@@ -38,9 +38,16 @@ def resolve(
     ref: str | None = None,
     target: str | None = None,
     role: str | None = None,
+    prefer_roles: frozenset[str] | None = None,
     actionable_only: bool = True,
 ) -> Target:
-    """Find one element. Raises ``ElementNotFound`` with candidates when it cannot."""
+    """Find one element. Raises ``ElementNotFound`` with candidates when it cannot.
+
+    ``prefer_roles`` breaks ties toward the kind of element the caller can
+    actually use. A settings row and its switch share a label, so "Airplane
+    Mode" is ambiguous in general but unambiguous for a caller that can only
+    act on a switch.
+    """
     if not ref and not target:
         raise InvalidArgument(
             "Provide either a ref from the last observation or a target description",
@@ -55,7 +62,9 @@ def resolve(
     if ref:
         return _resolve_ref(digest, refs, ref, role=role)
     assert target is not None
-    return _resolve_text(digest, target, role=role, actionable_only=actionable_only)
+    return _resolve_text(
+        digest, target, role=role, prefer_roles=prefer_roles, actionable_only=actionable_only
+    )
 
 
 # --- ref path --------------------------------------------------------------
@@ -118,7 +127,12 @@ def _resolve_ref(digest: Digest, refs: RefTable, ref: str, *, role: str | None) 
 
 
 def _resolve_text(
-    digest: Digest, target: str, *, role: str | None, actionable_only: bool
+    digest: Digest,
+    target: str,
+    *,
+    role: str | None,
+    actionable_only: bool,
+    prefer_roles: frozenset[str] | None = None,
 ) -> Target:
     pool = digest.nodes
     if role:
@@ -136,7 +150,7 @@ def _resolve_text(
 
     needle = _normalise(target)
 
-    exact = [n for n in pool if _normalise(n.label) == needle]
+    exact = _prefer([n for n in pool if _normalise(n.label) == needle], prefer_roles)
     if len(exact) == 1:
         return _target(exact[0], "text-exact")
     if len(exact) > 1:
@@ -150,7 +164,7 @@ def _resolve_text(
     if len(by_id) == 1:
         return _target(by_id[0], "id-exact")
 
-    partial = [n for n in pool if needle and needle in _normalise(n.label)]
+    partial = _prefer([n for n in pool if needle and needle in _normalise(n.label)], prefer_roles)
     if len(partial) == 1:
         return _target(partial[0], "text-partial")
     if len(partial) > 1:
@@ -198,6 +212,19 @@ def _target(node: DigestNode, via: str, alternatives: tuple[str, ...] = ()) -> T
         resolved_via=via,
         alternatives=alternatives,
     )
+
+
+def _prefer(matches: list[DigestNode], prefer_roles: frozenset[str] | None) -> list[DigestNode]:
+    """Break a tie toward the roles the caller can act on.
+
+    Only ever narrows an existing set of matches. Filtering the pool before
+    matching would make an element that exists but is unusable look absent,
+    which sends the agent hunting for something it can already see.
+    """
+    if not prefer_roles or len(matches) < 2:
+        return matches
+    preferred = [n for n in matches if n.role in prefer_roles]
+    return preferred or matches
 
 
 def _same_element(a: DigestNode, b: DigestNode) -> bool:

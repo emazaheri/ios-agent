@@ -108,3 +108,9 @@ def role_of(element_type: str) -> str:
     """Normalise an XCUIElementType name, tolerating the `XCUIElementType` prefix."""
     name = element_type.removeprefix("XCUIElementType")
     return ROLE_MAP.get(name, name.lower() or "other")
+
+
+#: Roles whose value can be set directly rather than by tapping at them.
+SETTABLE_ROLES: frozenset[str] = frozenset(
+    {"switch", "slider", "stepper", "picker", "segmented", "checkbox", "radio"}
+)
