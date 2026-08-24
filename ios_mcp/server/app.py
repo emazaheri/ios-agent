@@ -13,6 +13,7 @@ import logging
 from fastmcp import FastMCP
 
 from ios_mcp.config import Settings, get_settings
+from ios_mcp.server.context import ServerContext
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,26 @@ Never guess coordinates when a ref exists. Never retype a password into
 def build_server(settings: Settings | None = None) -> FastMCP:
     """Construct the MCP server with every tool module registered."""
     cfg = settings or get_settings()
+    ctx = ServerContext(cfg)
 
-    mcp: FastMCP = FastMCP(
-        name="ios-automation",
-        instructions=INSTRUCTIONS,
+    mcp: FastMCP = FastMCP(name="ios-automation", instructions=INSTRUCTIONS)
+
+    from ios_mcp.server import (
+        resources,
+        tools_act,
+        tools_app,
+        tools_env,
+        tools_perceive,
+        tools_session,
     )
 
-    from ios_mcp.server import tools_session
-
     tools_session.register(mcp, cfg)
+    tools_app.register(mcp, cfg, ctx)
+    tools_perceive.register(mcp, cfg, ctx)
+    tools_act.register(mcp, cfg, ctx)
+    tools_env.register(mcp, cfg, ctx)
+    resources.register(mcp, cfg, ctx)
 
+    # Stash the context so tests and embedders can reach the pool.
+    mcp.ios_context = ctx  # type: ignore[attr-defined]
     return mcp

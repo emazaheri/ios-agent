@@ -39,9 +39,14 @@ def test_the_cache_is_bounded() -> None:
 
 
 async def test_a_retried_action_does_not_touch_the_device_twice() -> None:
-    """A resumed LangGraph node must not send the message a second time."""
+    """A resumed LangGraph node must not send the message a second time.
+
+    Send is destructive, so this also covers the case that matters most: the
+    approval was granted once, and the replay neither re-taps nor re-prompts.
+    """
     session, fake, _ = make_session(form_screen())
     await session.observe()
+    session.approve("tap:send_button")
 
     first = await session.tap(target="Send", idem_key="send-once")
     taps_after_first = len(fake.taps())

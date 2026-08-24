@@ -24,20 +24,28 @@ from ios_mcp.actions.stabilize import settle, wait_until
 from ios_mcp.config import Settings
 from ios_mcp.devices.pool import Lease
 from ios_mcp.errors import (
+    ActionRejectedByPolicy,
+    ActionRequiresApproval,
     ElementNotInteractable,
     InvalidArgument,
+    IosAutomationError,
     NotSupported,
 )
 from ios_mcp.perception.digest import Digest, build_digest
 from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
 from ios_mcp.perception.roles import SETTABLE_ROLES
+from ios_mcp.policy.audit import AuditTrail
+from ios_mcp.policy.gate import PolicyGate, Verdict
+from ios_mcp.policy.redact import Redactor
+from ios_mcp.policy.secrets import resolve_secret
 from ios_mcp.wda.models import AlertInfo, Rect
 from ios_mcp.wda.session import WdaSession
 
 logger = logging.getLogger(__name__)
 
 Direction = Literal["up", "down", "left", "right"]
+ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool]]
 
 #: Fraction of a scrollable area traversed by one scroll gesture.
 _SCROLL_FRACTION = 0.6
@@ -48,14 +56,25 @@ _DELTA_OVERLAP_THRESHOLD = 0.5
 class IosSession:
     """One automation session against one device."""
 
-    def __init__(self, lease: Lease, settings: Settings) -> None:
+    def __init__(
+        self,
+        lease: Lease,
+        settings: Settings,
+        *,
+        on_approval: ApprovalHandler | None = None,
+    ) -> None:
         self.lease = lease
         self.settings = settings
         self.refs = RefTable()
         self.idempotency = IdempotencyCache()
+        self.gate = PolicyGate(settings.policy)
+        self.redactor = Redactor(settings.policy)
+        self.audit = AuditTrail()
+        #: Called when a destructive action needs a human. When unset, the
+        #: action raises ActionRequiresApproval so an external
+        #: human-in-the-loop layer (LangGraph interrupt, say) can own it.
+        self.on_approval = on_approval
         self._last_digest: Digest | None = None
-        self.halted = False
-        self.consecutive_failures = 0
         self._fingerprint_history: list[str] = []
 
     @property
@@ -186,6 +205,34 @@ class IosSession:
             idem_key=idem_key,
             require_target=False,
             note="typed a secret" if _redact else None,
+            # A secret is never shown to the policy gate, the audit trail, or
+            # the model. Its content cannot be a destructive instruction.
+            policy_text=None if _redact else text,
+        )
+
+    async def type_secret(
+        self,
+        secret_ref: str,
+        *,
+        ref: str | None = None,
+        target: str | None = None,
+        submit: bool = False,
+        idem_key: str | None = None,
+    ) -> ActionResult:
+        """Type a secret resolved by reference.
+
+        The value is fetched from the host keychain and sent straight to the
+        device. It appears in no prompt, no tool result, and no audit entry, so
+        a password never becomes part of a transcript.
+        """
+        secret = await resolve_secret(secret_ref)
+        return await self.type_text(
+            secret,
+            ref=ref,
+            target=target,
+            submit=submit,
+            idem_key=idem_key,
+            _redact=True,
         )
 
     async def set_value(
@@ -322,17 +369,30 @@ class IosSession:
         return result
 
     async def press_button(self, name: str, *, idem_key: str | None = None) -> ActionResult:
+        """Press a hardware button or a keyboard key.
+
+        Keyboard keys live here rather than in a tool of their own: from the
+        agent's side "press return" and "press home" are the same kind of act,
+        and a separate tool would be one more thing to choose between.
+        """
         normalised = name.strip().lower()
 
         async def do(_: Target | None) -> None:
             if normalised == "home":
                 await self.wda.home()
-            elif normalised in ("volumeup", "volume_up", "volumedown", "volume_down", "siri"):
+            elif normalised in _HARDWARE_BUTTONS:
                 await self.wda.press_button(_camel(normalised))
+            elif normalised in _KEYBOARD_KEYS:
+                await self.wda.send_keys(_KEYBOARD_KEYS[normalised])
+            elif normalised in ("dismiss_keyboard", "hide_keyboard"):
+                await self.wda.send_keys("\n")
             else:
                 raise InvalidArgument(
                     f"Unknown button {name!r}",
-                    hint="Supported: home, volumeUp, volumeDown, siri.",
+                    hint=(
+                        "Hardware: home, volumeUp, volumeDown, siri. "
+                        "Keyboard: enter, tab, delete, space, dismiss_keyboard."
+                    ),
                 )
 
         return await self._act(
@@ -387,6 +447,8 @@ class IosSession:
     # -- app control -------------------------------------------------------
 
     async def launch_app(self, bundle_id: str, *, fresh: bool = False) -> ActionResult:
+        self.gate.check_running()
+        self.gate.check_app(bundle_id)
         started = time.monotonic()
         before = self._last_digest
         await self.wda.launch_app(bundle_id, fresh=fresh)
@@ -431,6 +493,24 @@ class IosSession:
             )
         await self.lease.adapter.set_permission(bundle_id, service, grant)
 
+    # -- session control ---------------------------------------------------
+
+    def approve(self, signature: str) -> None:
+        """Grant consent for one previously refused action."""
+        self.gate.approve(signature)
+
+    def halt(self, reason: str = "stopped by the user") -> None:
+        self.gate.halt(reason)
+
+    def resume(self) -> None:
+        """Clear a halt and the loop history that may have caused it."""
+        self.gate.resume()
+        self._fingerprint_history.clear()
+
+    @property
+    def halted(self) -> bool:
+        return self.gate.halted_reason is not None
+
     # -- internals ---------------------------------------------------------
 
     async def _act(
@@ -445,29 +525,48 @@ class IosSession:
         prefer_roles: frozenset[str] | None = None,
         require_target: bool = True,
         note: str | None = None,
+        policy_text: str | None = None,
     ) -> ActionResult:
-        """Resolve, act, settle, re-observe, and report the change."""
+        """Resolve, gate, act, settle, re-observe, and report the change."""
         started = time.monotonic()
+        self.gate.check_running()
+
         cached = self.idempotency.get(idem_key)
         if cached is not None:
             return _from_cache(cached)
 
         before = self._last_digest or await self.snapshot()
+        args = {"ref": ref, "target": target}
 
         resolved: Target | None = None
-        if require_target or ref or target:
-            resolved = self.resolve(
-                before, ref=ref, target=target, role=role, prefer_roles=prefer_roles
-            )
-            if not resolved.enabled:
-                raise ElementNotInteractable(
-                    f"{resolved.describe} is disabled",
-                    hint="Something else on the screen has to change before this becomes active.",
-                    details={"ref": resolved.ref},
+        try:
+            if require_target or ref or target:
+                resolved = self.resolve(
+                    before, ref=ref, target=target, role=role, prefer_roles=prefer_roles
                 )
+                if not resolved.enabled:
+                    raise ElementNotInteractable(
+                        f"{resolved.describe} is disabled",
+                        hint=(
+                            "Something else on the screen has to change before this becomes active."
+                        ),
+                        details={"ref": resolved.ref},
+                    )
+        except IosAutomationError as exc:
+            self._record_failure(name, args, exc)
+            raise
+
+        # Approval is requested before the action, while it is still
+        # preventable, rather than reported after the fact.
+        await self._require_approval(name, resolved, text=policy_text)
 
         recovered_before = self.wda.recovered_count
-        await do(resolved)
+        try:
+            await do(resolved)
+        except IosAutomationError as exc:
+            self._record_failure(name, args, exc)
+            raise
+
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
         result = await self._finish(
             name,
@@ -478,8 +577,48 @@ class IosSession:
             note=note,
             recovered=self.wda.recovered_count > recovered_before,
         )
+        self.audit.record(
+            name,
+            args,
+            ok=True,
+            resolved_via=resolved.resolved_via if resolved else None,
+            target=resolved.describe if resolved else None,
+            fingerprint=outcome.digest.fingerprint,
+            screen_changed=result.screen_changed,
+            elapsed_ms=result.elapsed_ms,
+        )
         self.idempotency.put(idem_key, result)
         return result
+
+    async def _require_approval(
+        self, action: str, target: Target | None, *, text: str | None = None
+    ) -> None:
+        """Gate a destructive action before it happens, never after."""
+        verdict = self.gate.classify(action, target, text=text)
+        if not verdict.needs_approval:
+            return
+
+        signature = self.gate.signature(action, target)
+        if self.gate.is_approved(signature):
+            return
+
+        if self.on_approval is None:
+            raise ActionRequiresApproval(
+                verdict.reason or f"{action} needs approval",
+                hint=(f"Confirm with the user, then repeat the call with approve={signature!r}."),
+                details={"signature": signature, "verdict": verdict.to_dict()},
+            )
+
+        if not await self.on_approval(action, verdict, target):
+            raise ActionRejectedByPolicy(
+                f"The user declined: {verdict.reason}",
+                hint="Do not retry this action. Ask what they would like instead.",
+            )
+        self.gate.approve(signature)
+
+    def _record_failure(self, action: str, args: dict[str, Any], exc: IosAutomationError) -> None:
+        self.audit.record(action, args, ok=False, error=str(exc))
+        self.gate.record_failure()
 
     async def _finish(
         self,
@@ -504,7 +643,7 @@ class IosSession:
             delta = diff_digests(before, after)
             digest = None  # the delta already says everything that changed
 
-        self.consecutive_failures = 0
+        self.gate.record_success()
         return ActionResult(
             action=name,
             ok=True,
@@ -564,6 +703,8 @@ class IosSession:
         self._fingerprint_history.append(fingerprint)
         if len(self._fingerprint_history) > window * 2:
             del self._fingerprint_history[: -window * 2]
+        if self.settings.policy.enabled and self.looping:
+            self.gate.record_loop()
 
     @property
     def looping(self) -> bool:
@@ -606,6 +747,19 @@ def _within(inner: Rect, outer: Rect) -> bool:
         and inner.x + inner.width <= outer.x + outer.width + 1
         and inner.y + inner.height <= outer.y + outer.height + 1
     )
+
+
+_HARDWARE_BUTTONS = frozenset({"volumeup", "volume_up", "volumedown", "volume_down", "siri"})
+
+#: Keyboard keys, as the literal characters WDA's /wda/keys endpoint expects.
+_KEYBOARD_KEYS = {
+    "enter": "\n",
+    "return": "\n",
+    "tab": "\t",
+    "delete": "\b",
+    "backspace": "\b",
+    "space": " ",
+}
 
 
 def _camel(name: str) -> str:
