@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ios": {
+      "command": "uv",
+      "args": ["run", "--directory", ".", "ios-mcp", "serve"]
+    }
+  }
+}
