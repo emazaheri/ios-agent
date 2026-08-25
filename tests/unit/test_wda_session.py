@@ -213,3 +213,31 @@ async def test_a_passcode_locked_device_surfaces_rather_than_looping(
     with pytest.raises(DeviceLocked):
         await wda_session.source()
     assert fake_wda.unlock_calls == 1, "must try once, not spin"
+
+
+async def test_a_sleeping_device_is_woken_rather_than_restarted(settings: Settings) -> None:
+    """A sleeping phone stops answering and looks exactly like a hung runner.
+
+    Waking costs a second; restarting the runner costs a minute, so the cheap
+    explanation has to be tried first.
+    """
+    fake = FakeWda()
+    client = WdaClient("http://127.0.0.1:8100", settings.wda)
+    client._http = fake.client_factory()
+
+    relaunches: list[int] = []
+
+    async def relaunch() -> str:
+        relaunches.append(1)
+        return "http://127.0.0.1:8100"
+
+    session = WdaSession(client, settings, relaunch=relaunch)
+    await session.open()
+    # Locked: the transport still answers, but every real call refuses.
+    fake.locked = True
+
+    root = await session.source()
+
+    assert root.type == "Application"
+    assert fake.unlock_calls == 1
+    assert relaunches == [], "the runner must not be restarted for a nap"

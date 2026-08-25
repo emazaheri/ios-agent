@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+#: The home screen, as an app. Activating it after backgrounding another
+#: app is what stops XCTest blocking on the one that went away.
+SPRINGBOARD_BUNDLE_ID = "com.apple.springboard"
+
 # Where WDA needs the value under a different key than our config uses.
 _SETTINGS_KEYS = {
     "snapshotMaxDepth": "max_depth",
@@ -135,6 +139,14 @@ class WdaSession:
         except (SessionLost, RunnerCrashed) as exc:
             if not self.settings.wda.auto_heal:
                 raise
+            # A sleeping phone stops answering and looks exactly like a hung
+            # runner, but waking it costs a second where restarting costs a
+            # minute. Try the cheap explanation first.
+            if isinstance(exc, RunnerCrashed) and await self.wake():
+                logger.info("Device was asleep, not crashed; woke it and retried")
+                self.recovered_count += 1
+                return await fn(await self.ensure_open())
+
             logger.warning("Recovering WDA session after: %s", exc)
             await self._heal(exc)
             self.recovered_count += 1
@@ -263,13 +275,27 @@ class WdaSession:
         )
 
     async def home(self) -> None:
-        """Press the home button.
+        """Go to the home screen.
 
-        Uses /wda/pressButton rather than /wda/homescreen: the latter returns
-        404 on WebDriverAgent 16.8, verified against a physical iPhone on
-        iOS 26.6.
+        Two things here are not obvious, both measured on a physical iPhone
+        running iOS 26.6.
+
+        The gesture goes through /wda/pressButton because /wda/homescreen
+        returns 404 on WebDriverAgent 16.8.
+
+        Afterwards WDA is pointed at SpringBoard. Without that, XCTest keeps
+        waiting on the app that was just backgrounded and the next
+        accessibility snapshot blocks for 61 seconds; with it, the same
+        snapshot takes about 5. No WDA setting avoids this, and the stall is
+        long enough that the session gives up and restarts the runner, turning
+        a trivial action into a minute of downtime.
         """
         await self.press_button("home")
+        try:
+            await self.activate_app(SPRINGBOARD_BUNDLE_ID)
+        except (WdaError, RunnerCrashed):
+            # Not fatal: the next snapshot is merely slow, not wrong.
+            logger.debug("Could not activate SpringBoard after pressing home")
 
     async def handle_alert(self, action: str, button: str | None = None) -> None:
         if action not in ("accept", "dismiss"):

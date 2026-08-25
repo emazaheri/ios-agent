@@ -127,6 +127,13 @@ than discover it by failing.
 ### Speed
 
 A snapshot costs roughly 3.7s on a physical iPhone against well under a second
-on a simulator, so each action lands around 8s. That is the accessibility
+on a simulator, so each action lands around 8-12s. That is the accessibility
 round trip, not traversal depth: raw tree size stops growing past
 `snapshot.max_depth = 30` while wall time stays flat to depth 60.
+
+One case is worth knowing about because it looks like a hang. The first
+snapshot after an app is backgrounded blocks for 61 seconds: XCTest keeps
+waiting on the app that went away. No WebDriverAgent setting avoids it, so
+`home()` activates SpringBoard immediately afterwards, which drops the same
+snapshot to about 5s. If you background an app by some other route and the
+next call stalls, that is why.
