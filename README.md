@@ -92,8 +92,10 @@ Automating someone's real phone is not test automation. On by default:
   server.
 - Repeated failures or a detected loop halt the session.
 
-See [SAFETY.md](SAFETY.md). Defaults are in `ios-mcp.toml` or `IOS_MCP_*`
-environment variables.
+See [SAFETY.md](SAFETY.md). Defaults are in `ios-mcp.toml`, a `.env`, or
+`IOS_MCP_*` environment variables. Copy `.env.example` to `.env` for the full
+list of knobs across both packages; a real environment variable always beats
+the file.
 
 ## Development
 

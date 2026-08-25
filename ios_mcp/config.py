@@ -1,8 +1,14 @@
 """Configuration for the iOS automation server.
 
 Layered: defaults -> TOML file (``ios-mcp.toml`` or ``$IOS_MCP_CONFIG``) ->
-environment variables prefixed ``IOS_MCP_``. Nested settings use ``__`` as the
-delimiter, e.g. ``IOS_MCP_SNAPSHOT__MAX_DEPTH=30``.
+``.env`` -> environment variables prefixed ``IOS_MCP_``. Nested settings use
+``__`` as the delimiter, e.g. ``IOS_MCP_SNAPSHOT__MAX_DEPTH=30``.
+
+A real environment variable always beats a ``.env`` entry, so a shell export,
+CI, or a process manager overrides the file without anyone editing it. Pass
+``_env_file=None`` to ignore the file entirely, which is what a test asserting
+a *code* default should do: otherwise a developer's local ``.env`` quietly
+changes what the test is measuring.
 """
 
 from __future__ import annotations
@@ -162,6 +168,8 @@ class Settings(BaseSettings):
         env_prefix="IOS_MCP_",
         env_nested_delimiter="__",
         extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
 
     # Set by ``load``; consumed by ``settings_customise_sources``.

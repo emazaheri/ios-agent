@@ -1,7 +1,10 @@
 """Which model drives the phone, and on whose infrastructure.
 
-Layered the same way `ios_mcp.config` is: defaults, then environment variables
-prefixed `IOS_AGENT_`. Kept in this package rather than added to `Settings`,
+Layered the same way `ios_mcp.config` is: defaults, then `.env`, then
+environment variables prefixed `IOS_AGENT_`. A real environment variable always
+beats a `.env` entry, and `_env_file=None` ignores the file entirely, which is
+what a test asserting a code default wants. Kept in this package rather than
+added to `Settings`,
 because agent configuration in the server's settings object would put a
 model-provider concern inside the distribution that is meant not to have one.
 
@@ -47,6 +50,8 @@ class AgentSettings(BaseSettings):
         env_nested_delimiter="__",
         extra="ignore",
         protected_namespaces=(),
+        env_file=".env",
+        env_file_encoding="utf-8",
     )
 
     #: Any provider `langchain.chat_models.init_chat_model` accepts.

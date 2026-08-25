@@ -93,7 +93,10 @@ max_consecutive_failures = 5
 redact_screenshots = false
 ```
 
-Or `IOS_MCP_POLICY__CONFIRM_DESTRUCTIVE=false` in the environment.
+Or `IOS_MCP_POLICY__CONFIRM_DESTRUCTIVE=false` in the environment, or in a
+`.env` beside the repository. See `.env.example`, which documents every setting
+and leaves each safety default switched on, so copying it unedited changes
+nothing.
 
 Turning the gate off is a deliberate choice and a reasonable one for a
 simulator running a test suite. It is not reasonable for a device carrying
