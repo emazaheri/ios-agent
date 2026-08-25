@@ -35,41 +35,62 @@ rather than starting one per session. `scripts/start_tunnel.sh` contains a
 
 ## 4. Build and sign WebDriverAgent
 
-First sign in to Xcode (Settings > Accounts) so a signing identity exists,
-then:
+Sign in to Xcode first (Settings > Accounts). Then open the WebDriverAgent
+project once and pick your team under Signing & Capabilities on both the
+`WebDriverAgentLib` and `WebDriverAgentRunner` targets:
 
 ```bash
-security find-identity -v -p codesigning     # confirm an identity appears
-./scripts/prepare_wda.sh device               # TEAM_ID is required
+open vendor/wda/WebDriverAgent/WebDriverAgent.xcodeproj
 ```
 
-Find your team id with:
+That GUI step is not optional. Signing in to Accounts alone creates no
+certificate; Apple issues one only when a project first asks for a team, and
+`xcodebuild` cannot do it because it does not share Xcode's authenticated
+session (it fails with `No Account for Team`).
+
+**Free Apple IDs need their own bundle id.** Apple refuses
+`com.facebook.WebDriverAgentRunner` because someone else already registered
+it, reporting it as *"cannot be registered to your development team"*. Change
+the Runner target's Bundle Identifier to something unique such as
+`com.yourname.WebDriverAgentRunner`.
+
+**Authorize codesign once**, or every build stops on a keychain prompt per
+framework, eight times over:
 
 ```bash
-defaults read com.apple.dt.Xcode IDEProvisioningTeams
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+  ~/Library/Keychains/login.keychain-db
 ```
 
-**Free Apple IDs need a unique bundle id.** Apple refuses
-`com.facebook.WebDriverAgentRunner` because someone else already registered it,
-and the failure reads as a generic provisioning error:
+Then build and install:
 
 ```bash
-TEAM_ID=XXXXXXXXXX WDA_BUNDLE_ID=com.yourname.WebDriverAgentRunner \
-  ./scripts/prepare_wda.sh device
+./scripts/prepare_wda.sh device        # finds your team and device
+ios install --path vendor/wda/WebDriverAgentRunner-Runner.app
 ```
 
-Two things this handles that are easy to get wrong:
+Finally, **trust the developer on the phone**: Settings > General > VPN &
+Device Management > your Apple ID > Trust. iOS refuses to launch a
+free-account app until you do, and the host only sees an opaque
+`deviceprocesscontrolservice` error.
 
-- On iOS 17+, `testmanagerd` moved to `com.apple.dt.testmanagerd.runner`, and
-  the runner must bind the device's own XCTest libraries rather than its
-  embedded copies. The script strips `Frameworks/XC*.framework` for exactly
-  this reason; without it the runner crashes on launch.
-- **Signing expires.** A free Apple ID gets a 7-day profile, so automation
-  stops working after a week with a confusing connection error. `ios_doctor`
-  reports the expiry date and days remaining. A paid Developer Program
-  membership gets a year and is the practical requirement for regular use.
+Tell the server which runner to launch:
 
-Install it once: `ios install --path vendor/wda/WebDriverAgentRunner-Runner.app`.
+```bash
+export IOS_MCP_WDA__BUNDLE_ID=com.yourname.WebDriverAgentRunner.xctrunner
+```
+
+### Things that look like bugs but are not
+
+- The build must target the device by id, not `generic/platform=iOS`. With a
+  generic destination Apple never registers the phone, issues no profile, and
+  the build fails claiming *"your team has no devices"*.
+- Do not strip the embedded `XC*.framework` copies. Removing anything from a
+  signed bundle invalidates its signature, and installation then fails with a
+  bare `ApplicationVerificationFailed`.
+- **Signing expires after 7 days** on a free Apple ID. Re-run
+  `prepare_wda.sh device` and reinstall. `ios_doctor` reports the expiry date.
+  A paid Developer Program membership gets a year.
 
 ## 5. Run
 
@@ -97,6 +118,15 @@ than discover it by failing.
 | Symptom | Cause |
 |---|---|
 | `tunnel_down` | The daemon is not running. `sudo ios tunnel start`. |
-| `signing_invalid`, or WDA times out after a week | Profile expired. Re-run `prepare_wda.sh device`. |
-| `device_not_ready` | Phone locked, untrusted, or Developer Mode off. |
-| WDA crashes immediately on launch | Embedded `XC*.framework` copies not stripped. Re-run `prepare_wda.sh device`. |
+| `device_locked` | The phone slept. The session wakes it automatically, but cannot type a passcode. Set Auto-Lock to Never for long runs. |
+| `signing_invalid`, or WDA stops working after a week | Free profile expired. Re-run `prepare_wda.sh device` and reinstall. |
+| `device_not_ready` | Phone untrusted, Developer Mode off, or the runner not trusted under VPN & Device Management. |
+| Launch fails with `deviceprocesscontrolservice` code 2 | The developer certificate is not trusted on the phone. |
+| `ApplicationVerificationFailed` on install | The bundle was modified after signing. |
+
+### Speed
+
+A snapshot costs roughly 3.7s on a physical iPhone against well under a second
+on a simulator, so each action lands around 8s. That is the accessibility
+round trip, not traversal depth: raw tree size stops growing past
+`snapshot.max_depth = 30` while wall time stays flat to depth 60.

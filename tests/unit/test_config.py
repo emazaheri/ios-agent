@@ -7,9 +7,19 @@ from pathlib import Path
 from ios_mcp.config import Settings
 
 
+def test_settle_can_actually_converge() -> None:
+    """The window must fit the samples it needs, or a slow device never settles.
+
+    A snapshot costs roughly 3.7s on a physical iPhone.
+    """
+    s = Settings().stabilize
+    slowest_snapshot_s = 4.0
+    assert s.max_wait_s > s.stable_samples * slowest_snapshot_s
+
+
 def test_defaults_are_sane() -> None:
     s = Settings()
-    assert s.snapshot.max_depth == 30
+    assert s.snapshot.max_depth == 50
     assert s.digest.token_budget >= 200
     assert s.policy.enabled is True
     assert s.policy.confirm_destructive is True

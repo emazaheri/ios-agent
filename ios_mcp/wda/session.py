@@ -8,12 +8,13 @@ reports ``recovered=True`` rather than raising.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from ios_mcp.config import Settings
-from ios_mcp.errors import RunnerCrashed, SessionLost, WdaError
+from ios_mcp.errors import DeviceLocked, RunnerCrashed, SessionLost, WdaError
 from ios_mcp.wda.client import WdaClient
 from ios_mcp.wda.models import AlertInfo, Rect, SnapshotNode
 
@@ -119,10 +120,18 @@ class WdaSession:
     # -- auto-heal ---------------------------------------------------------
 
     async def _call(self, fn: Callable[[str], Awaitable[T]]) -> T:
-        """Run a session-scoped call, recovering once from a dead session or runner."""
+        """Run a session-scoped call, recovering once from the failures we can fix."""
         session_id = await self.ensure_open()
         try:
             return await fn(session_id)
+        except DeviceLocked:
+            # A phone that has merely slept is the commonest interruption of a
+            # long run, and waking it is something we can just do.
+            if not self.settings.wda.auto_heal or not await self.wake():
+                raise
+            logger.info("Woke the device and retried")
+            self.recovered_count += 1
+            return await fn(await self.ensure_open())
         except (SessionLost, RunnerCrashed) as exc:
             if not self.settings.wda.auto_heal:
                 raise
@@ -130,6 +139,26 @@ class WdaSession:
             await self._heal(exc)
             self.recovered_count += 1
             return await fn(await self.ensure_open())
+
+    async def wake(self) -> bool:
+        """Wake the screen. Returns whether the device ended up unlocked.
+
+        This can only dismiss sleep, not a passcode: WebDriverAgent has no way
+        to type one. On a passcode-locked phone it returns False so the caller
+        surfaces the original error rather than retrying forever.
+        """
+        try:
+            session_id = await self.ensure_open()
+            await self.client.post(f"/session/{session_id}/wda/unlock")
+            await asyncio.sleep(1.0)
+            locked = await self.client.get(f"/session/{session_id}/wda/locked")
+            return not bool(locked)
+        except (WdaError, RunnerCrashed, SessionLost):
+            return False
+
+    async def is_locked(self) -> bool:
+        value = await self._call(lambda sid: self.client.get(f"/session/{sid}/wda/locked"))
+        return bool(value)
 
     async def _heal(self, exc: Exception) -> None:
         """Rebuild the session, restarting the runner first if it died."""

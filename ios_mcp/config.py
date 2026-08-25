@@ -26,9 +26,16 @@ class SnapshotSettings(BaseModel):
     loop. They are configuration rather than constants because the right values
     differ wildly between a stock Apple app and a deeply nested React Native
     view hierarchy.
+
+    Measured on iOS 26.6 Settings, a physical iPhone, raw tree nodes by depth:
+    20 -> 336, 30 -> 421, 40/50/60 -> 421. Depth 20 silently loses a third of
+    the screen's elements, and everything past 30 is free: wall time stayed
+    within 3.5-3.9s at every depth because the round trip dominates, not the
+    traversal. The default therefore sits well above what stock apps need, to
+    leave headroom for deeper hierarchies without costing anything.
     """
 
-    max_depth: int = Field(default=30, ge=1, le=100)
+    max_depth: int = Field(default=50, ge=1, le=100)
     max_children: int = Field(default=64, ge=1)
     custom_snapshot_timeout_s: float = Field(default=5.0, ge=0.0)
     wait_for_idle_timeout_s: float = Field(default=2.0, ge=0.0)
@@ -47,11 +54,18 @@ class DigestSettings(BaseModel):
 
 
 class StabilizeSettings(BaseModel):
-    """Post-action settle loop."""
+    """Post-action settle loop.
+
+    ``max_wait_s`` has to exceed ``stable_samples`` snapshots or the loop can
+    never converge. A snapshot costs under a second on a simulator but roughly
+    3.7s on a physical iPhone, so the old 6s ceiling meant a real device timed
+    out on every single action and reported an unsettled screen. Raising it is
+    free for fast devices, which exit as soon as the fingerprint repeats.
+    """
 
     min_delay_s: float = Field(default=0.15, ge=0.0)
     poll_interval_s: float = Field(default=0.2, gt=0.0)
-    max_wait_s: float = Field(default=6.0, gt=0.0)
+    max_wait_s: float = Field(default=20.0, gt=0.0)
     stable_samples: int = Field(default=2, ge=1)
 
 

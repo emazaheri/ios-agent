@@ -26,9 +26,7 @@ def _device_report(*, signed: bool = True, **statuses: str) -> DoctorReport:
     ready = {"go-ios": "ok", "devices": "ok", "tunnel": "ok"}
     ready.update(statuses)
     checks = [Check(name, st, "") for name, st in ready.items()]
-    checks.append(
-        Check("wda-bundle", "ok", "", data={"runner_app": "x"} if signed else {})
-    )
+    checks.append(Check("wda-bundle", "ok", "", data={"runner_app": "x"} if signed else {}))
     return DoctorReport(checks=checks)
 
 

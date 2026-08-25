@@ -17,7 +17,7 @@ async def test_open_creates_a_session_and_applies_snapshot_settings(
     session_id = await wda_session.open()
     assert session_id == "S1"
     # These are what keep observation affordable; a session without them is a bug.
-    assert fake_wda.settings_applied["snapshotMaxDepth"] == 30
+    assert fake_wda.settings_applied["snapshotMaxDepth"] == 50
     assert fake_wda.settings_applied["snapshotMaxChildren"] == 64
     assert "visible" in fake_wda.settings_applied["pageSourceExcludedAttributes"]
 
@@ -165,3 +165,51 @@ async def test_close_is_safe_on_an_already_dead_session(
     fake_wda.crash()
     await wda_session.close()  # must not raise
     assert wda_session.session_id is None
+
+
+# -- locked devices ---------------------------------------------------------
+
+
+async def test_a_locked_device_is_reported_clearly(
+    wda_session: WdaSession, fake_wda: FakeWda
+) -> None:
+    """WebDriverAgent reports this as a wall of Apple error domains."""
+    from ios_mcp.errors import DeviceLocked
+
+    settings = wda_session.settings
+    settings.wda.auto_heal = False
+    await wda_session.open()
+    fake_wda.locked = True
+
+    with pytest.raises(DeviceLocked) as exc_info:
+        await wda_session.source()
+    assert "Auto-Lock" in (exc_info.value.hint or "")
+
+
+async def test_a_slept_device_is_woken_and_the_call_retried(
+    wda_session: WdaSession, fake_wda: FakeWda
+) -> None:
+    """A phone that merely slept is the commonest interruption of a long run."""
+    await wda_session.open()
+    fake_wda.locked = True
+
+    root = await wda_session.source()  # must not raise
+
+    assert root.type == "Application"
+    assert fake_wda.unlock_calls == 1
+    assert wda_session.recovered_count == 1
+
+
+async def test_a_passcode_locked_device_surfaces_rather_than_looping(
+    wda_session: WdaSession, fake_wda: FakeWda
+) -> None:
+    """WebDriverAgent cannot type a passcode, so retrying would never succeed."""
+    from ios_mcp.errors import DeviceLocked
+
+    await wda_session.open()
+    fake_wda.locked = True
+    fake_wda.passcode_locked = True
+
+    with pytest.raises(DeviceLocked):
+        await wda_session.source()
+    assert fake_wda.unlock_calls == 1, "must try once, not spin"

@@ -27,6 +27,11 @@ class FakeWda:
     alert_buttons: list[str] = field(default_factory=lambda: ["Cancel", "OK"])
     app_states: dict[str, int] = field(default_factory=dict)
     pasteboard: str = ""
+    #: When True, calls fail as a locked device until /wda/unlock is posted.
+    locked: bool = False
+    #: A passcode-locked phone cannot be woken by WebDriverAgent.
+    passcode_locked: bool = False
+    unlock_calls: int = 0
 
     calls: list[tuple[str, str, dict[str, Any] | None]] = field(default_factory=list)
     settings_applied: dict[str, Any] = field(default_factory=dict)
@@ -76,6 +81,29 @@ class FakeWda:
             return self._error(404, "unknown command")
 
         tail = path[len(f"/session/{self.session_id}") :] or "/"
+
+        # A locked device fails everything except session teardown and the
+        # lock endpoints themselves, which is how a real phone behaves.
+        if tail == "/wda/locked":
+            return self._ok(self.locked)
+        if tail == "/wda/unlock":
+            self.unlock_calls += 1
+            if not self.passcode_locked:
+                self.locked = False
+            return self._ok(None)
+        if self.locked and tail not in ("/", "/appium/settings"):
+            return httpx.Response(
+                500,
+                json={
+                    "value": {
+                        "error": "unknown error",
+                        "message": (
+                            "Unable to launch com.apple.Preferences because the "
+                            "device was not, or could not be, unlocked."
+                        ),
+                    }
+                },
+            )
 
         if method == "DELETE" and tail == "/":
             return self._ok(None)
