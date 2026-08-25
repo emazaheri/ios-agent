@@ -56,7 +56,25 @@ class DoctorReport:
 
     @property
     def can_use_real_device(self) -> bool:
-        return self._status("go-ios") == "ok" and self._status("devices") == "ok"
+        """Whether a physical iPhone could actually be driven right now.
+
+        All four parts are required. A missing signed runner or a stopped
+        tunnel does not degrade gracefully: the session fails a minute later
+        with a connection error that says nothing about the real cause.
+        """
+        return (
+            self._status("go-ios") == "ok"
+            and self._status("devices") == "ok"
+            and self._status("tunnel") == "ok"
+            and self._has_signed_runner
+        )
+
+    @property
+    def _has_signed_runner(self) -> bool:
+        for check in self.checks:
+            if check.name == "wda-bundle":
+                return "runner_app" in check.data
+        return False
 
     def _status(self, name: str) -> Status:
         for c in self.checks:

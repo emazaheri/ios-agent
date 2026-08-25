@@ -22,11 +22,25 @@ def test_simulator_readiness_needs_xcode_simctl_and_a_wda_build() -> None:
     assert not _report(**{**ready, "wda-bundle": "warn"}).can_use_simulator
 
 
-def test_real_device_readiness_requires_goios_and_an_attached_device() -> None:
-    assert _report(**{"go-ios": "ok", "devices": "ok"}).can_use_real_device
-    # go-ios installed but nothing plugged in is not "ready"
-    assert not _report(**{"go-ios": "ok", "devices": "warn"}).can_use_real_device
-    assert not _report(**{"go-ios": "warn", "devices": "skip"}).can_use_real_device
+def _device_report(*, signed: bool = True, **statuses: str) -> DoctorReport:
+    ready = {"go-ios": "ok", "devices": "ok", "tunnel": "ok"}
+    ready.update(statuses)
+    checks = [Check(name, st, "") for name, st in ready.items()]
+    checks.append(
+        Check("wda-bundle", "ok", "", data={"runner_app": "x"} if signed else {})
+    )
+    return DoctorReport(checks=checks)
+
+
+def test_real_device_readiness_requires_every_part() -> None:
+    """None of these degrade gracefully: without them a session fails a minute
+    later with an error that says nothing about the real cause."""
+    assert _device_report().can_use_real_device
+
+    assert not _device_report(**{"go-ios": "warn"}).can_use_real_device
+    assert not _device_report(devices="warn").can_use_real_device
+    assert not _device_report(tunnel="warn").can_use_real_device
+    assert not _device_report(signed=False).can_use_real_device
 
 
 def test_missing_check_is_treated_as_failing() -> None:
