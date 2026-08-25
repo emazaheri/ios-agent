@@ -66,6 +66,7 @@ markers = [
     "device: requires an attached physical iPhone (skipped when unavailable)",
     "eval: golden-flow evaluation, slow",
     "agent: goal-directed agent evaluation against a scripted device",
+    "model: calls a real model, needs credentials and costs money",
 ]
 
 [tool.ruff]

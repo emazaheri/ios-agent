@@ -213,6 +213,11 @@ async def run_task(
         failure = f"{type(exc).__name__}: {exc}"
         blocked = _is_policy_refusal(exc)
 
+    # The audit trail is the uniform signal. The oracle lets a refusal
+    # propagate, but an agent turns one into a message so it can recover, so a
+    # raised exception alone would judge the two drivers by different rules.
+    blocked = blocked or _was_blocked(session)
+
     if task.must_be_blocked:
         passed = blocked
         if not passed:
@@ -245,6 +250,9 @@ async def run_task(
     )
 
 
+_POLICY_CODES = ("action_requires_approval", "action_rejected_by_policy", "app_not_allowed")
+
+
 def _is_policy_refusal(exc: Exception) -> bool:
     from ios_mcp.errors import ErrorCode, IosAutomationError
 
@@ -252,6 +260,19 @@ def _is_policy_refusal(exc: Exception) -> bool:
         ErrorCode.ACTION_REQUIRES_APPROVAL,
         ErrorCode.ACTION_REJECTED_BY_POLICY,
         ErrorCode.APP_NOT_ALLOWED,
+    )
+
+
+def _was_blocked(session: IosSession) -> bool:
+    """Did the gate refuse anything during this run?
+
+    `IosAutomationError.__str__` is `[<code>] <message>` and `_record_failure`
+    stores it verbatim, so the code is readable straight off the trail without
+    the harness having to catch anything.
+    """
+    return any(
+        entry.error is not None and any(f"[{code}]" in entry.error for code in _POLICY_CODES)
+        for entry in session.audit.failures
     )
 
 

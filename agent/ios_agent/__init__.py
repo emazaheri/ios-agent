@@ -17,9 +17,25 @@ What that buys, beyond tidiness:
   to 4 are a plain async library an agent framework can import directly. An
   external consumer proves it; an internal sibling directory only asserts it.
 
-Nothing is exported yet. The measurement came first, in `tests/evals/agent`.
+The loop is deliberately the stupidest thing that can finish a task: one model
+node, one tool node, an edge back. No plan, no verification step, no memory, no
+subagents. Each of those is a later slice that has to justify itself against
+this baseline's numbers.
 """
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from ios_agent.backend import Backend, BackendStats, SessionBackend
+from ios_agent.loop import anthropic_model, operator_prompt, run_goal
+from ios_agent.state import AgentState, Outcome
+
+__all__ = [
+    "AgentState",
+    "Backend",
+    "BackendStats",
+    "Outcome",
+    "SessionBackend",
+    "anthropic_model",
+    "operator_prompt",
+    "run_goal",
+]
