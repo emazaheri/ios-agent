@@ -5,40 +5,77 @@ the same code reading the same counters, so the only difference in the report
 is the agent's. Nothing here judges success: `run_task` reads the device model,
 because what the agent claims and what the phone did are different questions.
 
-Needs credentials. Without them the whole tier skips rather than pretending.
+Needs a model. Which one is configuration, so the gate below has to be too: a
+run against a local Ollama model needs no key at all, and hardcoding a check
+for `ANTHROPIC_API_KEY` would skip a tier that could happily run.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 
 import pytest
-from ios_agent import SessionBackend, run_goal
+from ios_agent import AgentSettings, SessionBackend, run_goal
+from ios_agent.config import KNOWN_EXTRAS
 from measure import Meter
 from tasks import Task
 
 from ios_mcp.session import IosSession
 
+#: Where each provider looks for a key. An empty tuple means it needs none,
+#: which is the whole appeal of running one locally. A provider absent from
+#: this map is not assumed to be unusable: only its package is checked.
+CREDENTIAL_ENV: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+    "openai": ("OPENAI_API_KEY",),
+    "azure_openai": ("AZURE_OPENAI_API_KEY",),
+    "google_genai": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
+    "mistralai": ("MISTRAL_API_KEY",),
+    "ollama": (),
+}
 
-def credentials_available() -> bool:
-    """An unset API key does not mean there are no credentials.
 
-    The SDK also resolves an auth token or an `ant auth login` profile, so
-    checking only the environment variable would skip a tier that could
-    actually run.
-    """
-    if os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+def _package_installed(provider: str) -> bool:
+    package = KNOWN_EXTRAS.get(provider)
+    if package is None:
+        return True  # unknown provider; let init_chat_model have its say
+    return importlib.util.find_spec(package.replace("-", "_")) is not None
+
+
+def _has_credentials(provider: str) -> bool:
+    names = CREDENTIAL_ENV.get(provider)
+    if names is None:
+        return True  # nothing known to check, so do not block the run
+    if not names:
+        return True  # runs locally, no key involved
+    if any(os.environ.get(name) for name in names):
         return True
-    if shutil.which("ant") is None:
-        return False
-    return os.path.isdir(os.path.expanduser("~/.config/anthropic/credentials"))
+    if provider == "anthropic":
+        # An unset key does not mean no credentials: the SDK also resolves an
+        # `ant auth login` profile, and checking only the variable would skip
+        # a tier that would have run.
+        return shutil.which("ant") is not None and os.path.isdir(
+            os.path.expanduser("~/.config/anthropic/credentials")
+        )
+    return False
 
 
-requires_credentials = pytest.mark.skipif(
-    not credentials_available(),
-    reason="no Anthropic credentials; set ANTHROPIC_API_KEY or run `ant auth login`",
-)
+def why_unavailable() -> str | None:
+    """The reason this tier cannot run, or None if it can."""
+    cfg = AgentSettings()
+    if not _package_installed(cfg.provider):
+        return f"{cfg.describe()}: {cfg.missing_package_hint()}"
+    if not _has_credentials(cfg.provider):
+        names = " or ".join(CREDENTIAL_ENV.get(cfg.provider, ()))
+        return f"{cfg.describe()}: no credentials; set {names or 'the provider credential'}"
+    return None
+
+
+_unavailable = why_unavailable()
+requires_a_model = pytest.mark.skipif(_unavailable is not None, reason=_unavailable or "")
 
 
 async def drive(task: Task, session: IosSession, meter: Meter) -> None:

@@ -21,21 +21,30 @@ The loop is deliberately the stupidest thing that can finish a task: one model
 node, one tool node, an edge back. No plan, no verification step, no memory, no
 subagents. Each of those is a later slice that has to justify itself against
 this baseline's numbers.
+
+The provider is configuration, not a dependency. The loop builds its model
+through `init_chat_model`, so OpenAI, Gemini, Bedrock or a local Ollama model
+is `IOS_AGENT_PROVIDER` and `IOS_AGENT_MODEL` rather than a code change.
+Anthropic is the default because it is what this project's numbers were
+measured on; each integration package is a separate extra.
 """
 
 from __future__ import annotations
 
 from ios_agent.backend import Backend, BackendStats, SessionBackend
-from ios_agent.loop import anthropic_model, operator_prompt, run_goal
+from ios_agent.config import KNOWN_EXTRAS, AgentSettings
+from ios_agent.loop import chat_model, operator_prompt, run_goal
 from ios_agent.state import AgentState, Outcome
 
 __all__ = [
+    "KNOWN_EXTRAS",
+    "AgentSettings",
     "AgentState",
     "Backend",
     "BackendStats",
     "Outcome",
     "SessionBackend",
-    "anthropic_model",
+    "chat_model",
     "operator_prompt",
     "run_goal",
 ]

@@ -12,8 +12,20 @@ dependencies = [
     "ios-mcp",
     "langgraph>=1.2",
     "langchain>=1.3",
-    "langchain-anthropic>=1.6",
 ]
+
+# The provider is configuration, not a dependency. The loop builds its model
+# through `init_chat_model`, so the base install commits to no vendor and
+# `IOS_AGENT_PROVIDER` picks one at runtime. Install the extra that matches.
+[project.optional-dependencies]
+anthropic = ["langchain-anthropic>=1.6"]
+openai = ["langchain-openai>=1.6"]
+google_genai = ["langchain-google-genai>=4.3"]
+google_vertexai = ["langchain-google-vertexai>=3.2"]
+ollama = ["langchain-ollama>=1.1"]
+groq = ["langchain-groq>=1.1"]
+mistralai = ["langchain-mistralai>=1.1"]
+bedrock_converse = ["langchain-aws>=1.7"]
 
 [build-system]
 requires = ["hatchling"]

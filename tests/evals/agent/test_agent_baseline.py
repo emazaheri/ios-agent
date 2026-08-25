@@ -7,7 +7,9 @@ looks before every move. Recording that honestly is the whole point. A
 baseline that already contains half the ideas cannot show what any of them
 bought.
 
-Skipped without credentials. There is no offline substitute worth having here:
+Skipped when no model is reachable. Which model that is comes from
+`AgentSettings`, so this runs against OpenAI or a local Ollama just as happily;
+Anthropic is only the default. There is no offline substitute worth having:
 the question is whether a real model chooses well, and a scripted one cannot
 answer it. The loop's mechanics are covered without a network by
 `tests/unit/test_agent_loop.py`.
@@ -19,12 +21,13 @@ from pathlib import Path
 
 import agent_driver
 import pytest
-from agent_driver import requires_credentials
+from agent_driver import requires_a_model
+from ios_agent import AgentSettings
 from measure import TaskResult, write_report
 from tasks import TASKS, Task
 from test_agent_evals import measure
 
-pytestmark = [pytest.mark.agent, pytest.mark.model, requires_credentials]
+pytestmark = [pytest.mark.agent, pytest.mark.model, requires_a_model]
 
 REPORT = Path(".artifacts/evals/agent-baseline.json")
 
@@ -52,6 +55,6 @@ async def test_the_skeleton_on_one_task(task: Task) -> None:
 def test_write_the_baseline_report() -> None:
     if not _results:
         pytest.skip("no tasks ran")
-    path = write_report(_results, REPORT, driver="skeleton")
+    path = write_report(_results, REPORT, driver="skeleton", model=AgentSettings().describe())
     assert path.exists()
     print(f"\nWrote {path}")

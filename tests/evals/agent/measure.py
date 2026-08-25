@@ -18,6 +18,7 @@ raw token count, is the number a planning change has to move.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -34,10 +35,13 @@ from ios_mcp.session import IosSession
 #: reports can be compared without converting between units.
 _CHARS_PER_TOKEN = 4
 
-#: Claude Opus 5, per million tokens. Recorded per run so the cost of the eval
-#: suite is visible rather than discovered on a bill.
-_USD_PER_INPUT_TOKEN = 5.0 / 1_000_000
-_USD_PER_OUTPUT_TOKEN = 25.0 / 1_000_000
+#: Per million tokens, for the default provider and model (Claude Opus 5:
+#: $5 in, $25 out). Recorded so the cost of the suite is visible rather than
+#: discovered on a bill. Override with `IOS_AGENT_USD_PER_MTOK_IN` and
+#: `IOS_AGENT_USD_PER_MTOK_OUT` when running against another provider, since
+#: nothing here can know what a given vendor charges.
+_USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
+_USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
 
 
 @dataclass
@@ -276,12 +280,20 @@ def _was_blocked(session: IosSession) -> bool:
     )
 
 
-def write_report(results: list[TaskResult], path: Path, *, driver: str) -> Path:
-    """Persist the run so one slice's numbers can be diffed against the next."""
+def write_report(
+    results: list[TaskResult], path: Path, *, driver: str, model: str | None = None
+) -> Path:
+    """Persist the run so one slice's numbers can be diffed against the next.
+
+    `model` records which provider and model produced the figures. Comparing a
+    slice run on one model against a slice run on another says nothing about
+    either, and a report that does not name its model invites exactly that.
+    """
     attempts = [run for result in results for run in result.runs]
-    payload = {
+    payload: dict[str, Any] = {
         "generated_at": time.time(),
         "driver": driver,
+        "model": model or "n/a (no model in the loop)",
         "totals": {
             "tasks": len(results),
             "runs": len(attempts),

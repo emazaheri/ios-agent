@@ -39,8 +39,9 @@ dev = [
     "respx>=0.22",
     "pillow>=12.3.0",
     # Installed for the test run so the eval suite can drive both, not because
-    # ios-mcp needs it.
-    "ios-agent",
+    # ios-mcp needs it. The `anthropic` extra is the provider this project's
+    # numbers are measured on; the agent itself commits to none.
+    "ios-agent[anthropic]",
 ]
 
 [build-system]

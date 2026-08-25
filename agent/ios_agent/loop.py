@@ -1,8 +1,17 @@
 """The entry point: give it a session and a goal, get an outcome.
 
-The model is injected rather than constructed here so the graph can be driven
-by a scripted model in tests. The loop's mechanics are worth testing on their
-own, and they should not need an API key or a network to be trustworthy.
+Two things are injected rather than hardcoded, for different reasons.
+
+The **provider** comes from `AgentSettings`, so the loop is not an Anthropic
+agent that happens to be configurable. It builds through
+`init_chat_model`, which means OpenAI, Gemini, Bedrock, a local Ollama model or
+anything else LangChain integrates is a pair of environment variables rather
+than a code change. Anthropic is the default because it is what this project's
+numbers were measured on; the loop does not depend on it.
+
+The **model callable** can be replaced outright, which is how the graph gets
+driven by a scripted model in tests. The loop's mechanics deserve a
+deterministic test, and one that needs an API key and a network is not.
 """
 
 from __future__ import annotations
@@ -14,19 +23,11 @@ from typing import Any
 from langchain.messages import AIMessage, AnyMessage
 
 from ios_agent.backend import Backend, SessionBackend
-from ios_agent.graph import DEFAULT_MAX_STEPS, build_graph, opening_messages
+from ios_agent.config import AgentSettings
+from ios_agent.graph import build_graph, opening_messages
 from ios_agent.state import Outcome
 from ios_agent.tools import Run, build_tools
 from ios_mcp.session import IosSession
-
-#: Claude Opus 5. Thinking is on by default on this model and is left on
-#: deliberately: with thinking disabled it occasionally writes a tool call into
-#: its visible text instead of emitting a tool-use block, and the call then
-#: silently never runs. Cost is controlled with effort instead.
-DEFAULT_MODEL = "claude-opus-5"
-DEFAULT_EFFORT = "medium"
-#: Thinking and the reply share this budget, so it has to leave room for both.
-DEFAULT_MAX_TOKENS = 16000
 
 ModelFactory = Callable[[list[Any]], Callable[[list[AnyMessage]], Awaitable[AIMessage]]]
 
@@ -36,31 +37,33 @@ def operator_prompt() -> str:
     return (resources.files("ios_agent") / "prompts" / "operator.md").read_text()
 
 
-def anthropic_model(
-    *,
-    model: str = DEFAULT_MODEL,
-    effort: str = DEFAULT_EFFORT,
-    max_tokens: int = DEFAULT_MAX_TOKENS,
-) -> ModelFactory:
-    """Bind Claude to a tool list.
+def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
+    """Bind whichever provider is configured to a tool list.
 
-    `temperature` is never set: it is rejected outright on Claude Opus 5, so
-    run-to-run variance is controlled with a pinned effort level and repeated
-    runs rather than with sampling.
+    Everything provider-specific is decided in `AgentSettings.chat_kwargs`, so
+    switching to OpenAI or a local Ollama model is `IOS_AGENT_PROVIDER` and
+    `IOS_AGENT_MODEL`, not a code change. Anthropic is the default because it
+    is what this project's numbers were measured on, not because the loop
+    depends on it.
     """
-    from langchain_anthropic import ChatAnthropic
+    from langchain.chat_models import init_chat_model
+
+    cfg = settings or AgentSettings()
 
     def factory(tools: list[Any]) -> Callable[[list[AnyMessage]], Awaitable[AIMessage]]:
-        chat = ChatAnthropic(
-            model_name=model,
-            max_tokens_to_sample=max_tokens,
-            output_config={"effort": effort},
-            timeout=None,
-            stop=None,
-        ).bind_tools(tools)
+        try:
+            chat = init_chat_model(
+                model=cfg.model, model_provider=cfg.provider, **cfg.chat_kwargs()
+            )
+        except ImportError as exc:
+            # The default error names a pip package; this one names the extra
+            # that installs it in this repository.
+            raise ImportError(f"{exc}\n{cfg.missing_package_hint()}") from exc
+
+        bound = chat.bind_tools(tools)
 
         async def call(messages: list[AnyMessage]) -> AIMessage:
-            reply = await chat.ainvoke(messages)
+            reply = await bound.ainvoke(messages)
             assert isinstance(reply, AIMessage)
             return reply
 
@@ -75,12 +78,14 @@ async def run_goal(
     *,
     model: ModelFactory | None = None,
     backend: Backend | None = None,
-    max_steps: int = DEFAULT_MAX_STEPS,
+    settings: AgentSettings | None = None,
+    max_steps: int | None = None,
 ) -> Outcome:
     """Drive one goal to a stopping point and report what it cost."""
+    cfg = settings or AgentSettings()
     run = Run(backend=backend or SessionBackend(session), goal=goal)
     tools = build_tools(run)
-    call_model = (model or anthropic_model())(tools)
+    call_model = (model or chat_model(cfg))(tools)
 
     prompt_tokens = 0
     completion_tokens = 0
@@ -94,7 +99,7 @@ async def run_goal(
             completion_tokens += usage.get("output_tokens", 0)
         return reply
 
-    graph = build_graph(run, metered, tools, max_steps=max_steps)
+    graph = build_graph(run, metered, tools, max_steps=max_steps or cfg.max_steps)
     await graph.ainvoke({"messages": opening_messages(operator_prompt(), goal)})
 
     return Outcome(
