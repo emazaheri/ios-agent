@@ -9,6 +9,7 @@ as a connection refused.
 
 from __future__ import annotations
 
+import json
 import platform
 import plistlib
 import sys
@@ -249,37 +250,75 @@ async def _check_goios(cfg: Settings) -> Check:
 
 
 async def _check_tunnel(cfg: Settings) -> Check:
-    """iOS 17+ needs a RemoteXPC tunnel. go-ios exposes a control API on localhost."""
+    """iOS 17+ needs a RemoteXPC tunnel before anything can reach the device.
+
+    Asks go-ios directly rather than probing its HTTP control API. That API
+    only exists in the opt-in daemon mode (ENABLE_GO_IOS_AGENT), so probing it
+    reports "no tunnel" on a perfectly working setup, which is worse than not
+    checking at all.
+    """
+    binary = cfg.goios.binary
+    if which(binary) is None:
+        return Check("tunnel", "skip", "go-ios not installed")
+
+    result = await probe(binary, "tunnel", "ls", timeout=20.0)
+    if result is not None and result.ok:
+        tunnels = _parse_tunnels(result.stdout)
+        if tunnels:
+            udids = [t.get("udid", "?") for t in tunnels]
+            return Check(
+                "tunnel",
+                "ok",
+                f"{len(tunnels)} tunnel(s) up: {', '.join(u[:12] for u in udids)}",
+                data={"tunnels": tunnels},
+            )
+
+    # Daemon mode exposes an HTTP API instead; accept that too.
     url = f"http://{cfg.goios.tunnel_api_host}:{cfg.goios.tunnel_api_port}/tunnel/list"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(url)
-        if resp.status_code == 200:
-            payload = resp.json()
+            response = await client.get(url)
+        if response.status_code == 200:
+            payload = response.json()
             tunnels = payload if isinstance(payload, list) else payload.get("tunnels", [])
             return Check(
                 "tunnel",
                 "ok",
-                f"go-ios tunnel daemon reachable with {len(tunnels)} tunnel(s)",
+                f"go-ios daemon reachable with {len(tunnels)} tunnel(s)",
                 data={"tunnels": tunnels},
             )
-        return Check(
-            "tunnel",
-            "warn",
-            f"tunnel API returned HTTP {resp.status_code}",
-            remedy="Restart the daemon with `sudo ios tunnel start`.",
-        )
     except (httpx.HTTPError, ValueError):
-        return Check(
-            "tunnel",
-            "warn",
-            f"no go-ios tunnel daemon on {cfg.goios.tunnel_api_host}:{cfg.goios.tunnel_api_port}",
-            remedy=(
-                "Required for iOS 17+ physical devices (not for simulators). "
-                "Start it once with `sudo ios tunnel start` and leave it running; "
-                "see scripts/start_tunnel.sh for a launchd setup."
-            ),
-        )
+        pass
+
+    return Check(
+        "tunnel",
+        "warn",
+        "no RemoteXPC tunnel is running",
+        remedy=(
+            "Required for iOS 17+ physical devices, not for simulators. "
+            "Run `sudo ios tunnel start` and leave it running; "
+            "see scripts/start_tunnel.sh for a launchd setup."
+        ),
+    )
+
+
+def _parse_tunnels(stdout: str) -> list[dict[str, Any]]:
+    """Pull the tunnel list out of go-ios output.
+
+    go-ios interleaves structured log lines with the result on stdout, so the
+    payload is the last line that parses as a JSON array.
+    """
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        try:
+            parsed = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(parsed, list):
+            return [t for t in parsed if isinstance(t, dict)]
+    return []
 
 
 async def _check_wda_bundle(cfg: Settings) -> Check:
