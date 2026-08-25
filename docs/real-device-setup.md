@@ -7,7 +7,7 @@ of these and returns a remedy.
 ## 1. Install go-ios
 
 ```bash
-brew install go-ios
+npm install -g go-ios
 ios version
 ```
 
@@ -35,9 +35,27 @@ rather than starting one per session. `scripts/start_tunnel.sh` contains a
 
 ## 4. Build and sign WebDriverAgent
 
+First sign in to Xcode (Settings > Accounts) so a signing identity exists,
+then:
+
 ```bash
-security find-identity -v -p codesigning     # find your team id
-TEAM_ID=XXXXXXXXXX ./scripts/prepare_wda.sh device
+security find-identity -v -p codesigning     # confirm an identity appears
+./scripts/prepare_wda.sh device               # TEAM_ID is required
+```
+
+Find your team id with:
+
+```bash
+defaults read com.apple.dt.Xcode IDEProvisioningTeams
+```
+
+**Free Apple IDs need a unique bundle id.** Apple refuses
+`com.facebook.WebDriverAgentRunner` because someone else already registered it,
+and the failure reads as a generic provisioning error:
+
+```bash
+TEAM_ID=XXXXXXXXXX WDA_BUNDLE_ID=com.yourname.WebDriverAgentRunner \
+  ./scripts/prepare_wda.sh device
 ```
 
 Two things this handles that are easy to get wrong:

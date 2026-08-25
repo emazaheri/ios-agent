@@ -15,6 +15,9 @@ WDA_SRC="${WDA_SRC:-$VENDOR/WebDriverAgent}"
 WDA_REF="${WDA_REF:-v16.8.0}"
 TARGET="${1:-simulator}"   # simulator | device
 TEAM_ID="${TEAM_ID:-}"
+# Free Apple IDs cannot claim com.facebook.*, and any bundle id already
+# registered by someone else is refused, so device builds need a unique one.
+WDA_BUNDLE_ID="${WDA_BUNDLE_ID:-}"
 
 command -v xcodebuild >/dev/null 2>&1 || {
   echo "error: xcodebuild not found. Install the full Xcode, then:" >&2
@@ -53,6 +56,11 @@ else
     exit 1
   fi
   echo "==> Building WebDriverAgentRunner for a physical device (team $TEAM_ID)"
+  BUNDLE_ARGS=()
+  if [ -n "$WDA_BUNDLE_ID" ]; then
+    echo "    bundle id: $WDA_BUNDLE_ID"
+    BUNDLE_ARGS+=("PRODUCT_BUNDLE_IDENTIFIER=$WDA_BUNDLE_ID")
+  fi
   xcodebuild build-for-testing \
     -project "$WDA_SRC/WebDriverAgent.xcodeproj" \
     -scheme WebDriverAgentRunner \
@@ -60,7 +68,8 @@ else
     -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates \
     DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_STYLE=Automatic
+    CODE_SIGN_STYLE=Automatic \
+    "${BUNDLE_ARGS[@]}"
 fi
 
 RUNNER="$(find "$DERIVED/Build/Products" -name 'WebDriverAgentRunner-Runner.app' -maxdepth 3 | head -1)"
@@ -80,6 +89,13 @@ fi
 
 echo
 echo "Runner ready at: $DEST"
-if [ -f "$DEST/embedded.mobileprovision" ]; then
-  echo "Check signing expiry with: uv run ios-mcp doctor"
+if [ "$TARGET" = "device" ]; then
+  if [ -f "$DEST/embedded.mobileprovision" ]; then
+    echo "Check signing expiry with: uv run ios-mcp doctor"
+    echo "Install it with: ios install --path \"$DEST\""
+  else
+    echo "warning: no embedded.mobileprovision, so this build is NOT signed" >&2
+    echo "  and will not launch on a phone. Check DEVELOPMENT_TEAM." >&2
+    exit 1
+  fi
 fi

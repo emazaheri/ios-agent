@@ -219,8 +219,10 @@ async def _check_goios(cfg: Settings) -> Check:
             "warn",
             f"`{binary}` not found on PATH",
             remedy=(
-                "Needed for physical iPhones. Install with `brew install go-ios` or "
-                "download a release from https://github.com/danielpaulus/go-ios/releases."
+                "Needed for physical iPhones. Install with `npm install -g go-ios`, "
+                "or download go-ios-mac.zip from "
+                "https://github.com/danielpaulus/go-ios/releases. "
+                "There is no Homebrew formula."
             ),
         )
     res = await probe(binary, "version")
@@ -289,11 +291,14 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
     if xctestrun is not None:
         data["xctestrun"] = str(xctestrun)
         parts.append("simulator bundle ready")
-    if runner is not None:
+    # A runner app is only usable on a phone if it carries a provisioning
+    # profile. The simulator build produces the same bundle name unsigned, so
+    # its presence alone says nothing about device readiness.
+    profile = runner / "embedded.mobileprovision" if runner is not None else None
+    if runner is not None and profile is not None and profile.exists():
         data["runner_app"] = str(runner)
         parts.append("device runner ready")
-        profile = runner / "embedded.mobileprovision"
-        if profile.exists():
+        if True:
             expiry = _provisioning_expiry(profile)
             if expiry is not None:
                 days = (expiry - datetime.now(UTC)).days
@@ -320,12 +325,23 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
                         data=data,
                     )
 
+    if not parts:
+        return Check(
+            "wda-bundle",
+            "warn",
+            "a WebDriverAgent build exists but is not usable",
+            remedy="Re-run scripts/prepare_wda.sh for the target you want.",
+            data=data,
+        )
+
     status: Status = "ok" if xctestrun is not None else "warn"
     remedy = (
         None
         if xctestrun is not None
         else "Run `scripts/prepare_wda.sh simulator` to enable Simulator automation."
     )
+    if "device runner ready" not in parts:
+        parts.append("no signed device runner")
     return Check("wda-bundle", status, ", ".join(parts), remedy=remedy, data=data)
 
 
