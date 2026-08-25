@@ -319,7 +319,13 @@ class IosSession:
             )
 
         result = await self._finish(
-            "scroll", before, digest, target=None, started=started, note=note
+            "scroll",
+            before,
+            digest,
+            target=None,
+            started=started,
+            args={"direction": direction, "until": until},
+            note=note,
         )
         self.idempotency.put(idem_key, result)
         return result
@@ -341,7 +347,14 @@ class IosSession:
         area = await self._scroll_area(before, ref=ref, target=target)
         await self._swipe_within(area, direction)
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
-        result = await self._finish("swipe", before, outcome.digest, target=None, started=started)
+        result = await self._finish(
+            "swipe",
+            before,
+            outcome.digest,
+            target=None,
+            started=started,
+            args={"direction": direction},
+        )
         self.idempotency.put(idem_key, result)
         return result
 
@@ -365,7 +378,14 @@ class IosSession:
         dx, dy = destination.point
         await self.wda.drag(sx, sy, dx, dy, duration_s)
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
-        result = await self._finish("drag", before, outcome.digest, target=source, started=started)
+        result = await self._finish(
+            "drag",
+            before,
+            outcome.digest,
+            target=source,
+            started=started,
+            args={"from_ref": from_ref, "to_ref": to_ref},
+        )
         self.idempotency.put(idem_key, result)
         return result
 
@@ -414,7 +434,12 @@ class IosSession:
         await self.wda.handle_alert(action, button)
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
         return await self._finish(
-            f"handle_alert:{action}", before, outcome.digest, target=None, started=started
+            f"handle_alert:{action}",
+            before,
+            outcome.digest,
+            target=None,
+            started=started,
+            args={"action": action, "button": button},
         )
 
     async def wait_for(
@@ -440,7 +465,13 @@ class IosSession:
             else f"{condition!r} did not {verb.rstrip('ed')} within {timeout_s:.0f}s"
         )
         result = await self._finish(
-            "wait_for", before, digest, target=None, started=started, note=note
+            "wait_for",
+            before,
+            digest,
+            target=None,
+            started=started,
+            args={"condition": condition, "absent": absent},
+            note=note,
         )
         result.ok = met
         return result
@@ -455,7 +486,12 @@ class IosSession:
         await self.wda.launch_app(bundle_id, fresh=fresh)
         outcome = await settle(self.snapshot, self.settings.stabilize)
         return await self._finish(
-            f"launch_app:{bundle_id}", before, outcome.digest, target=None, started=started
+            f"launch_app:{bundle_id}",
+            before,
+            outcome.digest,
+            target=None,
+            started=started,
+            args={"bundle_id": bundle_id, "fresh": fresh},
         )
 
     async def terminate_app(self, bundle_id: str) -> bool:
@@ -470,7 +506,14 @@ class IosSession:
         else:
             await self.wda.open_url(url)
         outcome = await settle(self.snapshot, self.settings.stabilize)
-        return await self._finish("open_url", before, outcome.digest, target=None, started=started)
+        return await self._finish(
+            "open_url",
+            before,
+            outcome.digest,
+            target=None,
+            started=started,
+            args={"url": url},
+        )
 
     async def app_state(self, bundle_id: str) -> int:
         return await self.wda.app_state(bundle_id)
@@ -581,18 +624,9 @@ class IosSession:
             outcome.digest,
             target=resolved,
             started=started,
+            args=args,
             note=note,
             recovered=self.wda.recovered_count > recovered_before,
-        )
-        self.audit.record(
-            name,
-            args,
-            ok=True,
-            resolved_via=resolved.resolved_via if resolved else None,
-            target=resolved.describe if resolved else None,
-            fingerprint=outcome.digest.fingerprint,
-            screen_changed=result.screen_changed,
-            elapsed_ms=result.elapsed_ms,
         )
         self.idempotency.put(idem_key, result)
         return result
@@ -635,10 +669,17 @@ class IosSession:
         *,
         target: Target | None,
         started: float,
+        args: dict[str, Any] | None = None,
         note: str | None = None,
         recovered: bool = False,
     ) -> ActionResult:
-        """Record the new screen and decide between a delta and a full digest."""
+        """Record the new screen, write the audit entry, and shape the result.
+
+        Auditing happens here rather than in ``_act`` because scrolls, swipes,
+        drags, alerts and app launches never pass through ``_act``. Recording
+        there left a safety layer whose whole purpose is forensics silently
+        blind to most of what a session actually did.
+        """
         self.refs.update(after)
         self._remember_fingerprint(after.fingerprint)
         alert = await self.wda.alert()
@@ -651,6 +692,17 @@ class IosSession:
             digest = None  # the delta already says everything that changed
 
         self.gate.record_success()
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        self.audit.record(
+            name,
+            args or {},
+            ok=True,
+            resolved_via=target.resolved_via if target else None,
+            target=target.describe if target else None,
+            fingerprint=after.fingerprint,
+            screen_changed=changed,
+            elapsed_ms=elapsed_ms,
+        )
         return ActionResult(
             action=name,
             ok=True,

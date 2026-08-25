@@ -227,3 +227,42 @@ async def test_failed_actions_are_recorded_too() -> None:
         await session.tap(target="Nonexistent Thing")
 
     assert session.audit.summary()["failures"] == 1
+
+
+async def test_every_action_reaches_the_audit_trail() -> None:
+    """Scrolls, swipes, launches and alerts bypass _act entirely.
+
+    Recording only in _act left the layer whose whole purpose is forensics
+    blind to most of what a session did.
+    """
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    await session.tap(target="Wi-Fi")
+    await session.scroll("down")
+    await session.swipe("left")
+    await session.launch_app("com.apple.Preferences")
+    await session.open_url("App-prefs:root")
+    await session.wait_for("Wi-Fi", timeout_s=0.2)
+
+    actions = [e.action for e in session.audit.entries]
+    assert "tap" in actions
+    assert "scroll" in actions
+    assert "swipe" in actions
+    assert any(a.startswith("launch_app") for a in actions)
+    assert "open_url" in actions
+    assert "wait_for" in actions
+    assert session.audit.summary()["failures"] == 0
+
+
+async def test_audit_entries_carry_what_the_action_did() -> None:
+    """A trail that records only names cannot explain what happened."""
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+    await session.scroll("down", until="Bluetooth")
+
+    entry = next(e for e in session.audit.entries if e.action == "scroll")
+    assert entry.args["direction"] == "down"
+    assert entry.args["until"] == "Bluetooth"
+    assert entry.elapsed_ms is not None
+    assert entry.fingerprint
