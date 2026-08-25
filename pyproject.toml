@@ -27,6 +27,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "respx>=0.22",
+    "pillow>=12.3.0",
 ]
 
 [build-system]
@@ -38,7 +39,15 @@ packages = ["ios_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# One event loop for the whole run. The device pool and its WebDriverAgent
+# subprocesses live across tests, and tearing them down on a different loop
+# than the one that created them raises "attached to a different loop".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+# Test helper modules (fake_wda, trees, harness, flows) live beside the tests
+# that use them rather than in the package.
+pythonpath = ["tests", "tests/evals"]
 markers = [
     "simulator: requires a booted iOS Simulator (skipped when unavailable)",
     "device: requires an attached physical iPhone (skipped when unavailable)",

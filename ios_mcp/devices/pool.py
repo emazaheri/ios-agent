@@ -180,19 +180,29 @@ class DevicePool:
         return self._leases.get(udid)
 
 
+def _is_phone(device: DeviceInfo) -> bool:
+    name = device.name.lower()
+    model = (device.model or "").lower()
+    return "iphone" in name or "iphone" in model
+
+
 def _best_default(devices: list[DeviceInfo]) -> DeviceInfo:
     """Pick the safest useful device when the caller did not name one.
 
     Order matters. A simulator outranks a physical phone even when the phone is
     connected and the simulator is cold: acting on someone's real device should
-    be a deliberate choice, never a default. Within a kind, an already-booted
-    device wins, because booting a cold simulator costs tens of seconds.
+    be a deliberate choice, never a default. An iPhone outranks an iPad, because
+    this is a phone automation tool and an iPad's split-view layout behaves
+    differently enough to surprise a caller who did not ask for one. Within a
+    kind, an already-booted device wins, since booting a cold simulator costs
+    tens of seconds.
     """
     ranked = sorted(
         devices,
         key=lambda d: (
             not d.ready,
             d.kind != "simulator",
+            not _is_phone(d),
             d.state not in ("Booted", "connected"),
         ),
     )

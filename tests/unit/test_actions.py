@@ -263,7 +263,11 @@ async def test_setting_permissions_is_refused_on_a_real_device() -> None:
 async def test_read_text_scopes_to_one_element() -> None:
     session, _, _ = make_session(settings_screen())
     digest = await session.observe()
-    cell = next(n for n in digest.nodes if n.label == "Airplane Mode" and n.role == "cell")
-    text = await session.read_text(ref=cell.ref)
-    assert "Airplane Mode" in text
-    assert "Bluetooth" not in text
+    table = next(n for n in digest.nodes if n.role == "table")
+    scoped = await session.read_text(ref=table.ref)
+    assert "Bluetooth" in scoped
+
+    wifi = next(n for n in digest.nodes if n.label == "Wi-Fi")
+    narrow = await session.read_text(ref=wifi.ref)
+    assert "Wi-Fi" in narrow
+    assert "Bluetooth" not in narrow

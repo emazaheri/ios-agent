@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from ios_mcp.config import Settings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
-from ios_mcp.devices.ports import free_port
+from ios_mcp.devices.ports import free_port, release_port
 from ios_mcp.devices.shell import run
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing
 
@@ -70,56 +70,64 @@ class SimulatorAdapter:
         await run("xcrun", "simctl", "bootstatus", self.udid, "-b", timeout=180.0)
 
     async def ensure_runner(self) -> WdaEndpoint:
-        """Start WebDriverAgent and wait for it to answer /status."""
+        """Start WebDriverAgent and wait for it to answer /status.
+
+        WDA runs as an XCTest bundle, so it has to be launched by testmanagerd
+        via xcodebuild. `simctl launch` on the .xctrunner app cannot work: the
+        app aborts immediately without an XCTestConfiguration. (The prebuilt-app
+        route does work on physical devices, where go-ios drives testmanagerd
+        directly.)
+        """
         if self._endpoint and await self._runner_alive(self._endpoint):
             return self._endpoint
+
+        # A dead endpoint leaves a stale runner process holding the simulator
+        # and a reserved port. Relaunching without clearing both means the new
+        # runner fights the corpse and neither comes up.
+        if self._endpoint is not None or self._runner_proc is not None:
+            await self.teardown()
 
         await self.ensure_booted()
         port = free_port(*self.settings.wda.port_range)
         base_url = f"http://{self.settings.wda.host}:{port}"
 
-        runner_app = self.settings.wda.runner_app_path or _discover_runner()
-        if runner_app is not None:
-            await self._launch_prebuilt(runner_app, port)
+        xctestrun = self.settings.wda.xctestrun_path or _discover_xctestrun()
+        if xctestrun is not None:
+            await self._launch_prebuilt(xctestrun, port)
         else:
-            await self._launch_via_xcodebuild(port)
+            await self._launch_from_source(port)
 
         endpoint = WdaEndpoint(base_url=base_url, port=port, started_by_us=True)
-        await self._wait_for_runner(endpoint)
+        try:
+            await self._wait_for_runner(endpoint)
+        except DeviceNotReady:
+            release_port(port)
+            await self.teardown()
+            raise
         self._endpoint = endpoint
         return endpoint
 
-    async def _launch_prebuilt(self, runner_app: Path, port: int) -> None:
-        """Install and launch a prebuilt runner: far faster than building on demand."""
-        logger.info("Installing prebuilt WDA runner from %s", runner_app)
-        await run(
-            "xcrun", "simctl", "install", self.udid, str(runner_app), timeout=180.0, check=True
-        )
-        # simctl forwards SIMCTL_CHILD_-prefixed variables into the launched
-        # process, which is how the runner learns which port to listen on.
-        proc = await asyncio.create_subprocess_exec(
-            "xcrun",
-            "simctl",
-            "launch",
-            "--terminate-running-process",
-            self.udid,
-            SIM_WDA_BUNDLE,
-            env={**_env(), "SIMCTL_CHILD_USE_PORT": str(port)},
+    async def _launch_prebuilt(self, xctestrun: Path, port: int) -> None:
+        """Run an already-built test bundle. Seconds, rather than minutes."""
+        logger.info("Starting WebDriverAgent from %s", xctestrun.name)
+        self._runner_proc = await asyncio.create_subprocess_exec(
+            "xcodebuild",
+            "test-without-building",
+            "-xctestrun",
+            str(xctestrun),
+            "-destination",
+            f"id={self.udid}",
+            env={**_env(), "USE_PORT": str(port)},
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        _, err = await proc.communicate()
-        if proc.returncode != 0:
-            raise DeviceNotReady(
-                "Could not launch the prebuilt WebDriverAgent runner",
-                hint=(err.decode(errors="replace")[:300] or "Re-run scripts/prepare_wda.sh."),
-            )
 
-    async def _launch_via_xcodebuild(self, port: int) -> None:
+    async def _launch_from_source(self, port: int) -> None:
+        """Build and run WDA from a checkout. Slow; prefer a prebuilt bundle."""
         source = Path("vendor/wda/WebDriverAgent/WebDriverAgent.xcodeproj")
         if not source.exists():
             raise ToolchainMissing(
-                "No WebDriverAgent runner is available for the simulator",
+                "No WebDriverAgent build is available for the simulator",
                 hint=(
                     "Run scripts/prepare_wda.sh to build one into vendor/wda/. "
                     "It clones appium/WebDriverAgent and builds it once."
@@ -127,12 +135,10 @@ class SimulatorAdapter:
             )
         if shutil.which("xcodebuild") is None:
             raise ToolchainMissing(
-                "xcodebuild is required to build WebDriverAgent on demand",
-                hint=(
-                    "Install the full Xcode, or provide a prebuilt runner via wda.runner_app_path."
-                ),
+                "xcodebuild is required to run WebDriverAgent",
+                hint="Install the full Xcode, then run scripts/prepare_wda.sh.",
             )
-        logger.info("Building and launching WDA via xcodebuild (this is slow; prebuild instead)")
+        logger.info("Building and launching WDA from source; this takes a few minutes")
         self._runner_proc = await asyncio.create_subprocess_exec(
             "xcodebuild",
             "-project",
@@ -177,6 +183,8 @@ class SimulatorAdapter:
             except TimeoutError:
                 self._runner_proc.kill()
         self._runner_proc = None
+        if self._endpoint is not None:
+            release_port(self._endpoint.port)
         self._endpoint = None
 
     # -- app and device control -------------------------------------------
@@ -268,10 +276,14 @@ def _env() -> dict[str, str]:
     return dict(os.environ)
 
 
-def _discover_runner() -> Path | None:
-    for candidate in Path("vendor/wda").glob("**/WebDriverAgentRunner-Runner.app"):
-        return candidate
-    return None
+def _discover_xctestrun() -> Path | None:
+    """Find a prebuilt simulator test bundle produced by scripts/prepare_wda.sh."""
+    candidates = sorted(
+        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
 
 
 def _parse_listapps(text: str) -> list[AppInfo]:

@@ -48,7 +48,11 @@ class DoctorReport:
 
     @property
     def can_use_simulator(self) -> bool:
-        return self._status("xcode") == "ok" and self._status("simctl") == "ok"
+        return (
+            self._status("xcode") == "ok"
+            and self._status("simctl") == "ok"
+            and self._status("wda-bundle") == "ok"
+        )
 
     @property
     def can_use_real_device(self) -> bool:
@@ -259,55 +263,70 @@ async def _check_tunnel(cfg: Settings) -> Check:
 
 
 async def _check_wda_bundle(cfg: Settings) -> Check:
-    """Verify the prebuilt WebDriverAgent runner and, critically, its signing expiry."""
-    path = cfg.wda.runner_app_path or _discover_wda_app()
-    if path is None:
+    """Verify the WebDriverAgent builds, and their signing expiry.
+
+    Simulators and physical devices need different artifacts. A simulator needs
+    an .xctestrun bundle, because WDA can only be started through xcodebuild;
+    a device needs the signed runner .app, which go-ios installs and launches
+    through testmanagerd.
+    """
+    xctestrun = cfg.wda.xctestrun_path or _discover_xctestrun()
+    runner = cfg.wda.runner_app_path or _discover_wda_app()
+
+    if xctestrun is None and runner is None:
         return Check(
             "wda-bundle",
             "warn",
-            "no prebuilt WebDriverAgentRunner-Runner.app found",
+            "no WebDriverAgent build found",
             remedy=(
-                "Run scripts/prepare_wda.sh to build and sign one into vendor/wda/. "
-                "Simulators can also build it on demand via xcodebuild, but a prebuilt "
-                "runner starts sessions several times faster."
+                "Run `scripts/prepare_wda.sh simulator` (or `device` with your TEAM_ID) "
+                "to build one into vendor/wda/. Nothing can be automated without it."
             ),
         )
-    if not path.exists():
-        return Check(
-            "wda-bundle",
-            "fail",
-            f"configured runner path does not exist: {path}",
-            remedy="Fix wda.runner_app_path or re-run scripts/prepare_wda.sh.",
-        )
 
-    data: dict[str, Any] = {"path": str(path)}
-    profile = path / "embedded.mobileprovision"
-    if profile.exists():
-        expiry = _provisioning_expiry(profile)
-        if expiry is not None:
-            days = (expiry - datetime.now(UTC)).days
-            data["signing_expires"] = expiry.isoformat()
-            data["days_remaining"] = days
-            if days < 0:
-                return Check(
-                    "wda-bundle",
-                    "fail",
-                    f"runner provisioning profile expired {abs(days)} day(s) ago",
-                    remedy=(
-                        "Re-sign with scripts/prepare_wda.sh. Free Apple IDs get "
-                        "7-day profiles; a paid Developer Program membership gets a year."
-                    ),
-                    data=data,
-                )
-            if days <= 2:
-                return Check(
-                    "wda-bundle",
-                    "warn",
-                    f"runner provisioning profile expires in {days} day(s)",
-                    remedy="Re-sign soon with scripts/prepare_wda.sh.",
-                    data=data,
-                )
-    return Check("wda-bundle", "ok", f"prebuilt runner at {path}", data=data)
+    data: dict[str, Any] = {}
+    parts: list[str] = []
+    if xctestrun is not None:
+        data["xctestrun"] = str(xctestrun)
+        parts.append("simulator bundle ready")
+    if runner is not None:
+        data["runner_app"] = str(runner)
+        parts.append("device runner ready")
+        profile = runner / "embedded.mobileprovision"
+        if profile.exists():
+            expiry = _provisioning_expiry(profile)
+            if expiry is not None:
+                days = (expiry - datetime.now(UTC)).days
+                data["signing_expires"] = expiry.isoformat()
+                data["days_remaining"] = days
+                if days < 0:
+                    return Check(
+                        "wda-bundle",
+                        "fail",
+                        f"the device runner's provisioning profile expired {abs(days)} day(s) ago",
+                        remedy=(
+                            "Re-sign with scripts/prepare_wda.sh device. Free Apple IDs "
+                            "get 7-day profiles; a paid Developer Program membership "
+                            "gets a year."
+                        ),
+                        data=data,
+                    )
+                if days <= 2:
+                    return Check(
+                        "wda-bundle",
+                        "warn",
+                        f"the device runner's provisioning profile expires in {days} day(s)",
+                        remedy="Re-sign soon with scripts/prepare_wda.sh device.",
+                        data=data,
+                    )
+
+    status: Status = "ok" if xctestrun is not None else "warn"
+    remedy = (
+        None
+        if xctestrun is not None
+        else "Run `scripts/prepare_wda.sh simulator` to enable Simulator automation."
+    )
+    return Check("wda-bundle", status, ", ".join(parts), remedy=remedy, data=data)
 
 
 async def _check_attached_devices(cfg: Settings) -> Check:
@@ -342,9 +361,20 @@ async def _check_attached_devices(cfg: Settings) -> Check:
 
 
 def _discover_wda_app() -> Path | None:
+    """The signed runner app used on physical devices."""
     for candidate in Path("vendor/wda").glob("**/WebDriverAgentRunner-Runner.app"):
         return candidate
     return None
+
+
+def _discover_xctestrun() -> Path | None:
+    """The prebuilt test bundle used on simulators."""
+    candidates = sorted(
+        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
 
 
 def _provisioning_expiry(profile: Path) -> datetime | None:

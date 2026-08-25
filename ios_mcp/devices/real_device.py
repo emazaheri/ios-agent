@@ -117,6 +117,12 @@ class RealDeviceAdapter:
         if self._endpoint and await self._runner_alive(self._endpoint):
             return self._endpoint
 
+        # A dead endpoint leaves a stale runner process holding the simulator
+        # and a reserved port. Relaunching without clearing both means the new
+        # runner fights the corpse and neither comes up.
+        if self._endpoint is not None or self._runner_proc is not None:
+            await self.teardown()
+
         await self.ensure_booted()
         port = free_port(*self.settings.wda.port_range)
         base_url = f"http://{self.settings.wda.host}:{port}"

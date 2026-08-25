@@ -184,13 +184,26 @@ async def test_resume_clears_a_halt() -> None:
     assert result.ok
 
 
-async def test_a_looping_agent_is_halted() -> None:
-    """Bouncing between the same screens burns budget until something stops it."""
+async def test_repeatedly_observing_one_screen_is_not_a_loop() -> None:
+    """Reading the same screen carefully is not thrashing; halting there would
+    stop sessions that are behaving correctly."""
     session, _, _ = make_session(settings_screen())
-    window = session.settings.policy.loop_detection_window
-
-    for _ in range(window + 1):
+    for _ in range(session.settings.policy.loop_detection_window + 2):
         await session.observe()
+
+    assert not session.looping
+    assert not session.halted
+
+
+async def test_an_agent_whose_actions_change_nothing_is_halted() -> None:
+    """Tapping repeatedly with no effect burns budget until something stops it."""
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    for _ in range(session.settings.policy.loop_detection_window + 1):
+        if session.halted:
+            break
+        await session.tap(target="Wi-Fi")
 
     assert session.looping
     assert session.halted

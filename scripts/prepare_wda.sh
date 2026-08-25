@@ -9,7 +9,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENDOR="$ROOT/vendor/wda"
 WDA_SRC="${WDA_SRC:-$VENDOR/WebDriverAgent}"
-WDA_REF="${WDA_REF:-v9.16.0}"
+# Pinned deliberately: WebDriverAgent tracks Xcode closely, and an
+# unpinned clone turns an Xcode upgrade into a silent behaviour change.
+# Check https://github.com/appium/WebDriverAgent/tags before bumping.
+WDA_REF="${WDA_REF:-v16.8.0}"
 TARGET="${1:-simulator}"   # simulator | device
 TEAM_ID="${TEAM_ID:-}"
 
@@ -19,9 +22,17 @@ command -v xcodebuild >/dev/null 2>&1 || {
   exit 1
 }
 
-if [ ! -d "$WDA_SRC" ]; then
+if [ ! -d "$WDA_SRC/.git" ]; then
   echo "==> Cloning WebDriverAgent $WDA_REF"
-  git clone --depth 1 --branch "$WDA_REF" https://github.com/appium/WebDriverAgent.git "$WDA_SRC"
+  rm -rf "$WDA_SRC"
+  if ! git clone --depth 1 --branch "$WDA_REF" \
+      https://github.com/appium/WebDriverAgent.git "$WDA_SRC"; then
+    rm -rf "$WDA_SRC"
+    echo "error: could not clone WebDriverAgent at tag $WDA_REF." >&2
+    echo "  Check the tag exists: git ls-remote --tags https://github.com/appium/WebDriverAgent.git" >&2
+    echo "  Then re-run with: WDA_REF=<tag> scripts/prepare_wda.sh $TARGET" >&2
+    exit 1
+  fi
 fi
 
 DERIVED="$VENDOR/DerivedData"

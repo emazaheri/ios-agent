@@ -104,14 +104,16 @@ async def test_open_session_returns_the_first_screen(server_with_session) -> Non
     data = payload(result)
     assert data["ok"] is True
     assert "screen" in data
-    assert data["screen"]["elements"], "the first screen must come back with the session"
+    # The rendered form is what the model reads, and it carries the refs.
+    assert data["screen"]["text"], "the first screen must come back with the session"
+    assert data["screen"]["element_count"] > 0
 
 
 async def test_observe_then_tap_by_ref(server_with_session) -> None:
     mcp, _, state = server_with_session
     async with Client(mcp) as client:
         await client.call_tool("ios_open_session", {})
-        observed = payload(await client.call_tool("ios_observe", {}))
+        observed = payload(await client.call_tool("ios_observe", {"include_elements": True}))
         ref = next(e["ref"] for e in observed["elements"] if e.get("label") == "Wi-Fi")
         result = payload(await client.call_tool("ios_tap", {"ref": ref}))
 
@@ -190,6 +192,27 @@ async def test_wait_for_reports_failure_as_data_not_an_error(server_with_session
         await client.call_tool("ios_open_session", {})
         result = payload(await client.call_tool("ios_wait_for", {"text": "Nope", "timeout_s": 0.2}))
     assert result["ok"] is False
+
+
+async def test_observe_omits_structured_elements_by_default() -> None:
+    """They duplicate the rendered text at roughly twice the tokens, and both
+    would be pushed into the model's context."""
+    mcp = build_server(Settings())
+
+    async def fake_open(device=None, *, app=None, fresh=False):
+        session, _, _ = make_session(settings_screen())
+        mcp.ios_context.session = session
+        return session
+
+    mcp.ios_context.open = fake_open
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        default = payload(await client.call_tool("ios_observe", {}))
+        verbose = payload(await client.call_tool("ios_observe", {"include_elements": True}))
+
+    assert "elements" not in default
+    assert "elements" in verbose
+    assert len(json.dumps(verbose)) > len(json.dumps(default)) * 1.5
 
 
 async def test_the_operator_prompt_ships_with_the_server() -> None:

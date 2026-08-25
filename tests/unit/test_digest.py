@@ -21,9 +21,22 @@ def test_wrappers_and_label_echoes_are_removed() -> None:
     assert "application" not in roles
     assert "window" not in roles
     assert "nav" not in roles
-    # The StaticText inside each cell repeating the cell's own label is dropped.
-    assert sum(1 for n in d.nodes if n.label == "Airplane Mode") == 2  # cell + switch
     assert d.title == "Settings"
+
+
+def test_one_visual_row_produces_exactly_one_element() -> None:
+    """UIKit reports a switch row three times: cell, echoed label, and switch.
+
+    An agent shown three entries for one row wastes tokens on all of them and
+    then cannot tell which to act on.
+    """
+    d = digest_of(settings_screen())
+    airplane = [n for n in d.nodes if n.label == "Airplane Mode"]
+    assert len(airplane) == 1
+    # The control survives rather than the row that wraps it, because it is
+    # what carries the state and what set_value has to target.
+    assert airplane[0].role == "switch"
+    assert airplane[0].value == "0"
 
 
 def test_every_actionable_element_survives() -> None:

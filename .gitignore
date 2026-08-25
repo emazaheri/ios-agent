@@ -13,3 +13,8 @@ htmlcov/
 .artifacts/
 vendor/wda/*.app/
 vendor/wda/*.ipa
+
+# WebDriverAgent checkout and build products (rebuild with scripts/prepare_wda.sh)
+vendor/wda/WebDriverAgent/
+vendor/wda/DerivedData/
+vendor/wda/*.xctestrun

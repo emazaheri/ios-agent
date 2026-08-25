@@ -114,3 +114,38 @@ def role_of(element_type: str) -> str:
 SETTABLE_ROLES: frozenset[str] = frozenset(
     {"switch", "slider", "stepper", "picker", "segmented", "checkbox", "radio"}
 )
+
+
+#: Labels iOS attaches to purely decorative disclosure glyphs. These arrive as
+#: disabled buttons whose only job is to draw an arrow at the end of a row, so
+#: they carry nothing an agent can act on or learn from. A stock Settings
+#: screen emits fifteen or more of them.
+DECORATIVE_LABELS: frozenset[str] = frozenset(
+    {
+        "chevron",
+        "chevron.right",
+        "chevron.left",
+        "chevron.up",
+        "chevron.down",
+        "disclosure",
+        "disclosureindicator",
+    }
+)
+
+#: Which element wins when two nodes describe the same thing. The inner
+#: control is more precise than the row that wraps it.
+ROLE_PRECEDENCE: tuple[str, ...] = (
+    "switch",
+    "slider",
+    "stepper",
+    "textfield",
+    "securefield",
+    "searchfield",
+    "textview",
+    "button",
+    "link",
+    "menuitem",
+    "cell",
+    "text",
+    "image",
+)

@@ -22,8 +22,9 @@ You are driving an iOS device through the ios-automation MCP server.
 ## The loop
 
 1. `ios_open_session` once, then `ios_launch_app` or `ios_open_url` to arrive.
-   A deep link (`prefs:root=WIFI`, `maps://?q=...`) is far cheaper than tapping
-   through navigation.
+   A deep link is far cheaper than tapping through navigation. Settings panes
+   are `App-prefs:root=WIFI` on iOS 26 (the older `prefs:` scheme no longer
+   opens); other apps use their own, such as `maps://?q=...`.
 2. `ios_observe` gives a compact list of elements, each with a ref like `e7`.
 3. Act with `ios_tap`, `ios_type`, `ios_scroll`, `ios_set_value`, passing refs.
 4. Actions return the resulting screen, so do not call `ios_observe` again
@@ -86,7 +87,7 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         """The last observed screen, without spending a tool call."""
         session = ctx.require()
         digest = session._last_digest or await session.observe()
-        return json.dumps(session.redactor.payload(digest.to_dict()), indent=2)
+        return json.dumps(session.redactor.payload(digest.to_dict(include_elements=True)), indent=2)
 
     @mcp.resource("ios://capabilities", mime_type="application/json")
     async def capabilities_resource() -> str:

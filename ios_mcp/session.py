@@ -111,7 +111,6 @@ class IosSession:
         """Observe the screen and record the refs as what the agent has seen."""
         digest = await self.snapshot(query=query, region=region, budget=budget)
         self.refs.update(digest)
-        self._remember_fingerprint(digest.fingerprint)
         return digest
 
     async def screenshot(self) -> bytes:
@@ -122,7 +121,9 @@ class IosSession:
 
     async def read_text(self, ref: str | None = None, target: str | None = None) -> str:
         """Full text of the screen, or of one element and its descendants."""
-        digest = self._last_digest or await self.observe()
+        # Fresh, like the action paths: text read from a screen that has since
+        # changed is misinformation, and the agent will act on it.
+        digest = await self.snapshot()
         if ref is None and target is None:
             return "\n".join(t for t in (n.text for n in digest.nodes) if t)
         resolved = self.resolve(digest, ref=ref, target=target, actionable_only=False)
@@ -291,7 +292,7 @@ class IosSession:
         if cached is not None:
             return _from_cache(cached)
 
-        before = self._last_digest or await self.snapshot()
+        before = await self.snapshot()
         area = await self._scroll_area(before, ref=ref, target=target)
 
         found = False
@@ -336,7 +337,7 @@ class IosSession:
         if cached is not None:
             return _from_cache(cached)
 
-        before = self._last_digest or await self.snapshot()
+        before = await self.snapshot()
         area = await self._scroll_area(before, ref=ref, target=target)
         await self._swipe_within(area, direction)
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
@@ -357,7 +358,7 @@ class IosSession:
         if cached is not None:
             return _from_cache(cached)
 
-        before = self._last_digest or await self.snapshot()
+        before = await self.snapshot()
         source = self.resolve(before, ref=from_ref)
         destination = self.resolve(before, ref=to_ref, actionable_only=False)
         sx, sy = source.point
@@ -409,7 +410,7 @@ class IosSession:
         self, action: Literal["accept", "dismiss"], button: str | None = None
     ) -> ActionResult:
         started = time.monotonic()
-        before = self._last_digest or await self.snapshot()
+        before = await self.snapshot()
         await self.wda.handle_alert(action, button)
         outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
         return await self._finish(
@@ -425,7 +426,7 @@ class IosSession:
     ) -> ActionResult:
         """Wait until some text appears on screen, or disappears when ``absent``."""
         started = time.monotonic()
-        before = self._last_digest or await self.snapshot()
+        before = await self.snapshot()
 
         def predicate(digest: Digest) -> bool:
             present = _contains_text(digest, condition)
@@ -535,7 +536,13 @@ class IosSession:
         if cached is not None:
             return _from_cache(cached)
 
-        before = self._last_digest or await self.snapshot()
+        # Always re-read the screen rather than trusting the last observation.
+        # Seconds of model latency sit between observe and act, and anything
+        # that moved in between (an animation finishing, content loading late)
+        # would send the tap to whatever now occupies those coordinates. The
+        # ref table still holds what the agent was shown, so refs keep
+        # resolving; only the geometry is refreshed.
+        before = await self.snapshot()
         args = {"ref": ref, "target": target}
 
         resolved: Target | None = None
@@ -699,6 +706,12 @@ class IosSession:
         return str(value) if value else None
 
     def _remember_fingerprint(self, fingerprint: str) -> None:
+        """Track where actions land, for loop detection.
+
+        Only actions are recorded. Observing the same screen repeatedly is not
+        a loop; it is an agent reading carefully, and flagging it would halt
+        sessions that are behaving correctly.
+        """
         window = self.settings.policy.loop_detection_window
         self._fingerprint_history.append(fingerprint)
         if len(self._fingerprint_history) > window * 2:

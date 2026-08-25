@@ -31,6 +31,15 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         budget: Annotated[
             int | None, Field(description="Token budget for the digest. Default 1500.")
         ] = None,
+        include_elements: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Also return each element as structured JSON. Roughly doubles the "
+                    "cost and duplicates the text form; only useful programmatically."
+                )
+            ),
+        ] = False,
     ) -> dict[str, Any]:
         """Read the screen as a compact list of elements with short refs.
 
@@ -44,7 +53,7 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         session = ctx.require()
         rect = Rect(*region) if region else None
         digest = await session.observe(query=query, region=rect, budget=budget)
-        return session.redactor.mapping(digest.to_dict())
+        return session.redactor.mapping(digest.to_dict(include_elements=include_elements))
 
     @mcp.tool(annotations=READ_ONLY)
     @tool_errors

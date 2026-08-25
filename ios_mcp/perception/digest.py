@@ -13,14 +13,16 @@ assign refs.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ios_mcp.config import DigestSettings
 from ios_mcp.perception.roles import (
     ALWAYS_COLLAPSE,
     CONTAINER_ROLES,
+    DECORATIVE_LABELS,
     INTERACTIVE_ROLES,
+    ROLE_PRECEDENCE,
     SCROLLABLE_ROLES,
     STATEFUL_ROLES,
     role_of,
@@ -29,6 +31,10 @@ from ios_mcp.wda.models import Rect, SnapshotNode
 
 #: Rough characters-per-token for English UI labels.
 _CHARS_PER_TOKEN = 4
+
+#: How much of a control must sit inside another before they are judged the
+#: same thing. Not 1.0: real iOS rects overhang their own parents slightly.
+_CONTAINMENT_RATIO = 0.8
 
 
 @dataclass(slots=True, frozen=True)
@@ -126,18 +132,29 @@ class Digest:
             )
         return "\n".join(lines)
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
+    def to_dict(self, *, include_elements: bool = False) -> dict[str, Any]:
+        """Serialise for the wire.
+
+        ``elements`` is omitted by default because it duplicates ``text``:
+        every ref, role, label and coordinate the structured list carries is
+        already in the rendered form, at roughly twice the tokens. Since both
+        would be pushed into the model's context, sending both means paying
+        twice for one screen. Programmatic consumers that want the structure
+        can ask for it.
+        """
+        payload: dict[str, Any] = {
             "app": self.app,
             "title": self.title,
-            "fingerprint": self.fingerprint,
+            "fingerprint": self.fingerprint[:8],
             "element_count": len(self.nodes),
             "total_elements": self.total_nodes,
             "truncated": self.truncated,
             "text": self.render(),
-            "elements": [n.to_dict() for n in self.nodes],
             **self.meta,
         }
+        if include_elements:
+            payload["elements"] = [n.to_dict() for n in self.nodes]
+        return payload
 
     def estimated_tokens(self) -> int:
         return len(self.render()) // _CHARS_PER_TOKEN
@@ -174,6 +191,7 @@ def build_digest(
     # Seed the echo filter with the screen title: the navigation bar's
     # StaticText always repeats it, and the digest header already reports it.
     candidates = _collect(root, settings, screen=screen, depth=0, inherited_text=title)
+    candidates = _dedupe_colocated(candidates)
     candidates = _collapse_repeats(candidates, settings)
 
     if query:
@@ -209,7 +227,7 @@ def build_digest(
 
     return Digest(
         nodes=nodes,
-        fingerprint=fingerprint_of(nodes, app),
+        fingerprint=fingerprint_of(nodes, app, title),
         app=app or root.name,
         title=title,
         total_nodes=total,
@@ -217,15 +235,21 @@ def build_digest(
     )
 
 
-def fingerprint_of(nodes: list[DigestNode], app: str | None = None) -> str:
+def fingerprint_of(
+    nodes: list[DigestNode], app: str | None = None, title: str | None = None
+) -> str:
     """A stable hash of screen structure and state.
 
     Used for three things: deciding whether an action changed anything, driving
     the post-action settle loop, and detecting an agent looping between the same
     two screens. Positions are rounded to 4px so animation jitter does not
     register as a change, but real layout shifts still do.
+
+    The title is part of the hash because a split view (any iPad, and iPhone
+    landscape) keeps most of the screen identical while navigating: without the
+    title, a real navigation looks like an action that did nothing.
     """
-    parts = [app or ""]
+    parts = [app or "", title or ""]
     for n in sorted(nodes, key=lambda n: (n.role, n.label or "", n.identifier or "")):
         parts.append(
             f"{n.role}|{n.label or ''}|{n.identifier or ''}|"
@@ -304,8 +328,147 @@ def _is_noise(
     # An unlabelled decoration the agent can neither read nor act on.
     if role in ("image", "text") and not text:
         return True
+    # A disclosure arrow drawn at the end of a row: disabled, and meaningless.
+    if not node.enabled and (text or "").strip().lower() in DECORATIVE_LABELS:
+        return True
     # A label already reported by the ancestor that owns it.
     return role == "text" and text is not None and text == inherited_text
+
+
+def _dedupe_colocated(candidates: list[_Candidate]) -> list[_Candidate]:
+    """Collapse several nodes that describe one on-screen thing into one.
+
+    UIKit reports a table row twice: once as the Cell and again as the control
+    inside it. Sometimes both carry the label, sometimes only the inner one
+    does. Either way, showing both inflates the digest by roughly 40% on a list
+    screen and makes every row an ambiguous target, so resolution refuses to
+    act on any of them.
+    """
+    kept: list[_Candidate] = []
+    for candidate in candidates:
+        duplicate_at = _find_coincident(kept, candidate)
+        if duplicate_at is None:
+            kept.append(candidate)
+        else:
+            kept[duplicate_at] = _merge(kept[duplicate_at], candidate)
+    return kept
+
+
+def _merge(incumbent: _Candidate, candidate: _Candidate) -> _Candidate:
+    """Fuse two nodes describing one control into the most useful single node.
+
+    Semantics come from whichever node carries the label. Geometry comes from
+    the smaller node, but only when both describe the same kind of control:
+    iOS reports a switch row twice, once row-wide with the label and once as
+    the toggle at the trailing edge, and tapping the row's centre hits the text
+    where a switch ignores it, so set_value would report success while changing
+    nothing. Between different roles the tighter rect is usually the label's,
+    which is not a hit target at all, so the control keeps its own.
+    """
+    winner = candidate if _beats(candidate, incumbent) else incumbent
+    if incumbent.role != candidate.role:
+        return winner
+
+    tightest = min((incumbent, candidate), key=lambda c: c.node.rect.area)
+    if tightest is winner or tightest.node.rect.area <= 0:
+        return winner
+    return _Candidate(
+        node=replace(winner.node, rect=tightest.node.rect),
+        role=winner.role,
+        depth=winner.depth,
+        repeat_count=max(winner.repeat_count, 1),
+    )
+
+
+def _find_coincident(kept: list[_Candidate], candidate: _Candidate) -> int | None:
+    """Locate an already-kept node describing the same thing as ``candidate``.
+
+    Two nodes are the same thing when either holds:
+
+    * their rects mutually contain each other's centre, which catches the
+      unlabelled Cell wrapping a labelled Button that iOS emits for every
+      navigation row; or
+    * they carry the same text and one contains the other's centre, which
+      catches a row and the switch sitting at its right-hand edge.
+
+    Mutual containment is deliberately required in the first case. Testing a
+    single direction would make a table coincide with each of its own rows and
+    delete the scroll container the agent needs.
+    """
+    text = _text_of(candidate.node)
+    for index, existing in enumerate(kept):
+        rect, other = candidate.node.rect, existing.node.rect
+        if _mutually_centred(rect, other):
+            return index
+        if text and _text_of(existing.node) == text and _either_covers(rect, other):
+            return index
+        if _wraps_bare_control(existing, candidate) or _wraps_bare_control(candidate, existing):
+            return index
+    return None
+
+
+def _wraps_bare_control(outer: _Candidate, inner: _Candidate) -> bool:
+    """A labelled row and the unlabelled control sitting inside it.
+
+    Requires the same role and near-total overlap, and never eats a scroll
+    container: a table encloses every one of its rows, and collapsing that pair
+    would delete the thing the agent scrolls.
+
+    Overlap is proportional rather than strict containment because real iOS
+    geometry does not nest cleanly. A Settings switch row reports x=36 w=330
+    while its own toggle reports x=305 w=63, so the toggle overhangs the row it
+    lives in by two points and any containment test fails on it.
+    """
+    if outer.role != inner.role or outer.role in SCROLLABLE_ROLES:
+        return False
+    if _identity_text(inner.node) or not _identity_text(outer.node):
+        return False
+    return _overlap_ratio(inner.node.rect, outer.node.rect) >= _CONTAINMENT_RATIO
+
+
+def _overlap_ratio(inner: Rect, outer: Rect) -> float:
+    """How much of ``inner`` lies within ``outer``, from 0 to 1."""
+    if inner.area <= 0:
+        return 0.0
+    width = min(inner.x + inner.width, outer.x + outer.width) - max(inner.x, outer.x)
+    height = min(inner.y + inner.height, outer.y + outer.height) - max(inner.y, outer.y)
+    if width <= 0 or height <= 0:
+        return 0.0
+    return (width * height) / inner.area
+
+
+def _mutually_centred(a: Rect, b: Rect) -> bool:
+    ax, ay = a.center
+    bx, by = b.center
+    return a.contains(bx, by) and b.contains(ax, ay)
+
+
+def _either_covers(a: Rect, b: Rect) -> bool:
+    ax, ay = a.center
+    bx, by = b.center
+    return a.contains(bx, by) or b.contains(ax, ay)
+
+
+def _beats(candidate: _Candidate, incumbent: _Candidate) -> bool:
+    """Which of two coincident nodes the agent should be shown.
+
+    Text wins first: an unlabelled Cell wrapping a labelled Button says nothing
+    the Button does not, and iOS emits that pairing for every Settings row.
+    Otherwise the more specific role wins, since the inner control is the more
+    precise thing to act on.
+    """
+    has_text = bool(_identity_text(candidate.node))
+    incumbent_has_text = bool(_identity_text(incumbent.node))
+    if has_text != incumbent_has_text:
+        return has_text
+    return _precedence(candidate.role) < _precedence(incumbent.role)
+
+
+def _precedence(role: str) -> int:
+    try:
+        return ROLE_PRECEDENCE.index(role)
+    except ValueError:
+        return len(ROLE_PRECEDENCE)
 
 
 def _collapse_repeats(candidates: list[_Candidate], settings: DigestSettings) -> list[_Candidate]:
@@ -431,6 +594,16 @@ def _value_of(c: _Candidate) -> str | None:
 
 def _text_of(node: SnapshotNode) -> str | None:
     return node.label or node.value or node.placeholder
+
+
+def _identity_text(node: SnapshotNode) -> str | None:
+    """Text that names the element, excluding its value.
+
+    A switch reports value "0" or "1", which is state rather than identity.
+    Counting it as text makes an unlabelled toggle look like a named element,
+    so it never merges with the labelled row it belongs to.
+    """
+    return node.label or node.identifier or node.placeholder
 
 
 def _intersects(a: Rect, b: Rect) -> bool:

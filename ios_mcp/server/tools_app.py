@@ -111,7 +111,12 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
     async def ios_open_url(
         url: Annotated[
             str,
-            Field(description="A URL or deep link, e.g. prefs:root=WIFI or https://example.com"),
+            Field(
+                description=(
+                    "A URL or deep link, e.g. App-prefs:root=WIFI (iOS 26 Settings) "
+                    "or https://example.com"
+                )
+            ),
         ],
     ) -> dict[str, Any]:
         """Open a URL or deep link.

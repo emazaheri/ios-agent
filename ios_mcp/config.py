@@ -100,7 +100,10 @@ class WdaSettings(BaseModel):
     request_timeout_s: float = Field(default=60.0, gt=0.0)
     startup_timeout_s: float = Field(default=90.0, gt=0.0)
     bundle_id: str = "com.facebook.WebDriverAgentRunner.xctrunner"
+    #: Prebuilt runner app, used on physical devices.
     runner_app_path: Path | None = None
+    #: Prebuilt .xctestrun bundle, used on simulators.
+    xctestrun_path: Path | None = None
     auto_heal: bool = True
 
 

@@ -44,13 +44,11 @@ class DigestDelta:
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
+        """The rendered form only, for the same reason as ``Digest.to_dict``."""
         return {
-            "added": [n.to_dict() for n in self.added],
-            "removed": [n.to_dict() for n in self.removed],
-            "changed": [
-                {"before": before.to_dict(), "after": after.to_dict()}
-                for before, after in self.changed
-            ],
+            "added": len(self.added),
+            "removed": len(self.removed),
+            "changed": len(self.changed),
             "text": self.render(),
         }
 
