@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from ios_mcp.config import Settings, get_settings
+from ios_mcp.devices import devicectl
 from ios_mcp.devices.base import DeviceInfo
 from ios_mcp.devices.shell import probe, which
 
@@ -62,7 +63,52 @@ async def list_simulators() -> list[DeviceInfo]:
 
 
 async def list_real_devices(settings: Settings | None = None) -> list[DeviceInfo]:
+    """Physical devices, from both go-ios and CoreDevice.
+
+    Neither source is sufficient alone. go-ios only sees cabled devices, so a
+    phone on Wi-Fi is invisible to it; devicectl sees both but needs Xcode,
+    which go-ios does not. Merging them means a device shows up however it
+    happens to be attached.
+    """
     cfg = settings or get_settings()
+    by_udid: dict[str, DeviceInfo] = {}
+
+    for device in await _from_devicectl():
+        by_udid[device.udid] = device
+    for device in await _from_goios(cfg):
+        # go-ios is authoritative when present: if it can see the device, the
+        # USB path is available, which is the faster one to drive.
+        by_udid[device.udid] = device
+    return list(by_udid.values())
+
+
+async def _from_devicectl() -> list[DeviceInfo]:
+    out: list[DeviceInfo] = []
+    for device in await devicectl.list_devices():
+        blockers: list[str] = []
+        if not device.paired:
+            blockers.append("device is not paired; connect it over USB once and tap Trust")
+        if not device.is_wired:
+            blockers.append(
+                "connected over the network, so WebDriverAgent is launched via "
+                "xcodebuild rather than go-ios"
+            )
+        out.append(
+            DeviceInfo(
+                udid=device.udid,
+                name=device.name,
+                os_version=device.os_version,
+                kind="device",
+                state="connected" if device.paired else "unpaired",
+                model=device.model,
+                ready=device.paired,
+                blockers=tuple(blockers),
+            )
+        )
+    return out
+
+
+async def _from_goios(cfg: Settings) -> list[DeviceInfo]:
     binary = cfg.goios.binary
     if which(binary) is None:
         return []

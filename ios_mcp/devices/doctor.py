@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ios_mcp.config import Settings, get_settings
-from ios_mcp.devices.shell import probe, run, which
+from ios_mcp.devices.base import DeviceInfo
+from ios_mcp.devices.shell import probe, which
 from ios_mcp.devices.tunnel import list_tunnels
 
 Status = Literal["ok", "warn", "fail", "skip"]
@@ -61,12 +62,13 @@ class DoctorReport:
         tunnel does not degrade gracefully: the session fails a minute later
         with a connection error that says nothing about the real cause.
         """
-        return (
-            self._status("go-ios") == "ok"
-            and self._status("devices") == "ok"
-            and self._status("tunnel") == "ok"
-            and self._has_signed_runner
-        )
+        if self._status("devices") != "ok" or not self._has_signed_runner:
+            return False
+        # Either route will do: USB through go-ios and a tunnel, or the network
+        # through xcodebuild, which needs neither.
+        over_usb = self._status("go-ios") == "ok" and self._status("tunnel") == "ok"
+        over_network = self._status("xcode") == "ok"
+        return over_usb or over_network
 
     @property
     def _has_signed_runner(self) -> bool:
@@ -267,9 +269,10 @@ async def _check_tunnel(cfg: Settings) -> Check:
         "warn",
         "no RemoteXPC tunnel is running",
         remedy=(
-            "Required for iOS 17+ physical devices, not for simulators. "
-            "Run `sudo ios tunnel start` and leave it running; "
-            "see scripts/start_tunnel.sh for a launchd setup."
+            "Needed only to drive a physical device over USB. Simulators do not "
+            "use it, and a device on Wi-Fi is driven through xcodebuild instead. "
+            "For USB, run `sudo ios tunnel start` and leave it running; see "
+            "scripts/start_tunnel.sh for a launchd setup."
         ),
     )
 
@@ -356,34 +359,48 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
 
 
 async def _check_attached_devices(cfg: Settings) -> Check:
-    binary = cfg.goios.binary
-    if which(binary) is None:
-        return Check("devices", "skip", "go-ios not installed; cannot enumerate physical devices")
-    res = await run(binary, "list", timeout=20.0)
-    if not res.ok:
+    """Physical devices, however they are attached.
+
+    Uses the merged discovery rather than go-ios alone: go-ios speaks to
+    usbmuxd and cannot see a device on Wi-Fi, so asking it directly reports
+    "nothing attached" while a perfectly drivable phone sits on the network.
+    """
+    from ios_mcp.devices.discovery import list_real_devices
+
+    devices = await list_real_devices(cfg)
+    if not devices:
         return Check(
             "devices",
             "warn",
-            "could not list physical devices",
-            remedy=res.stderr[:200] or "Check that the device is unlocked and trusted.",
-        )
-    try:
-        udids = res.json().get("deviceList", [])
-    except (ValueError, AttributeError):
-        udids = [line for line in res.stdout.splitlines() if line.strip()]
-    if not udids:
-        return Check(
-            "devices",
-            "warn",
-            "no physical iOS devices attached",
+            "no physical iOS devices found",
             remedy=(
                 "Connect an iPhone over USB, unlock it, tap Trust, and enable "
-                "Settings > Privacy & Security > Developer Mode."
+                "Settings > Privacy & Security > Developer Mode. A device already "
+                "paired can also be used over Wi-Fi once Xcode is installed."
             ),
         )
+
+    wired = [d for d in devices if not _is_network_only(d)]
+    network = [d for d in devices if _is_network_only(d)]
+    parts = []
+    if wired:
+        parts.append(f"{len(wired)} over USB")
+    if network:
+        parts.append(f"{len(network)} over the network")
+
+    ready = [d for d in devices if d.ready]
+    status: Status = "ok" if ready else "warn"
     return Check(
-        "devices", "ok", f"{len(udids)} physical device(s) attached", data={"udids": udids}
+        "devices",
+        status,
+        f"{len(devices)} device(s): {', '.join(parts)}",
+        remedy=None if ready else "; ".join(devices[0].blockers) or None,
+        data={"devices": [d.to_dict() for d in devices]},
     )
+
+
+def _is_network_only(device: DeviceInfo) -> bool:
+    return any("network" in b for b in device.blockers)
 
 
 def _discover_wda_app() -> Path | None:

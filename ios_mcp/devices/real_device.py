@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import shutil
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -19,7 +22,7 @@ import httpx
 from ios_mcp.config import Settings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
-from ios_mcp.devices.shell import run, which
+from ios_mcp.devices.shell import probe, run, which
 from ios_mcp.devices.tunnel import tunnel_for
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing, TunnelDown
 
@@ -35,10 +38,15 @@ class RealDeviceAdapter:
         self._endpoint: WdaEndpoint | None = None
         self._runner_proc: asyncio.subprocess.Process | None = None
         self._forward_proc: asyncio.subprocess.Process | None = None
+        self._log_path: Path | None = None
 
     @property
     def udid(self) -> str:
         return self.info.udid
+
+    @property
+    def _ios_binary(self) -> str:
+        return self.settings.goios.binary
 
     @property
     def _ios(self) -> str:
@@ -106,34 +114,150 @@ class RealDeviceAdapter:
         )
 
     async def ensure_runner(self) -> WdaEndpoint:
+        """Get a reachable WebDriverAgent, by whichever route this device allows.
+
+        Three cases, in order of preference:
+
+        1. ``wda.base_url`` is set, so something else is already running WDA
+           and we only have to connect.
+        2. The device is cabled, so go-ios can drive testmanagerd directly and
+           the traffic goes over a USB port forward. This works without Xcode.
+        3. The device is only on the network, where go-ios is blind because it
+           speaks to usbmuxd. xcodebuild can still reach it, and WebDriverAgent
+           listens on the device itself, so we connect straight to the phone's
+           own address with no forward at all.
+        """
+        configured = self.settings.wda.base_url
+        if configured:
+            endpoint = WdaEndpoint(base_url=configured.rstrip("/"), port=0, started_by_us=False)
+            if not await self._runner_alive(endpoint):
+                raise DeviceNotReady(
+                    f"No WebDriverAgent answering at {configured}",
+                    hint=(
+                        "wda.base_url points at a runner this server does not manage. "
+                        "Start it, or clear the setting to have the server launch one."
+                    ),
+                )
+            self._endpoint = endpoint
+            return endpoint
+
         if self._endpoint and await self._runner_alive(self._endpoint):
             return self._endpoint
 
-        # A dead endpoint leaves a stale runner process holding the simulator
-        # and a reserved port. Relaunching without clearing both means the new
+        # A dead endpoint leaves a stale runner process holding the device and
+        # a reserved port. Relaunching without clearing both means the new
         # runner fights the corpse and neither comes up.
         if self._endpoint is not None or self._runner_proc is not None:
             await self.teardown()
 
-        await self.ensure_booted()
-        port = free_port(*self.settings.wda.port_range)
-        base_url = f"http://{self.settings.wda.host}:{port}"
+        if await self._usb_attached():
+            endpoint = await self._ensure_runner_over_usb()
+        else:
+            endpoint = await self._ensure_runner_over_network()
 
-        await self._start_runner()
-        await self._start_forward(port)
-
-        endpoint = WdaEndpoint(base_url=base_url, port=port, started_by_us=True)
         try:
             await self._wait_for_runner(endpoint)
         except DeviceNotReady:
-            release_port(port)
+            if endpoint.port:
+                release_port(endpoint.port)
             await self.teardown()
             raise
         self._endpoint = endpoint
         return endpoint
 
+    async def _usb_attached(self) -> bool:
+        """Whether go-ios can see this device, which means USB is available."""
+        if which(self._ios_binary) is None:
+            return False
+        result = await probe(self._ios_binary, "list", timeout=20.0)
+        if result is None or not result.ok:
+            return False
+        try:
+            return self.udid in result.json().get("deviceList", [])
+        except (ValueError, AttributeError):
+            return self.udid in result.stdout
+
+    async def _ensure_runner_over_usb(self) -> WdaEndpoint:
+        await self.ensure_booted()
+        port = free_port(*self.settings.wda.port_range)
+        await self._start_runner()
+        await self._start_forward(port)
+        return WdaEndpoint(
+            base_url=f"http://{self.settings.wda.host}:{port}", port=port, started_by_us=True
+        )
+
+    async def _ensure_runner_over_network(self) -> WdaEndpoint:
+        """Launch through xcodebuild and talk to the device's own address.
+
+        No tunnel and no port forward: those exist to carry traffic over USB,
+        and there is no USB here. WebDriverAgent binds a port on the phone, so
+        any host on the same network can reach it once it is up.
+        """
+        if shutil.which("xcodebuild") is None:
+            raise ToolchainMissing(
+                f"{self.info.name} is only reachable over the network, which needs Xcode",
+                hint=(
+                    "go-ios cannot see network devices because it speaks to usbmuxd. "
+                    "Either connect the device over USB, or install Xcode so the "
+                    "runner can be launched with xcodebuild."
+                ),
+            )
+
+        xctestrun = self.settings.wda.xctestrun_path or _discover_device_xctestrun()
+        if xctestrun is None:
+            raise ToolchainMissing(
+                "No prebuilt WebDriverAgent test bundle for a physical device",
+                hint="Build one with `scripts/prepare_wda.sh device`.",
+            )
+
+        logger.info("Starting WebDriverAgent on %s over the network", self.info.name)
+        self._log_path = Path(tempfile.mkstemp(prefix="wda-", suffix=".log")[1])
+        with self._log_path.open("w") as log:
+            self._runner_proc = await asyncio.create_subprocess_exec(
+                "xcodebuild",
+                "test-without-building",
+                "-xctestrun",
+                str(xctestrun),
+                "-destination",
+                f"id={self.udid}",
+                stdout=log,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+
+        base_url = await self._await_announced_address()
+        return WdaEndpoint(
+            base_url=base_url, port=0, started_by_us=True, meta={"transport": "network"}
+        )
+
+    async def _await_announced_address(self) -> str:
+        """Read the address WebDriverAgent prints once it is listening.
+
+        The runner logs `ServerURLHere->http://10.0.0.5:8100<-ServerURLHere`,
+        which is more reliable than guessing the device's IP: it is the address
+        WDA actually bound, on whichever interface it chose.
+        """
+        assert self._log_path is not None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.settings.wda.startup_timeout_s
+        while loop.time() < deadline:
+            if self._runner_proc is not None and self._runner_proc.returncode not in (None, 0):
+                raise DeviceNotReady(
+                    "xcodebuild exited before WebDriverAgent started",
+                    hint=_xcodebuild_hint(self._log_path),
+                )
+            match = _SERVER_URL.search(self._log_path.read_text(errors="replace"))
+            if match:
+                return match.group(1)
+            await asyncio.sleep(1.0)
+
+        raise DeviceNotReady(
+            f"WebDriverAgent never announced an address within "
+            f"{self.settings.wda.startup_timeout_s:.0f}s",
+            hint=_xcodebuild_hint(self._log_path),
+        )
+
     async def _start_runner(self) -> None:
-        """Launch the preinstalled WDA runner through testmanagerd.
+        """Launch the preinstalled runner through testmanagerd, over USB.
 
         `ios runwda` is the command in go-ios 1.3.x; the older `ios ui run wda`
         spelling no longer exists. The runner bundle id is configurable because
@@ -141,7 +265,7 @@ class RealDeviceAdapter:
         anyone without a paid membership will have built their own.
         """
         bundle_id = self.settings.wda.bundle_id
-        logger.info("Starting WebDriverAgent (%s) on %s", bundle_id, self.info.name)
+        logger.info("Starting WebDriverAgent (%s) on %s over USB", bundle_id, self.info.name)
         self._runner_proc = await asyncio.create_subprocess_exec(
             self._ios,
             "runwda",
@@ -207,6 +331,12 @@ class RealDeviceAdapter:
             return False
 
     async def teardown(self) -> None:
+        # A runner we did not start is not ours to stop: wda.base_url points at
+        # something the caller manages, and killing it would be a surprise.
+        if self._endpoint is not None and not self._endpoint.started_by_us:
+            self._endpoint = None
+            return
+
         for proc in (self._forward_proc, self._runner_proc):
             if proc and proc.returncode is None:
                 proc.terminate()
@@ -216,7 +346,13 @@ class RealDeviceAdapter:
                     proc.kill()
         self._forward_proc = None
         self._runner_proc = None
-        if self._endpoint:
+
+        if self._log_path is not None:
+            self._log_path.unlink(missing_ok=True)
+            self._log_path = None
+
+        # Port 0 means the network path, which reserved nothing to release.
+        if self._endpoint is not None and self._endpoint.port:
             release_port(self._endpoint.port)
         self._endpoint = None
 
@@ -297,3 +433,36 @@ class RealDeviceAdapter:
         finally:
             if proc.returncode is None:
                 proc.terminate()
+
+
+#: WebDriverAgent prints the address it bound, wrapped in these markers.
+_SERVER_URL = re.compile(r"ServerURLHere->(http://[^<\s]+)<-ServerURLHere")
+
+
+def _discover_device_xctestrun() -> Path | None:
+    """A prebuilt test bundle for real hardware, not the simulator."""
+    candidates = sorted(
+        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphoneos*.xctestrun"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
+def _xcodebuild_hint(log_path: Path | None) -> str:
+    """Surface the real xcodebuild failure rather than a generic timeout."""
+    generic = (
+        "Check that the runner is installed and trusted on the device, and that "
+        "its provisioning profile has not expired: `uv run ios-mcp doctor`."
+    )
+    if log_path is None or not log_path.exists():
+        return generic
+    try:
+        errors = [
+            line.strip()
+            for line in log_path.read_text(errors="replace").splitlines()
+            if "error:" in line.lower()
+        ]
+    except OSError:
+        return generic
+    return errors[-1][:300] if errors else generic

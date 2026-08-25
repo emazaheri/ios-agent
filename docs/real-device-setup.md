@@ -95,13 +95,54 @@ export IOS_MCP_WDA__BUNDLE_ID=com.yourname.WebDriverAgentRunner.xctrunner
 ## 5. Run
 
 ```bash
-uv run ios-mcp doctor      # should now report "Ready to automate: real device"
+uv run ios-mcp doctor      # should report "Ready to automate: real device"
 uv run ios-mcp devices
 ```
 
 The device is never the default target. `ios_open_session` prefers a simulator
 even when a phone is connected, so acting on real hardware is always something
 the caller asked for by name or UDID.
+
+## Over Wi-Fi, without a cable
+
+Once a device has been paired over USB, it can be driven with no cable at all.
+The server picks the route itself:
+
+| | USB | Wi-Fi |
+|---|---|---|
+| Discovery | go-ios | CoreDevice (`devicectl`) |
+| Runner launch | `ios runwda` | `xcodebuild test-without-building` |
+| Reaching WebDriverAgent | port forward | straight to the phone's own address |
+| Needs a RemoteXPC tunnel | yes | no |
+| Needs Xcode | no | yes |
+
+Nothing to configure: if go-ios can see the device, USB is used; otherwise the
+network route is taken automatically. `ios-mcp devices` says which, and
+`ios-mcp doctor` reports e.g. `1 device(s): 1 over the network`.
+
+Two things make this work. go-ios talks to usbmuxd and cannot see an unplugged
+device at all, so discovery has to go through CoreDevice, which also browses
+Bonjour. And WebDriverAgent listens on the device itself, so once it is running
+any host on the same network can reach it — the port forward exists only to
+carry traffic over USB, and there is no USB here.
+
+The runner announces the address it bound (`ServerURLHere->http://10.0.0.195:8100`),
+which the adapter reads from the xcodebuild log. That is more reliable than
+guessing the device's IP, since it is the interface WDA actually chose.
+
+Wi-Fi is not slower in practice: a snapshot measured 2.6s over the network
+against 3.7s over USB, because the cost is the accessibility traversal on the
+device, not the transport.
+
+### Pointing at a runner you manage yourself
+
+```bash
+export IOS_MCP_WDA__BASE_URL=http://10.0.0.195:8100
+```
+
+The server then connects to that WebDriverAgent instead of launching one, and
+never tears it down. Useful for a device farm, a phone on another network, or a
+runner you started by hand for debugging.
 
 ## What does not work on a physical device
 

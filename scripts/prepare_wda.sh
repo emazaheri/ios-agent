@@ -51,26 +51,73 @@ if [ "$TARGET" = "simulator" ]; then
     -derivedDataPath "$DERIVED" \
     CODE_SIGNING_ALLOWED=NO
 else
+  # The team must come from a provisioning profile, not from the signing
+  # certificate's name. On a free personal team those are different strings
+  # (cert "Apple Development: you (8GCJFTF6MK)" against team QPYD2D7U3F), and
+  # passing the certificate's one makes xcodebuild report "No Account for Team".
+  #
+  # `|| true` throughout: grep exits non-zero when it finds nothing, and under
+  # `set -e -o pipefail` that would kill the script before the error message
+  # explaining what was missing could print.
   if [ -z "$TEAM_ID" ]; then
-    TEAM_ID="$(security find-identity -v -p codesigning 2>/dev/null \
-      | grep -oE '\(([A-Z0-9]{10})\)' | head -1 | tr -d '()')"
+    TEAM_ID="$(python3 -c '
+import glob, plistlib, sys, pathlib
+newest, team = 0, None
+for path in glob.glob(str(pathlib.Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles/*.mobileprovision")):
+    try:
+        blob = pathlib.Path(path).read_bytes()
+        start, end = blob.find(b"<?xml"), blob.find(b"</plist>")
+        if start == -1 or end == -1:
+            continue
+        parsed = plistlib.loads(blob[start:end + 8])
+        stamp = pathlib.Path(path).stat().st_mtime
+        ids = parsed.get("TeamIdentifier") or []
+        if ids and stamp > newest:
+            newest, team = stamp, ids[0]
+    except Exception:
+        continue
+print(team or "")
+' 2>/dev/null)" || true
   fi
-  if [ -z "$TEAM_ID" ]; then
-    echo "error: no signing identity found." >&2
-    echo "  Sign in via Xcode > Settings > Accounts, then open the WebDriverAgent" >&2
-    echo "  project once and pick your team under Signing & Capabilities. Apple only" >&2
-    echo "  issues a certificate when a project first asks for one." >&2
-    exit 1
+  # Without a profile to read, leave DEVELOPMENT_TEAM alone: whatever the user
+  # selected in Xcode's Signing & Capabilities is more trustworthy than a guess.
+  TEAM_ARGS=()
+  if [ -n "$TEAM_ID" ]; then
+    TEAM_ARGS+=("DEVELOPMENT_TEAM=$TEAM_ID")
+  else
+    echo "note: no provisioning profile found to read a team from;" >&2
+    echo "  using whatever the Xcode project already has configured." >&2
+  fi
+  # go-ios first (it is cheap), then CoreDevice, which is the only one that
+  # sees a device attached over Wi-Fi rather than USB.
+  if [ -z "$UDID" ] && command -v ios >/dev/null 2>&1; then
+    UDID="$(ios list 2>/dev/null | grep -oE '"[0-9A-Fa-f-]{25,}"' | head -1 | tr -d '"')" || true
   fi
   if [ -z "$UDID" ]; then
-    UDID="$(ios list 2>/dev/null | grep -oE '"[0-9A-Fa-f-]{25,}"' | head -1 | tr -d '"')"
+    DEVJSON="$(mktemp -t devicectl)" || true
+    xcrun devicectl list devices --json-output "$DEVJSON" >/dev/null 2>&1 || true
+    UDID="$(python3 -c '
+import json, sys
+try:
+    devices = json.load(open(sys.argv[1]))["result"]["devices"]
+except Exception:
+    sys.exit(0)
+for d in devices:
+    udid = d.get("hardwareProperties", {}).get("udid")
+    if udid:
+        print(udid)
+        break
+' "$DEVJSON" 2>/dev/null)" || true
+    rm -f "$DEVJSON"
   fi
   if [ -z "$UDID" ]; then
-    echo "error: no device found. Connect an iPhone, or pass UDID=..." >&2
+    echo "error: no device found. Connect an iPhone over USB, or pass UDID=..." >&2
+    echo "  A device already paired can be used over Wi-Fi, but it must be" >&2
+    echo "  awake and on the same network." >&2
     exit 1
   fi
 
-  echo "==> Building WebDriverAgentRunner for device $UDID (team $TEAM_ID)"
+  echo "==> Building WebDriverAgentRunner for device $UDID (team ${TEAM_ID:-from project})"
   BUNDLE_ARGS=()
   if [ -n "$WDA_BUNDLE_ID" ]; then
     echo "    bundle id: $WDA_BUNDLE_ID"
@@ -86,17 +133,32 @@ else
     -destination "id=$UDID" \
     -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
     CODE_SIGN_STYLE=Automatic \
+    "${TEAM_ARGS[@]}" \
     "${BUNDLE_ARGS[@]}"
 fi
 
-RUNNER="$(find "$DERIVED/Build/Products" -name 'WebDriverAgentRunner-Runner.app' -maxdepth 3 | head -1)"
-[ -n "$RUNNER" ] || { echo "error: build produced no runner app" >&2; exit 1; }
+# Both platforms build into the same DerivedData, so the products directory
+# holds a Debug-iphoneos and a Debug-iphonesimulator app at once. Picking the
+# first match copied the unsigned simulator bundle for a device build, which
+# then failed to install with a bare verification error.
+if [ "$TARGET" = "device" ]; then
+  PRODUCTS="$DERIVED/Build/Products/Debug-iphoneos"
+else
+  PRODUCTS="$DERIVED/Build/Products/Debug-iphonesimulator"
+fi
+RUNNER="$PRODUCTS/WebDriverAgentRunner-Runner.app"
+[ -d "$RUNNER" ] || {
+  echo "error: no runner app at $RUNNER" >&2
+  echo "  The build reported success but produced nothing for this platform." >&2
+  exit 1
+}
 
-rm -rf "$VENDOR/WebDriverAgentRunner-Runner.app"
-cp -R "$RUNNER" "$VENDOR/"
 DEST="$VENDOR/WebDriverAgentRunner-Runner.app"
+rm -rf "$DEST"
+# ditto, not cp -R: it preserves the extended attributes and resource forks a
+# signed bundle carries, so the copy verifies the same as the original.
+ditto "$RUNNER" "$DEST"
 
 # Do NOT strip the embedded XCTest frameworks here. Removing anything from a
 # signed bundle invalidates its signature, and the device then refuses to
@@ -111,15 +173,25 @@ if [ "$TARGET" = "device" ]; then
     echo "  and will not launch on a phone. Check DEVELOPMENT_TEAM." >&2
     exit 1
   fi
-  if ! codesign -dvv "$DEST" 2>&1 | grep -q "Authority=Apple Development"; then
-    echo "error: the bundle is not signed by a development certificate." >&2
-    echo "  build-for-testing leaves Apple's stock XCTRunner in place unless" >&2
-    echo "  codesign can reach your key. If you saw repeated keychain prompts," >&2
-    echo "  authorize it once with:" >&2
-    echo "    security set-key-partition-list -S apple-tool:,apple:,codesign: -s \\" >&2
-    echo "      ~/Library/Keychains/login.keychain-db" >&2
-    exit 1
-  fi
+  # Capture first, then match. Piping codesign into `grep -q` under
+  # `set -o pipefail` is unreliable: grep exits on its first match and the
+  # resulting SIGPIPE can surface as a pipeline failure, so a correctly signed
+  # bundle intermittently reports as unsigned.
+  SIGNING="$(codesign -dvv "$DEST" 2>&1)" || true
+  case "$SIGNING" in
+    *"Authority=Apple Development"*) ;;
+    *)
+      echo "error: the bundle is not signed by a development certificate." >&2
+      echo "  build-for-testing leaves Apple's stock XCTRunner in place unless" >&2
+      echo "  codesign can reach your key. If you saw repeated keychain prompts," >&2
+      echo "  authorize it once with:" >&2
+      echo "    security set-key-partition-list -S apple-tool:,apple:,codesign: -s \\" >&2
+      echo "      ~/Library/Keychains/login.keychain-db" >&2
+      echo "  codesign reported:" >&2
+      echo "$SIGNING" | sed 's/^/    /' >&2
+      exit 1
+      ;;
+  esac
 
   BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$DEST/Info.plist" 2>/dev/null)"
   echo

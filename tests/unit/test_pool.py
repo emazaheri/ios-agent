@@ -136,3 +136,111 @@ def test_exhausted_port_range_fails_with_a_remedy() -> None:
         assert "port_range" in str(exc_info.value)
     finally:
         release_port(taken)
+
+
+# -- Wi-Fi devices ----------------------------------------------------------
+
+
+async def test_a_network_device_is_discovered_when_goios_is_blind(
+    settings: Settings, monkeypatch
+) -> None:
+    """go-ios speaks to usbmuxd, so an unplugged phone is invisible to it.
+
+    Without CoreDevice in the mix, a perfectly drivable device on Wi-Fi simply
+    does not appear.
+    """
+    from ios_mcp.devices import discovery
+    from ios_mcp.devices.devicectl import DevicectlDevice
+
+    async def no_goios(_: Settings) -> list[DeviceInfo]:
+        return []
+
+    async def one_network_device() -> list[DevicectlDevice]:
+        return [
+            DevicectlDevice(
+                udid="UDID-WIFI",
+                name="Ehsan's iPhone",
+                os_version="26.6",
+                model="iPhone18,2",
+                transport="network",
+                paired=True,
+                hostnames=("phone.local",),
+            )
+        ]
+
+    monkeypatch.setattr(discovery, "_from_goios", no_goios)
+    monkeypatch.setattr(discovery.devicectl, "list_devices", one_network_device)
+
+    devices = await discovery.list_real_devices(settings)
+
+    assert len(devices) == 1
+    assert devices[0].udid == "UDID-WIFI"
+    assert devices[0].ready, "a paired network device is drivable"
+    assert any("network" in b for b in devices[0].blockers), "the route should be explained"
+
+
+async def test_goios_wins_when_both_sources_see_a_device(settings: Settings, monkeypatch) -> None:
+    """If go-ios can see it, USB is available, which is the faster route."""
+    from ios_mcp.devices import discovery
+    from ios_mcp.devices.devicectl import DevicectlDevice
+
+    async def goios(_: Settings) -> list[DeviceInfo]:
+        return [
+            DeviceInfo(
+                udid="SHARED",
+                name="Ehsan's iPhone",
+                os_version="26.6",
+                kind="device",
+                state="connected",
+                ready=True,
+            )
+        ]
+
+    async def core() -> list[DevicectlDevice]:
+        return [
+            DevicectlDevice(
+                udid="SHARED",
+                name="Ehsan's iPhone",
+                os_version="26.6",
+                model=None,
+                transport="network",
+                paired=True,
+                hostnames=(),
+            )
+        ]
+
+    monkeypatch.setattr(discovery, "_from_goios", goios)
+    monkeypatch.setattr(discovery.devicectl, "list_devices", core)
+
+    devices = await discovery.list_real_devices(settings)
+
+    assert len(devices) == 1, "the same phone must not appear twice"
+    assert not devices[0].blockers, "the USB entry has no network caveat"
+
+
+async def test_an_unpaired_device_is_not_ready(settings: Settings, monkeypatch) -> None:
+    from ios_mcp.devices import discovery
+    from ios_mcp.devices.devicectl import DevicectlDevice
+
+    async def no_goios(_: Settings) -> list[DeviceInfo]:
+        return []
+
+    async def unpaired() -> list[DevicectlDevice]:
+        return [
+            DevicectlDevice(
+                udid="U",
+                name="Someone's iPhone",
+                os_version="26.6",
+                model=None,
+                transport="network",
+                paired=False,
+                hostnames=(),
+            )
+        ]
+
+    monkeypatch.setattr(discovery, "_from_goios", no_goios)
+    monkeypatch.setattr(discovery.devicectl, "list_devices", unpaired)
+
+    devices = await discovery.list_real_devices(settings)
+    assert not devices[0].ready
+    assert any("Trust" in b for b in devices[0].blockers)
