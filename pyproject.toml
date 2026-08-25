@@ -16,6 +16,16 @@ dependencies = [
 [project.optional-dependencies]
 vision = ["pillow>=11.0"]
 
+# One repository, two distributions. `ios-agent` depends on `ios-mcp`; nothing
+# points the other way, which is what keeps this package usable by any agent
+# rather than only by the one shipped beside it.
+[tool.uv.workspace]
+members = ["agent"]
+
+[tool.uv.sources]
+ios-agent = { workspace = true }
+ios-mcp = { workspace = true }
+
 [project.scripts]
 ios-mcp = "ios_mcp.__main__:main"
 
@@ -28,6 +38,9 @@ dev = [
     "mypy>=1.13",
     "respx>=0.22",
     "pillow>=12.3.0",
+    # Installed for the test run so the eval suite can drive both, not because
+    # ios-mcp needs it.
+    "ios-agent",
 ]
 
 [build-system]

@@ -1,21 +1,31 @@
 # Architecture
 
-Six layers. Layers 1 to 4 are a plain async library with no MCP imports, so a
-future agent framework can import `IosSession` directly and skip the protocol
+Six layers. Layers 1 to 4 are a plain async library with no MCP imports, so an
+agent framework can import `IosSession` directly and skip the protocol
 round-trip on latency-critical steps. The MCP server is one consumer of that
-library, not the thing itself.
+library, not the thing itself, and `ios_agent` is a second one: a peer of the
+server rather than a layer above it, since the policy gate lives inside
+`IosSession` and both pass through it identically. `tests/unit/test_layering.py`
+enforces the no-MCP-imports rule and the agent's public surface statically.
 
 ```
-   MCP clients (Claude Code, Claude Desktop, a future agent service or iOS app)
-                                  |
- 6  policy      approval gate, secret injection, redaction, audit, kill switch
- 5  mcp         FastMCP: tools, resources, prompts, transports          <- only layer importing MCP
- 4  actions     act, stabilize, re-observe; idempotency keys
+   MCP clients (Claude Code, Claude Desktop, an iOS app)       ios_agent
+                        |                                          |
+                        v                                          |
+ 5  mcp         FastMCP: tools, resources, prompts, transports     |  <- only package importing MCP
+                        |                                          |
+                        +---------------------+--------------------+
+                                              v
+ 4  actions     act, stabilize, re-observe; idempotency keys   (IosSession)
  3  perception  accessibility tree -> UI Digest, stable refs, resolution  <- most of the value
  2  wda         typed WebDriverAgent client, session settings, auto-heal
  1  devices     SimulatorAdapter | RealDeviceAdapter, device pool
                                   |
                      iOS Simulator      iPhone (USB / Wi-Fi)
+
+ 6  policy      approval gate, secret injection, redaction, audit, kill switch
+                constructed inside IosSession, so every action passes through
+                it whichever consumer started the call
 ```
 
 ## 1. Device fabric (`ios_mcp/devices/`)
