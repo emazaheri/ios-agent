@@ -17,6 +17,7 @@ class ErrorCode(StrEnum):
     TOOLCHAIN_MISSING = "toolchain_missing"
     DEVICE_UNAVAILABLE = "device_unavailable"
     DEVICE_NOT_READY = "device_not_ready"
+    DEVICE_LOCKED = "device_locked"
     TUNNEL_DOWN = "tunnel_down"
     SIGNING_INVALID = "signing_invalid"
 
@@ -101,6 +102,10 @@ class DeviceUnavailable(IosAutomationError):
 
 class DeviceNotReady(IosAutomationError):
     code = ErrorCode.DEVICE_NOT_READY
+
+
+class DeviceLocked(IosAutomationError):
+    code = ErrorCode.DEVICE_LOCKED
 
 
 class TunnelDown(IosAutomationError):

@@ -234,7 +234,13 @@ class WdaSession:
         )
 
     async def home(self) -> None:
-        await self._call(lambda sid: self.client.post(f"/session/{sid}/wda/homescreen"))
+        """Press the home button.
+
+        Uses /wda/pressButton rather than /wda/homescreen: the latter returns
+        404 on WebDriverAgent 16.8, verified against a physical iPhone on
+        iOS 26.6.
+        """
+        await self.press_button("home")
 
     async def handle_alert(self, action: str, button: str | None = None) -> None:
         if action not in ("accept", "dismiss"):

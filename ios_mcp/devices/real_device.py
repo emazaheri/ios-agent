@@ -20,6 +20,7 @@ from ios_mcp.config import Settings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
 from ios_mcp.devices.shell import run, which
+from ios_mcp.devices.tunnel import tunnel_for
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing, TunnelDown
 
 logger = logging.getLogger(__name__)
@@ -74,15 +75,10 @@ class RealDeviceAdapter:
             )
 
     async def _require_tunnel(self) -> None:
+        """Ensure a RemoteXPC tunnel exists for this device."""
         cfg = self.settings.goios
-        url = f"http://{cfg.tunnel_api_host}:{cfg.tunnel_api_port}/tunnel/list"
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                response = await client.get(url)
-            if response.status_code == 200:
-                return
-        except httpx.HTTPError:
-            pass
+        if await tunnel_for(cfg, self.udid) is not None:
+            return
 
         if cfg.auto_start_tunnel:
             logger.info("Starting go-ios tunnel daemon")
@@ -95,17 +91,13 @@ class RealDeviceAdapter:
                 stderr=asyncio.subprocess.DEVNULL,
             )
             for _ in range(20):
-                await asyncio.sleep(0.5)
-                try:
-                    async with httpx.AsyncClient(timeout=2.0) as client:
-                        if (await client.get(url)).status_code == 200:
-                            return
-                except httpx.HTTPError:
-                    continue
+                await asyncio.sleep(1.0)
+                if await tunnel_for(cfg, self.udid) is not None:
+                    return
 
         raise TunnelDown(
-            f"iOS {self.info.os_version} needs a RemoteXPC tunnel, but no go-ios "
-            f"tunnel daemon is listening on {cfg.tunnel_api_host}:{cfg.tunnel_api_port}",
+            f"iOS {self.info.os_version} needs a RemoteXPC tunnel, "
+            f"but none is running for {self.info.name}",
             hint=(
                 "Run `sudo ios tunnel start` once and leave it running "
                 "(see scripts/start_tunnel.sh), or set goios.auto_start_tunnel = true "
@@ -141,19 +133,27 @@ class RealDeviceAdapter:
         return endpoint
 
     async def _start_runner(self) -> None:
-        """Launch the preinstalled WDA runner. Requires WDA 5.10+ on iOS 17+."""
-        logger.info("Starting WebDriverAgent on %s", self.info.name)
+        """Launch the preinstalled WDA runner through testmanagerd.
+
+        `ios runwda` is the command in go-ios 1.3.x; the older `ios ui run wda`
+        spelling no longer exists. The runner bundle id is configurable because
+        a free Apple ID cannot sign com.facebook.WebDriverAgentRunner, so
+        anyone without a paid membership will have built their own.
+        """
+        bundle_id = self.settings.wda.bundle_id
+        logger.info("Starting WebDriverAgent (%s) on %s", bundle_id, self.info.name)
         self._runner_proc = await asyncio.create_subprocess_exec(
             self._ios,
-            "ui",
-            "run",
-            "wda",
-            "--udid",
-            self.udid,
+            "runwda",
+            f"--bundleid={bundle_id}",
+            f"--testrunnerbundleid={bundle_id}",
+            "--xctestconfig=WebDriverAgentRunner.xctest",
+            f"--udid={self.udid}",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.sleep(1.0)
+        # testmanagerd needs a few seconds to hand control to the runner.
+        await asyncio.sleep(3.0)
         if self._runner_proc.returncode not in (None, 0):
             stderr = b""
             if self._runner_proc.stderr is not None:
@@ -161,9 +161,11 @@ class RealDeviceAdapter:
             raise DeviceNotReady(
                 "go-ios could not start WebDriverAgent",
                 hint=(
-                    "The runner is probably missing or unsigned. Run "
-                    "`scripts/prepare_wda.sh device` with your TEAM_ID, then install it. "
-                    "On iOS 17+ the embedded XC*.framework copies must be stripped."
+                    f"Check that {bundle_id} is installed and trusted on the device. "
+                    "Build it with scripts/prepare_wda.sh device, install it with "
+                    "`ios install --path <app>`, then trust the developer under "
+                    "Settings > General > VPN & Device Management. iOS refuses to "
+                    "launch a free-account app until that is done."
                 ),
                 details={"stderr": stderr.decode(errors="replace")[:300]},
             )

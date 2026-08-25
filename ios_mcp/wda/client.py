@@ -14,6 +14,7 @@ import httpx
 
 from ios_mcp.config import WdaSettings
 from ios_mcp.errors import (
+    DeviceLocked,
     ElementNotFound,
     ElementNotInteractable,
     ElementStale,
@@ -139,6 +140,19 @@ class WdaClient:
     def _to_error(self, value: dict[str, Any], method: str, path: str) -> IosAutomationError:
         kind = str(value.get("error", "")).strip().lower()
         message = _message_of(value) or f"{method} {path} failed"
+
+        # A locked phone is the commonest real-device failure, and WDA reports
+        # it as a wall of Apple error domains rather than anything typed.
+        if _is_locked(message):
+            return DeviceLocked(
+                "The device is locked",
+                hint=(
+                    "Unlock the phone and keep it awake. For longer runs, set "
+                    "Settings > Display & Brightness > Auto-Lock to Never."
+                ),
+                recoverable=True,
+            )
+
         cls = _ERROR_MAP.get(kind, WdaError)
         recoverable = issubclass(cls, (SessionLost, ElementStale, RunnerCrashed))
         return cls(
@@ -178,6 +192,11 @@ class WdaClient:
         if not isinstance(encoded, str):
             raise WdaError("Screenshot response was not a base64 string")
         return base64.b64decode(encoded)
+
+
+def _is_locked(message: str) -> bool:
+    lowered = message.lower()
+    return "could not be, unlocked" in lowered or ("passcode" in lowered and "locked" in lowered)
 
 
 def _message_of(value: Any) -> str | None:

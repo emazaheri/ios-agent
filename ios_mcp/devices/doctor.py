@@ -9,7 +9,6 @@ as a connection refused.
 
 from __future__ import annotations
 
-import json
 import platform
 import plistlib
 import sys
@@ -18,10 +17,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import httpx
-
 from ios_mcp.config import Settings, get_settings
 from ios_mcp.devices.shell import probe, run, which
+from ios_mcp.devices.tunnel import list_tunnels
 
 Status = Literal["ok", "warn", "fail", "skip"]
 
@@ -250,45 +248,19 @@ async def _check_goios(cfg: Settings) -> Check:
 
 
 async def _check_tunnel(cfg: Settings) -> Check:
-    """iOS 17+ needs a RemoteXPC tunnel before anything can reach the device.
-
-    Asks go-ios directly rather than probing its HTTP control API. That API
-    only exists in the opt-in daemon mode (ENABLE_GO_IOS_AGENT), so probing it
-    reports "no tunnel" on a perfectly working setup, which is worse than not
-    checking at all.
-    """
-    binary = cfg.goios.binary
-    if which(binary) is None:
+    """iOS 17+ needs a RemoteXPC tunnel before anything can reach the device."""
+    if which(cfg.goios.binary) is None:
         return Check("tunnel", "skip", "go-ios not installed")
 
-    result = await probe(binary, "tunnel", "ls", timeout=20.0)
-    if result is not None and result.ok:
-        tunnels = _parse_tunnels(result.stdout)
-        if tunnels:
-            udids = [t.get("udid", "?") for t in tunnels]
-            return Check(
-                "tunnel",
-                "ok",
-                f"{len(tunnels)} tunnel(s) up: {', '.join(u[:12] for u in udids)}",
-                data={"tunnels": tunnels},
-            )
-
-    # Daemon mode exposes an HTTP API instead; accept that too.
-    url = f"http://{cfg.goios.tunnel_api_host}:{cfg.goios.tunnel_api_port}/tunnel/list"
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            response = await client.get(url)
-        if response.status_code == 200:
-            payload = response.json()
-            tunnels = payload if isinstance(payload, list) else payload.get("tunnels", [])
-            return Check(
-                "tunnel",
-                "ok",
-                f"go-ios daemon reachable with {len(tunnels)} tunnel(s)",
-                data={"tunnels": tunnels},
-            )
-    except (httpx.HTTPError, ValueError):
-        pass
+    tunnels = await list_tunnels(cfg.goios)
+    if tunnels:
+        udids = [str(t.get("udid", "?")) for t in tunnels]
+        return Check(
+            "tunnel",
+            "ok",
+            f"{len(tunnels)} tunnel(s) up: {', '.join(u[:12] for u in udids)}",
+            data={"tunnels": tunnels},
+        )
 
     return Check(
         "tunnel",
@@ -300,25 +272,6 @@ async def _check_tunnel(cfg: Settings) -> Check:
             "see scripts/start_tunnel.sh for a launchd setup."
         ),
     )
-
-
-def _parse_tunnels(stdout: str) -> list[dict[str, Any]]:
-    """Pull the tunnel list out of go-ios output.
-
-    go-ios interleaves structured log lines with the result on stdout, so the
-    payload is the last line that parses as a JSON array.
-    """
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if not line.startswith("["):
-            continue
-        try:
-            parsed = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(parsed, list):
-            return [t for t in parsed if isinstance(t, dict)]
-    return []
 
 
 async def _check_wda_bundle(cfg: Settings) -> Check:
