@@ -89,6 +89,22 @@ async def test_the_oracle_spends_no_more_than_its_floor(task: Task) -> None:
     )
 
 
+@pytest.mark.parametrize("task", TASKS, ids=lambda t: t.name)
+async def test_the_oracle_spends_no_more_actions_than_its_floor(task: Task) -> None:
+    """Actions are the governing metric from S2 on, so the floor is asserted.
+
+    Observations were already at the floor before the first pillar existed, so
+    the number that decides whether a pillar earned its place is this one. An
+    unasserted floor drifts into an aspiration, and then every later comparison
+    is against a guess.
+    """
+    result = await measure(task, oracle.drive, ORACLE_RUNS)
+    actions = [run.actions for run in result.runs]
+    assert actions == [task.action_floor] * ORACLE_RUNS, (
+        f"{task.name}: oracle took {actions}, action_floor says {task.action_floor}"
+    )
+
+
 def test_write_the_report() -> None:
     """Persist the floor so a later slice can be diffed against it."""
     if not _results:
