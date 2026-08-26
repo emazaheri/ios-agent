@@ -78,8 +78,12 @@ def build_graph(
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:
             return "act"
-        # No tool call and no `done`. The model has stopped without saying so,
-        # which counts as finishing without a claim rather than as success.
+        # No tool call and no `done`. Keep whatever the model said instead:
+        # stopping without a tool call is often a refusal, and discarding the
+        # text turns "I will not erase this device" into "the model stopped
+        # early", which is the same outcome reported as a malfunction.
+        if isinstance(last, AIMessage) and last.text:
+            run.summary = run.summary or last.text
         return END
 
     builder = StateGraph(AgentState)

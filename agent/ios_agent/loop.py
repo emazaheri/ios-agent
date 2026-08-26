@@ -23,7 +23,7 @@ from typing import Any
 from langchain.messages import AIMessage, AnyMessage
 
 from ios_agent.backend import Backend, SessionBackend
-from ios_agent.config import AgentSettings
+from ios_agent.config import AgentSettings, export_provider_credentials
 from ios_agent.graph import build_graph, opening_messages
 from ios_agent.state import Outcome
 from ios_agent.tools import Run, build_tools
@@ -49,6 +49,10 @@ def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
     from langchain.chat_models import init_chat_model
 
     cfg = settings or AgentSettings()
+    # The vendor SDK reads its key from the process environment, and
+    # pydantic-settings only ever put `.env` into a settings object. Without
+    # this, a key written beside the model it configures is invisible.
+    export_provider_credentials()
 
     def factory(tools: list[Any]) -> Callable[[list[AnyMessage]], Awaitable[AIMessage]]:
         try:

@@ -32,7 +32,7 @@ measured on; each integration package is a separate extra.
 from __future__ import annotations
 
 from ios_agent.backend import Backend, BackendStats, SessionBackend
-from ios_agent.config import KNOWN_EXTRAS, AgentSettings
+from ios_agent.config import KNOWN_EXTRAS, AgentSettings, export_provider_credentials
 from ios_agent.loop import chat_model, operator_prompt, run_goal
 from ios_agent.state import AgentState, Outcome
 
@@ -45,6 +45,7 @@ __all__ = [
     "Outcome",
     "SessionBackend",
     "chat_model",
+    "export_provider_credentials",
     "operator_prompt",
     "run_goal",
 ]

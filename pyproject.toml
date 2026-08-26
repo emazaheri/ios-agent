@@ -39,9 +39,10 @@ dev = [
     "respx>=0.22",
     "pillow>=12.3.0",
     # Installed for the test run so the eval suite can drive both, not because
-    # ios-mcp needs it. The `anthropic` extra is the provider this project's
-    # numbers are measured on; the agent itself commits to none.
-    "ios-agent[anthropic]",
+    # ios-mcp needs it. Both provider extras are here so the evals can be run
+    # against either without a resync; the agent itself commits to none, and
+    # `IOS_AGENT_PROVIDER` picks one at runtime.
+    "ios-agent[anthropic,openai]",
 ]
 
 [build-system]

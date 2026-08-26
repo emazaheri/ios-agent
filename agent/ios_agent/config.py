@@ -18,8 +18,11 @@ heard of.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
+from dotenv import dotenv_values
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -124,3 +127,42 @@ class AgentSettings(BaseSettings):
         # Several providers share one package. Whichever extra pulls it in works.
         extra = next(name for name, pkg in KNOWN_EXTRAS.items() if pkg == package)
         return f"install it with `uv sync --extra {extra.replace('_', '-')}` (provides {package})"
+
+
+#: Prefixes this project owns. These reach code through `Settings` and
+#: `AgentSettings`, where the test suite can switch the file off, so exporting
+#: them into the process environment would defeat that and make a local `.env`
+#: able to change what a unit test measures.
+_OWN_PREFIXES = ("IOS_MCP_", "IOS_AGENT_")
+
+
+def export_provider_credentials(dotenv_path: str | Path = ".env") -> list[str]:
+    """Put third-party credentials from `.env` where their SDKs will find them.
+
+    pydantic-settings reads `.env` into a settings object, not into the
+    process environment, so a key written there is invisible to the vendor SDK
+    that actually needs it: `AgentSettings` would resolve `openai:gpt-5.6-sol`
+    from the same file while the OpenAI client saw no key at all. That split is
+    surprising enough to be worth closing rather than documenting.
+
+    Only variables this project does not own are exported. `IOS_MCP_*` and
+    `IOS_AGENT_*` keep going through the settings classes, so the suite's
+    hermeticity fixture still holds.
+
+    An existing environment variable is never overwritten, which keeps the
+    precedence rule the same everywhere: a real variable beats the file.
+
+    Returns the names it set, so a caller can say what it did without printing
+    a secret.
+    """
+    path = Path(dotenv_path)
+    if not path.is_file():
+        return []
+
+    exported: list[str] = []
+    for name, value in dotenv_values(path).items():
+        if value is None or name.startswith(_OWN_PREFIXES) or name in os.environ:
+            continue
+        os.environ[name] = value
+        exported.append(name)
+    return exported

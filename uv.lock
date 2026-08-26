@@ -1364,7 +1364,7 @@ vision = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "ios-agent", extra = ["anthropic"] },
+    { name = "ios-agent", extra = ["anthropic", "openai"] },
     { name = "mypy" },
     { name = "pillow" },
     { name = "pytest" },
@@ -1387,7 +1387,7 @@ provides-extras = ["vision"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "ios-agent", extras = ["anthropic"], editable = "agent" },
+    { name = "ios-agent", extras = ["anthropic", "openai"], editable = "agent" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytest", specifier = ">=8.3" },

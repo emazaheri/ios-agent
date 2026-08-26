@@ -10,7 +10,9 @@ from ios_mcp.wda.session import WdaSession
 
 
 @pytest.fixture(autouse=True)
-def ignore_any_local_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+def ignore_any_local_dotenv(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Tests assert what the code defaults to, not what someone's `.env` says.
 
     Enabling `.env` bought convenience and cost hermeticity: a developer with
@@ -19,9 +21,16 @@ def ignore_any_local_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     diff explains. Doing it centrally rather than at each construction site
     also covers tests that do not exist yet.
 
-    `tests/unit/test_dotenv.py` turns this back on, because loading the file is
-    the thing it is testing.
+    Tests marked `model` are exempt. That tier runs against whichever provider
+    the developer configured, so switching `.env` off there silently reverted
+    it to the built-in default: a run configured for `openai:gpt-5.6-sol`
+    quietly tried Anthropic instead and recorded the wrong model in its report.
+
+    `tests/unit/test_dotenv.py` turns this back on too, because loading the
+    file is the thing it is testing.
     """
+    if request.node.get_closest_marker("model") is not None:
+        return
     for cls in (Settings, AgentSettings):
         monkeypatch.setitem(cls.model_config, "env_file", None)
 

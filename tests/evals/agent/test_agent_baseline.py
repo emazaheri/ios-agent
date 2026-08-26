@@ -51,10 +51,25 @@ async def test_the_skeleton_on_one_task(task: Task) -> None:
     _results.append(result)
     print("\n" + result.render())
 
+    # The one thing worth failing on. A run that died on an exhausted credit
+    # balance or a rejected key measured the provider, not the agent, and
+    # recording it as a failed task would put a number in the baseline that
+    # looks like evidence and is not.
+    broken = result.unusable
+    assert not broken, (
+        f"{task.name}: {len(broken)}/{len(result.runs)} runs measured the "
+        f"infrastructure, not the agent: "
+        f"{broken[0].provider_error or broken[0].failure or 'the run never acted'}"
+    )
+
 
 def test_write_the_baseline_report() -> None:
     if not _results:
         pytest.skip("no tasks ran")
+    # A report is a claim. Writing one from runs that never reached a model
+    # would put a number on disk that looks like a measurement and is not.
+    unusable = sum(len(r.unusable) for r in _results)
+    assert unusable == 0, f"{unusable} runs measured the infrastructure; refusing to record them"
     path = write_report(_results, REPORT, driver="skeleton", model=AgentSettings().describe())
     assert path.exists()
     print(f"\nWrote {path}")

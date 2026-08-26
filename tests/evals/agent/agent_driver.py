@@ -18,7 +18,7 @@ import shutil
 
 import pytest
 from ios_agent import AgentSettings, SessionBackend, run_goal
-from ios_agent.config import KNOWN_EXTRAS
+from ios_agent.config import KNOWN_EXTRAS, export_provider_credentials
 from measure import Meter
 from tasks import Task
 
@@ -64,7 +64,13 @@ def _has_credentials(provider: str) -> bool:
 
 
 def why_unavailable() -> str | None:
-    """The reason this tier cannot run, or None if it can."""
+    """The reason this tier cannot run, or None if it can.
+
+    Exports first, for the same reason the loop does: a key sitting in `.env`
+    is real, and reporting "no credentials" because nothing had copied it into
+    the environment yet would skip a tier that was ready to run.
+    """
+    export_provider_credentials()
     cfg = AgentSettings()
     if not _package_installed(cfg.provider):
         return f"{cfg.describe()}: {cfg.missing_package_hint()}"
