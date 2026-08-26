@@ -123,6 +123,10 @@ class Verifier:
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
     _no_ops: dict[Attempt, int] = field(default_factory=dict)
 
+    def no_ops(self, key: Attempt) -> int:
+        """How many times this exact attempt has changed nothing."""
+        return self._no_ops.get(key, 0)
+
     def check(self, key: Attempt) -> Verdict | None:
         """Called before touching the device. None means go ahead.
 
