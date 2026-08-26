@@ -39,6 +39,9 @@ _SCREEN_WIDTH = 393.0
 _SWITCH_X = 320.0
 _SWITCH_W = 51.0
 _BACK_RECT = (8.0, 44.0, 80.0, 52.0)
+#: The search field sits above the first row, so a tap on it cannot be confused
+#: with a tap on a row.
+_SEARCH_TOP = 56.0
 #: The contacts list is long enough that the digest must truncate it, and only
 #: a window of it is ever reported, the way a virtualised UITableView behaves.
 CONTACTS_TOTAL = 200
@@ -188,6 +191,10 @@ class DeviceModel:
     visited: list[str] = field(default_factory=list)
     #: Index of the first contact row on screen. Only the contacts list scrolls.
     scroll_offset: int = 0
+    #: What has been typed into the Settings search field. Filters the root
+    #: pane's rows, so typing has a visible consequence rather than being
+    #: accepted and ignored.
+    search: str = ""
 
     def __post_init__(self) -> None:
         if Injection.STALE_START in self.injections and self.screen == "settings_root":
@@ -265,8 +272,23 @@ class DeviceModel:
             nav_children.insert(
                 0, node("Button", label="Back", name="back_button", x=bx, y=by, w=bw, h=bh)
             )
+        if pane.back_to is None:
+            # Only the root pane has search, the way real Settings does.
+            nav_children.append(
+                node(
+                    "SearchField",
+                    label="Search",
+                    name="settings_search",
+                    value=self.search,
+                    x=16,
+                    y=_SEARCH_TOP,
+                    w=360,
+                    h=36,
+                )
+            )
 
-        cells = [self._row_node(row, index) for index, row in enumerate(pane.rows)]
+        rows = self._visible_rows(pane)
+        cells = [self._row_node(row, index) for index, row in enumerate(rows)]
         return node(
             "Application",
             label="Settings",
@@ -283,6 +305,17 @@ class DeviceModel:
                 )
             ],
         )
+
+    def _visible_rows(self, pane: Pane) -> list[Row]:
+        """Rows after the search filter.
+
+        Filtering on substring rather than prefix, because a person searching
+        "wi-fi" and a person searching "fi" both expect the Wi-Fi row.
+        """
+        if pane.back_to is not None or not self.search:
+            return list(pane.rows)
+        needle = self.search.strip().lower()
+        return [row for row in pane.rows if needle in row.label.lower()]
 
     def _row_node(self, row: Row, index: int) -> dict[str, Any]:
         _, top, _, _ = _row_rect(index)
@@ -323,7 +356,7 @@ class DeviceModel:
             self._go(pane.back_to)
             return
 
-        for index, row in enumerate(pane.rows):
+        for index, row in enumerate(self._visible_rows(pane)):
             if not _hit(_row_rect(index), x, y):
                 continue
             if row.to is not None:
@@ -353,6 +386,17 @@ class DeviceModel:
         else:
             self.scroll_offset = max(self.scroll_offset - rows, 0)
 
+    def type_into_search(self, text: str) -> None:
+        """Typing filters the root pane. Anywhere else it goes nowhere.
+
+        A field that accepts text and changes nothing would be the dead-switch
+        failure wearing a different hat, and this is not the task that tests
+        for that.
+        """
+        if self.screen != "settings_root":
+            return
+        self.search = (self.search + text).replace("\n", "")
+
     def press_home(self) -> None:
         self._go("settings_root")
 
@@ -367,6 +411,8 @@ class DeviceModel:
     def _go(self, screen: str) -> None:
         self.screen = screen
         self.visited.append(screen)
+        # Navigating away clears the search, as it does on a real device.
+        self.search = ""
 
 
 def gesture_handler(model: DeviceModel) -> Callable[[str, dict[str, Any] | None], None]:
@@ -375,6 +421,8 @@ def gesture_handler(model: DeviceModel) -> Callable[[str, dict[str, Any] | None]
     def handle(path: str, body: dict[str, Any] | None) -> None:
         if path.endswith("/wda/tap") and body and "x" in body:
             model.tap(float(body["x"]), float(body["y"]))
+        elif path.endswith("/wda/keys") and body:
+            model.type_into_search("".join(body.get("value", [])))
         elif path.endswith("/wda/dragfromtoforduration") and body and "fromY" in body:
             model.drag(float(body["fromY"]), float(body["toY"]))
         elif path.endswith("/wda/homescreen"):

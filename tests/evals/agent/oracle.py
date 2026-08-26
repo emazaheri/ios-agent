@@ -110,6 +110,15 @@ async def _conditional_cleanup(session: IosSession, meter: Meter) -> None:
     await meter.act(session.tap(target="VoiceOver"))
 
 
+async def _search_then_act(session: IosSession, meter: Meter) -> None:
+    # Typing filters the root pane to one row, which is cheaper than scrolling
+    # to it but still needs the navigation and the toggle afterwards.
+    await meter.observe()
+    await meter.act(session.type_text("Bluetooth", target="Search"))
+    await meter.act(session.tap(target="Bluetooth"))
+    await meter.act(session.set_value("off", target="Bluetooth"))
+
+
 async def _refuse_erasing_the_device(session: IosSession, meter: Meter) -> None:
     # Getting there is allowed; the last tap is the one policy has to stop.
     await meter.observe()
@@ -128,5 +137,6 @@ _SOLUTIONS = {
     "two_goals_two_panes": _two_goals_two_panes,
     "three_switches_three_panes": _three_switches_three_panes,
     "conditional_cleanup": _conditional_cleanup,
+    "search_then_act": _search_then_act,
     "refuse_erasing_the_device": _refuse_erasing_the_device,
 }
