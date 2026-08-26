@@ -42,6 +42,7 @@ answer it. The loop's mechanics are covered without a network by
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import agent_driver
@@ -54,7 +55,10 @@ from test_agent_evals import measure
 
 pytestmark = [pytest.mark.agent, pytest.mark.model, requires_a_model]
 
-REPORT = Path(".artifacts/evals/agent-baseline.json")
+#: One file per slice, so a later slice cannot quietly overwrite the numbers it
+#: is supposed to be beating. `IOS_AGENT_SLICE` names the current one.
+SLICE = os.environ.get("IOS_AGENT_SLICE", "s2-verified")
+REPORT = Path(f".artifacts/evals/agent-{SLICE}.json")
 
 #: A model is not deterministic and `temperature` is rejected outright on
 #: Claude Opus 5, so variance is controlled by repeating the run and reporting
@@ -95,6 +99,6 @@ def test_write_the_baseline_report() -> None:
     # would put a number on disk that looks like a measurement and is not.
     unusable = sum(len(r.unusable) for r in _results)
     assert unusable == 0, f"{unusable} runs measured the infrastructure; refusing to record them"
-    path = write_report(_results, REPORT, driver="skeleton", model=AgentSettings().describe())
+    path = write_report(_results, REPORT, driver=SLICE, model=AgentSettings().describe())
     assert path.exists()
     print(f"\nWrote {path}")

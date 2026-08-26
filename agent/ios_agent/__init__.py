@@ -35,6 +35,7 @@ from ios_agent.backend import Backend, BackendStats, SessionBackend
 from ios_agent.config import KNOWN_EXTRAS, AgentSettings, export_provider_credentials
 from ios_agent.loop import chat_model, operator_prompt, run_goal
 from ios_agent.state import AgentState, Outcome
+from ios_agent.verify import Judgement, Verdict, Verifier
 
 __all__ = [
     "KNOWN_EXTRAS",
@@ -42,8 +43,11 @@ __all__ = [
     "AgentState",
     "Backend",
     "BackendStats",
+    "Judgement",
     "Outcome",
     "SessionBackend",
+    "Verdict",
+    "Verifier",
     "chat_model",
     "export_provider_credentials",
     "operator_prompt",

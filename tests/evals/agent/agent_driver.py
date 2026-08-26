@@ -95,5 +95,6 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     meter.observations = backend.stats.observations
     meter.actions = backend.stats.actions
     meter.device_tokens = backend.stats.device_tokens
+    meter.refusals = backend.stats.refusals
     meter.charge_model(outcome.prompt_tokens, outcome.completion_tokens)
     meter.last_screen = backend.last_screen

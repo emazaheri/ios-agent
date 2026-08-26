@@ -62,6 +62,10 @@ class Meter:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     replans: int = 0
+    #: Repeats refused by verification before reaching the device. Reported so
+    #: an agent that merely swapped device actions for refused turns cannot
+    #: look like one that stopped wasting effort.
+    refusals: int = 0
     #: The last screen the agent was shown, rendered. Success predicates read
     #: this rather than re-observing, which would corrupt the count.
     last_screen: str = ""
@@ -101,6 +105,7 @@ class RunResult:
     prompt_tokens: int
     completion_tokens: int
     replans: int
+    refusals: int
     seconds: float
     floor: int
     failure: str | None = None
@@ -164,6 +169,8 @@ class RunResult:
             out["usd"] = round(self.usd, 4)
         if self.replans:
             out["replans"] = self.replans
+        if self.refusals:
+            out["refusals"] = self.refusals
         if self.failure:
             out["failure"] = self.failure
         if self.provider_error:
@@ -296,6 +303,7 @@ async def run_task(
         prompt_tokens=meter.prompt_tokens,
         completion_tokens=meter.completion_tokens,
         replans=meter.replans,
+        refusals=meter.refusals,
         seconds=time.monotonic() - started,
         floor=task.floor,
         failure=failure,
@@ -442,6 +450,7 @@ def write_report(
                 2,
             ),
             "device_tokens": sum(a.device_tokens for a in attempts),
+            "refusals": sum(a.refusals for a in attempts),
             "prompt_tokens": sum(a.prompt_tokens for a in attempts),
             "completion_tokens": sum(a.completion_tokens for a in attempts),
             "usd": round(sum(a.usd for a in attempts), 4),

@@ -21,10 +21,11 @@ for any agent.
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from ios_agent.verify import Attempt, Verifier, attempt_key
 from ios_mcp.actions.result import ActionResult
 from ios_mcp.session import IosSession
 
@@ -40,6 +41,11 @@ class BackendStats:
     observations: int = 0
     actions: int = 0
     device_tokens: int = 0
+    #: Calls refused by verification before reaching the device. Counted apart
+    #: from `actions` because the device was never touched, and reported so the
+    #: waste stays visible: an agent that spends its turns on refused repeats
+    #: has traded one failure mode for a quieter one.
+    refusals: int = 0
 
     @property
     def observation_overhead(self) -> float:
@@ -78,10 +84,13 @@ class Backend(Protocol):
 class SessionBackend:
     """Calls `IosSession` in-process. No transport, no serialisation."""
 
-    def __init__(self, session: IosSession) -> None:
+    def __init__(self, session: IosSession, verifier: Verifier | None = None) -> None:
         self.session = session
         self.stats = BackendStats()
         self.last_screen = ""
+        #: Judges each action from the screen it returned. Never re-reads the
+        #: screen; a test asserts that.
+        self.verifier = verifier or Verifier()
 
     # -- perception --------------------------------------------------------
 
@@ -95,27 +104,40 @@ class SessionBackend:
     # -- actions -----------------------------------------------------------
 
     async def tap(self, target: str, *, idem_key: str) -> str:
-        return await self._act(self.session.tap(target=target, idem_key=idem_key))
+        return await self._act(
+            attempt_key("tap", target),
+            lambda: self.session.tap(target=target, idem_key=idem_key),
+        )
 
     async def type_text(self, text: str, target: str | None, *, idem_key: str) -> str:
-        return await self._act(self.session.type_text(text, target=target, idem_key=idem_key))
+        return await self._act(
+            attempt_key("type_text", target, text),
+            lambda: self.session.type_text(text, target=target, idem_key=idem_key),
+        )
 
     async def set_value(self, value: str, target: str, *, idem_key: str) -> str:
-        return await self._act(self.session.set_value(value, target=target, idem_key=idem_key))
+        return await self._act(
+            attempt_key("set_value", target, value),
+            lambda: self.session.set_value(value, target=target, idem_key=idem_key),
+        )
 
     async def scroll(self, direction: str, until: str | None, *, idem_key: str) -> str:
         return await self._act(
-            self.session.scroll(direction, until=until, idem_key=idem_key)  # type: ignore[arg-type]
+            attempt_key("scroll", direction, until),
+            lambda: self.session.scroll(direction, until=until, idem_key=idem_key),  # type: ignore[arg-type]
         )
 
     async def press_button(self, name: str, *, idem_key: str) -> str:
-        return await self._act(self.session.press_button(name, idem_key=idem_key))
+        return await self._act(
+            attempt_key("press_button", name),
+            lambda: self.session.press_button(name, idem_key=idem_key),
+        )
 
     async def open_url(self, url: str) -> str:
         # `IosSession.open_url` takes no idempotency key, so this one cannot be
         # replayed safely by key. Opening the same deep link twice lands on the
         # same screen, which is why it has never needed one.
-        return await self._act(self.session.open_url(url))
+        return await self._act(attempt_key("open_url", url), lambda: self.session.open_url(url))
 
     # -- stopping ----------------------------------------------------------
 
@@ -134,12 +156,27 @@ class SessionBackend:
 
     # -- internals ---------------------------------------------------------
 
-    async def _act(self, call: Awaitable[ActionResult]) -> str:
-        result = await call
+    async def _act(self, key: Attempt, call: Callable[[], Awaitable[ActionResult]]) -> str:
+        """Gate, act, judge.
+
+        The gate runs before the call is even created, so a refused attempt
+        never reaches the device and is not counted as an action. It is counted
+        as a refusal instead, which keeps the waste visible rather than making
+        a spinning agent look efficient.
+        """
+        refusal = self.verifier.check(key)
+        if refusal is not None:
+            self.stats.refusals += 1
+            return str(refusal.note)
+
+        result = await call()
         self.stats.actions += 1
         payload = result.to_dict()
         self._charge(payload)
-        return self._render(result, payload)
+
+        verdict = self.verifier.record(key, result)
+        rendered = self._render(result, payload)
+        return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 
     def _render(self, result: ActionResult, payload: dict[str, object]) -> str:
         """Hand back the screen the action produced, not just whether it worked.
