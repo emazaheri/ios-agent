@@ -78,6 +78,8 @@ class Backend(Protocol):
     async def press_button(self, name: str, *, idem_key: str) -> str: ...
     async def open_url(self, url: str) -> str: ...
 
+    def approve(self, signature: str) -> None: ...
+
     def stop_reason(self) -> str | None: ...
 
 
@@ -138,6 +140,17 @@ class SessionBackend:
         # replayed safely by key. Opening the same deep link twice lands on the
         # same screen, which is why it has never needed one.
         return await self._act(attempt_key("open_url", url), lambda: self.session.open_url(url))
+
+    # -- approval ----------------------------------------------------------
+
+    def approve(self, signature: str) -> None:
+        """Record a human's yes for one specific action.
+
+        Scoped to a signature rather than to the session, so approving Send
+        never approves Delete. The gate enforces that; this only carries the
+        answer back to it.
+        """
+        self.session.approve(signature)
 
     # -- stopping ----------------------------------------------------------
 

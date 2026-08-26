@@ -21,6 +21,7 @@ from importlib import resources
 from typing import Any
 
 from langchain.messages import AIMessage, AnyMessage
+from langgraph.types import Command
 
 from ios_agent.backend import Backend, SessionBackend
 from ios_agent.config import AgentSettings, export_provider_credentials
@@ -30,6 +31,20 @@ from ios_agent.tools import Run, build_tools
 from ios_mcp.session import IosSession
 
 ModelFactory = Callable[[list[Any]], Callable[[list[AnyMessage]], Awaitable[AIMessage]]]
+
+#: Asked when the agent wants to do something destructive. Receives the
+#: interrupt payload (action, target signature, why it was flagged) and returns
+#: whether to allow it.
+#:
+#: The default refuses. SAFETY.md: a client that cannot answer is treated as
+#: refusal, because an unanswerable question is not consent. An agent left
+#: running unattended must not be able to erase a phone because nobody was
+#: there to say no.
+Approver = Callable[[dict[str, Any]], Awaitable[bool]]
+
+
+async def refuse_everything(_request: dict[str, Any]) -> bool:
+    return False
 
 
 def operator_prompt() -> str:
@@ -83,9 +98,15 @@ async def run_goal(
     model: ModelFactory | None = None,
     backend: Backend | None = None,
     settings: AgentSettings | None = None,
+    approve: Approver | None = None,
     max_steps: int | None = None,
 ) -> Outcome:
-    """Drive one goal to a stopping point and report what it cost."""
+    """Drive one goal to a stopping point and report what it cost.
+
+    A destructive action pauses the graph rather than being decided for the
+    person whose phone it is. `approve` is asked and the graph resumes with the
+    answer; without one, everything destructive is refused.
+    """
     cfg = settings or AgentSettings()
     run = Run(backend=backend or SessionBackend(session), goal=goal)
     tools = build_tools(run)
@@ -104,7 +125,22 @@ async def run_goal(
         return reply
 
     graph = build_graph(run, metered, tools, max_steps=max_steps or cfg.max_steps)
-    await graph.ainvoke({"messages": opening_messages(operator_prompt(), goal)})
+    decide = approve or refuse_everything
+    # One thread per run. The checkpointer keys on it, and reusing an id across
+    # runs would resume someone else's conversation.
+    config = {"configurable": {"thread_id": f"{id(run):x}"}}
+
+    step: Any = {"messages": opening_messages(operator_prompt(), goal)}
+    while True:
+        result = await graph.ainvoke(step, config=config)
+        pending = result.get("__interrupt__") if isinstance(result, dict) else None
+        if not pending:
+            break
+        # Answer every pending question, then resume. Each is scoped to one
+        # action, so approving one never approves another.
+        answers = {item.id: await decide(dict(item.value)) for item in pending}
+        run.approvals_asked += len(answers)
+        step = Command(resume=answers if len(answers) > 1 else next(iter(answers.values())))
 
     return Outcome(
         goal=goal,
@@ -112,6 +148,7 @@ async def run_goal(
         summary=run.summary,
         stopped_because=None if run.finished else (run.summary or "the model stopped early"),
         steps=run.steps,
+        approvals_asked=run.approvals_asked,
         stats=run.backend.stats,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

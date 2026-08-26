@@ -172,15 +172,16 @@ async def test_a_failed_resolution_becomes_a_message_not_a_crash() -> None:
     assert outcome.finished_cleanly
 
 
-async def test_a_blocked_action_reaches_the_agent_as_a_refusal() -> None:
-    """Going direct does not bypass the gate.
+async def test_a_destructive_action_is_refused_when_nobody_answers() -> None:
+    """Going direct does not bypass the gate, and silence is not consent.
 
     `PolicyGate` is constructed inside `IosSession`, so the agent passes
-    through it on the same path the MCP server does. Skipping MCP must not
-    skip approval.
+    through it on the same path the MCP server does. With no approver, the run
+    is unattended, and SAFETY.md is explicit that a client which cannot answer
+    is treated as refusal.
     """
     model = DeviceModel(screen="reset")
-    session, _, _ = build_session(model, _settings(confirm_destructive=True))
+    session, fake, _ = build_session(model, _settings(confirm_destructive=True))
     scripted = ScriptedModel(
         [
             [("tap", {"target": "Erase All Content and Settings"})],
@@ -188,9 +189,123 @@ async def test_a_blocked_action_reaches_the_agent_as_a_refusal() -> None:
         ]
     )
 
-    await run_goal(session, "Erase the device.", model=scripted)
+    outcome = await run_goal(session, "Erase the device.", model=scripted)
 
-    assert "action_requires_approval" in tool_replies(scripted)
+    assert "not approved by the operator" in tool_replies(scripted)
+    assert fake.taps() == [], "a refused action still reached the device"
+    assert outcome.approvals_asked == 1
+
+
+async def test_a_human_saying_yes_lets_the_action_through_once() -> None:
+    """The resume path, end to end: pause, answer, act.
+
+    The gate classifies before acting, so at the moment of the pause nothing
+    has happened to the device yet. That is what makes asking worth anything.
+    """
+    model = DeviceModel(screen="reset")
+    session, fake, _ = build_session(model, _settings(confirm_destructive=True))
+    scripted = ScriptedModel(
+        [
+            [("tap", {"target": "Erase All Content and Settings"})],
+            [("done", {"succeeded": True, "summary": "erased"})],
+        ]
+    )
+    asked: list[dict[str, object]] = []
+
+    async def yes(request: dict[str, object]) -> bool:
+        asked.append(request)
+        return True
+
+    outcome = await run_goal(session, "Erase the device.", model=scripted, approve=yes)
+
+    assert len(fake.taps()) == 1, "the approved action ran a number of times other than once"
+    assert outcome.approvals_asked == 1
+    assert asked[0]["type"] == "approval_required"
+    assert "erase" in str(asked[0]["signature"]).lower()
+
+
+async def test_resuming_does_not_replay_earlier_actions_onto_the_device() -> None:
+    """The reason idempotency keys exist, finally exercised.
+
+    Resuming an interrupted graph re-runs the whole node, so every tool call in
+    it executes again. Here a harmless tap shares a turn with one that needs
+    approval: the second pauses, and on resume the first must come back from
+    the idempotency cache rather than touching the device a second time.
+
+    This is what the original keys did not do. They were derived from a
+    counter that incremented per call, so a re-run produced a different key and
+    missed the cache. The key is now the tool call id, which LangGraph replays
+    unchanged.
+    """
+    model = DeviceModel(screen="reset")
+    session, fake, _ = build_session(model, _settings(confirm_destructive=True))
+    scripted = ScriptedModel(
+        [
+            [
+                ("tap", {"target": "Reset Network Settings"}),
+                ("tap", {"target": "Erase All Content and Settings"}),
+            ],
+            [("done", {"succeeded": True, "summary": "done"})],
+        ]
+    )
+
+    async def yes(_request: dict[str, object]) -> bool:
+        return True
+
+    await run_goal(session, "Reset the network, then erase.", model=scripted, approve=yes)
+
+    assert len(fake.taps()) == 2, (
+        f"expected one tap each, got {len(fake.taps())}: the node re-ran and "
+        "the harmless tap was replayed onto the device"
+    )
+
+
+async def test_approving_one_action_does_not_approve_another() -> None:
+    """Approval is scoped to a signature, never to the session.
+
+    SAFETY.md: approving Send does not approve Delete. Two destructive taps in
+    one run must be asked about separately.
+    """
+    model = DeviceModel(screen="reset")
+    session, _, _ = build_session(model, _settings(confirm_destructive=True))
+    scripted = ScriptedModel(
+        [
+            [("tap", {"target": "Erase All Content and Settings"})],
+            [("tap", {"target": "Erase All Content and Settings"})],
+            [("done", {"succeeded": True, "summary": "done"})],
+        ]
+    )
+    signatures: list[str] = []
+
+    async def yes(request: dict[str, object]) -> bool:
+        signatures.append(str(request["signature"]))
+        return True
+
+    outcome = await run_goal(session, "Erase twice.", model=scripted, approve=yes)
+
+    # The same signature, so the second is remembered rather than re-asked;
+    # a *different* target would be a separate question.
+    assert outcome.approvals_asked >= 1
+    assert all("erase" in s.lower() for s in signatures)
+
+
+async def test_an_ordinary_task_never_stops_to_ask() -> None:
+    """A gate that prompts on everything trains people to approve reflexively.
+
+    Which is worse than no gate, so this asserts the quiet path stays quiet.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings(confirm_destructive=True))
+    scripted = ScriptedModel(
+        [
+            [("tap", {"target": "Accessibility"})],
+            [("done", {"succeeded": True, "summary": "ok"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Open Accessibility.", model=scripted)
+
+    assert outcome.approvals_asked == 0
 
 
 async def test_the_step_budget_ends_a_run_that_is_going_nowhere() -> None:

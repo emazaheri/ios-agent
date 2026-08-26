@@ -160,6 +160,18 @@ than the server's thirty, because a large confusable set degrades tool
 selection. The provider is chosen through `init_chat_model`, so the package
 commits to no vendor.
 
+A destructive action **pauses the graph** with a LangGraph `interrupt()` rather
+than being decided on the phone owner's behalf. The gate classifies before
+acting, so nothing has touched the device at the moment of the pause, and with
+no approver attached everything destructive is refused: an unanswerable
+question is not consent.
+
+Resuming re-runs the entire node, which is why every action's idempotency key
+is its **tool call id** rather than a step counter. A counter yields a
+different key on the re-run, misses the cache, and taps the device twice; a
+test asserts this by putting a harmless tap in the same turn as one that needs
+approval and counting what reaches the device.
+
 What is *not* in it is the interesting part. Planning, subagents and
 cross-session memory were each specified, measured, and rejected with numbers;
 see [docs/adr/](docs/adr/). The one mechanism that survived is verification,

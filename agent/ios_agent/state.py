@@ -45,6 +45,9 @@ class Outcome:
     #: a halted session, a detected loop, or the step budget running out.
     stopped_because: str | None = None
     steps: int = 0
+    #: Times the run paused to ask a human. Zero is the expected value for an
+    #: ordinary task; anything else means the policy gate fired.
+    approvals_asked: int = 0
     stats: BackendStats = field(default_factory=BackendStats)
     prompt_tokens: int = 0
     completion_tokens: int = 0

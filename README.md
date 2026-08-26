@@ -154,6 +154,23 @@ the device. Most importantly, a real no-op still reports `screen_changed=False`
 — if a real device jittered its fingerprint, the one pillar that was kept would
 be silently dead on hardware while every fake-based test stayed green.
 
+### Approval pauses the run
+
+Anything destructive stops the graph and asks, rather than deciding for the
+person whose phone it is:
+
+```python
+async def ask(request):  # request names the action and why it tripped
+    return input(f"{request['reason']}  approve? ") == "y"
+
+
+outcome = await run_goal(session, "clear my messages", approve=ask)
+```
+
+Without an `approve` callback the run is unattended and everything destructive
+is refused, because an unanswerable question is not consent. Approval is scoped
+to one action: approving Send never approves Delete.
+
 See [agent/README.md](agent/README.md) for configuration.
 
 ## Development

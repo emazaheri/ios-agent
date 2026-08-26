@@ -55,6 +55,19 @@ Extras are declared for `anthropic`, `openai`, `azure_openai` (via `openai`),
 integration package is installed; the list only decides how specific the error
 message is when one is missing.
 
+## Approval
+
+Destructive actions pause the graph with a LangGraph `interrupt()` and resume
+with the answer. `run_goal(..., approve=callback)` supplies the decision;
+omitting it refuses everything destructive, which is the correct default for an
+unattended run.
+
+The pause is safe because the policy gate classifies *before* acting, so
+nothing has reached the device when the question is asked. Resuming re-runs the
+whole node, so every action keys its idempotency cache on the tool call id,
+which LangGraph replays unchanged. Keying on a step counter instead produces a
+new key on the re-run and taps the device twice.
+
 ## Running the evals
 
 ```bash

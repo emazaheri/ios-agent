@@ -1,9 +1,12 @@
 """The loop. Deliberately the stupidest thing that can finish a task.
 
-One model node, one tool node, an edge back. No plan, no verification step, no
-memory, no subagents. That is the point: this is the baseline every later slice
-has to beat, and a baseline that already contains half the ideas cannot show
-what any of them bought.
+One model node, one tool node, an edge back. No plan, no memory, no subagents; verification
+lives outside the model, in `verify.py`, because it costs nothing there.
+
+The one thing the shape does carry is an interrupt. A destructive action pauses
+the graph rather than deciding for the person whose phone it is, and resuming
+re-runs the whole node, which is why every action's idempotency key is its tool
+call id.
 
 The two things it does have are not optional. It stops when the session says to
 stop, because halting and loop detection already exist in the policy layer and
@@ -18,6 +21,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from ios_agent.state import AgentState
@@ -38,6 +42,7 @@ def build_graph(
     tools: list[Any],
     *,
     max_steps: int = DEFAULT_MAX_STEPS,
+    checkpointer: Any | None = None,
 ) -> Any:
     """Wire one goal into a graph. One run, one graph; they share no state."""
     by_name = {t.name: t for t in tools}
@@ -54,13 +59,25 @@ def build_graph(
         for call in last.tool_calls:
             chosen = by_name.get(call["name"])
             if chosen is None:
-                # Better to tell the model than to crash the graph: an
-                # unknown tool is a recoverable mistake, and naming the real
-                # ones costs one message against a whole lost run.
-                content = f"no such tool {call['name']!r}; available: {', '.join(by_name)}"
-            else:
-                content = str(await chosen.ainvoke(call["args"]))
-            out.append(ToolMessage(content=content, tool_call_id=call["id"] or ""))
+                # Better to tell the model than to crash the graph: an unknown
+                # tool is a recoverable mistake, and naming the real ones costs
+                # one message against a whole lost run.
+                out.append(
+                    ToolMessage(
+                        content=f"no such tool {call['name']!r}; available: {', '.join(by_name)}",
+                        tool_call_id=call["id"] or "",
+                    )
+                )
+                continue
+            # The whole ToolCall, not just its args: the action tools take
+            # their idempotency key from the call id, and LangChain only
+            # injects it when handed the full call. Passing args alone raises.
+            result = await chosen.ainvoke(call)
+            out.append(
+                result
+                if isinstance(result, ToolMessage)
+                else ToolMessage(content=str(result), tool_call_id=call["id"] or "")
+            )
         return {"messages": out}
 
     def next_step(state: AgentState) -> str:
@@ -92,7 +109,11 @@ def build_graph(
     builder.add_edge(START, "agent")
     builder.add_conditional_edges("agent", next_step, ["act", END])
     builder.add_edge("act", "agent")
-    return builder.compile()
+    # A checkpointer is what makes `interrupt()` work: the state has to survive
+    # the pause. In memory, because durable execution is out of scope for this
+    # project and LangGraph checkpoints persist data rather than execution, so
+    # a disk-backed saver would imply a guarantee it does not give.
+    return builder.compile(checkpointer=checkpointer or InMemorySaver())
 
 
 def opening_messages(system_prompt: str, goal: str) -> list[AnyMessage]:
