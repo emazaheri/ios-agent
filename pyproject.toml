@@ -68,6 +68,7 @@ markers = [
     "device: requires an attached physical iPhone (skipped when unavailable)",
     "eval: golden-flow evaluation, slow",
     "agent: goal-directed agent evaluation against a scripted device",
+    "device_state: configures the scripted device for one MCP-backend test",
     "model: calls a real model, needs credentials and costs money",
 ]
 

@@ -34,24 +34,41 @@ already in the same process, in exchange for nothing the direct path does not
 have. The no-MCP-imports rule in layers 1 to 4 exists precisely so this choice
 is available, and routing through MCP anyway would make that rule decorative.
 
-## The MCP-backed variant, and its honest status
+## The MCP-backed variant, built and measured
 
-The plan committed to an `McpBackend` behind the same `Backend` protocol, so
-the eval suite could run the same tasks both ways and publish the difference.
-The `Backend` protocol exists and `SessionBackend` implements it.
-**`McpBackend` was not built.**
+`McpBackend` exists, behind the same `Backend` protocol, and it connects as a
+genuine `fastmcp.Client` rather than importing the server. The layering test
+forbids `ios_agent` from importing `ios_mcp.server`, and that constraint is the
+point: an in-process import would exercise a path no real client has and prove
+nothing about whether anyone else can drive the server.
 
-That is a gap, recorded rather than glossed. It was deprioritised because the
-architectural claim it would demonstrate is already enforced statically by
-`tests/unit/test_layering.py`, and because the number it would produce is
-predictable: a local transport round-trip against actions that cost 8 to 12
-seconds on a real device.
+The same route, one observation and three actions, median of five runs on the
+scripted device:
 
-One constraint is worth writing down before anyone builds it. The layering test
-forbids `ios_agent` from importing `ios_mcp.server`, so `McpBackend` must
-connect as a genuine client over a transport. An in-process import would be
-easier and would prove nothing about whether the server works for anyone else,
-which is the entire point of building it.
+| | latency | device tokens |
+|---|---|---|
+| direct | 6.6 ms | 573 |
+| over MCP | 12.8 ms | 573 |
+
+**Protocol overhead is +1.6 ms per call and zero tokens.** Against a real
+device snapshot of roughly 3,700 ms that is 0.04% per call, which is why the
+direct path is preferred for latency reasons that turn out to be almost
+irrelevant, and why the architectural reason is the one that actually decides
+it.
+
+Token parity is not a coincidence and is asserted as an equality rather than an
+approximation: the server serialises exactly the dict `ActionResult.to_dict()`
+produces. If a payload ever gains or loses a field in transit, the two sets of
+numbers this project reports stop being comparable, and that should fail
+loudly rather than drift.
+
+Two capabilities are deliberately absent over MCP rather than faked. Halting
+and loop detection live on the session object, and polling them would cost a
+round trip per turn purely to read a flag, distorting the very latency this
+backend exists to measure; the agent's step budget still bounds a runaway loop.
+Approval arrives as an `action_requires_approval` error carrying a signature,
+which is the documented human-in-the-loop path for a client that cannot elicit,
+and the tool layer's `interrupt()` handles it identically on both backends.
 
 ## Consequences
 

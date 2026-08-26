@@ -34,6 +34,7 @@ from __future__ import annotations
 from ios_agent.backend import Backend, BackendStats, SessionBackend
 from ios_agent.config import KNOWN_EXTRAS, AgentSettings, export_provider_credentials
 from ios_agent.loop import Approver, chat_model, operator_prompt, refuse_everything, run_goal
+from ios_agent.mcp_backend import McpBackend, McpClient
 from ios_agent.state import AgentState, Outcome
 from ios_agent.verify import Judgement, Verdict, Verifier
 
@@ -45,6 +46,8 @@ __all__ = [
     "Backend",
     "BackendStats",
     "Judgement",
+    "McpBackend",
+    "McpClient",
     "Outcome",
     "SessionBackend",
     "Verdict",

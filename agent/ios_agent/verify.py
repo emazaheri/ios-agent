@@ -64,8 +64,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Protocol
 
-from ios_mcp.actions.result import ActionResult
+
+class Outcome(Protocol):
+    """The three fields a verdict is read from.
+
+    A protocol rather than `ActionResult` because two backends produce this
+    evidence: the direct one returns an `ActionResult`, and the MCP one has a
+    JSON payload of the same shape. Verification must judge both identically,
+    or a comparison between the transports would be measuring the verifier.
+    """
+
+    @property
+    def screen_changed(self) -> bool: ...
+
+    @property
+    def digest(self) -> object | None: ...
+
+    @property
+    def delta(self) -> object | None: ...
+
 
 #: Consecutive no-ops on one action before it is refused outright. One can be a
 #: slow transition the settle loop called early. Three, after the fingerprint
@@ -145,7 +164,7 @@ class Verifier:
             f"done. Do something else, or finish with `done` and say which it was.",
         )
 
-    def record(self, key: Attempt, result: ActionResult) -> Verdict:
+    def record(self, key: Attempt, result: Outcome) -> Verdict:
         """Judge a completed action from what it returned."""
         if self._changed(result):
             self._no_ops.pop(key, None)
@@ -173,7 +192,7 @@ class Verifier:
         )
 
     @staticmethod
-    def _changed(result: ActionResult) -> bool:
+    def _changed(result: Outcome) -> bool:
         """Did the device move?
 
         `screen_changed` is the fingerprint comparison and is the primary
@@ -184,4 +203,5 @@ class Verifier:
         """
         if result.screen_changed or result.digest is not None:
             return True
-        return result.delta is not None and not result.delta.empty
+        delta = result.delta
+        return delta is not None and not getattr(delta, "empty", True)

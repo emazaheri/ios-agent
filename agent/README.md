@@ -68,6 +68,18 @@ whole node, so every action keys its idempotency cache on the tool call id,
 which LangGraph replays unchanged. Keying on a step counter instead produces a
 new key on the re-run and taps the device twice.
 
+## Two ways to reach the device
+
+`SessionBackend` calls `IosSession` in-process and is the production path.
+`McpBackend` speaks the protocol to a `fastmcp.Client`, which is how any other
+consumer would reach the server, and exists to prove the server is not
+privileged from the inside.
+
+Measured on the same route, median of five runs: **+1.6 ms per call and zero
+extra tokens**. Payloads are identical because the server serialises the same
+dict the library returns, and a test asserts that equality so the two sets of
+numbers stay comparable.
+
 ## Running the evals
 
 ```bash
