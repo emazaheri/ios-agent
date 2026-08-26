@@ -166,3 +166,82 @@ def settings_screen(airplane_on: bool = False) -> dict[str, Any]:
             ),
         ],
     )
+
+
+def third_party_card_screen() -> dict[str, Any]:
+    """A card composed the way apps outside Apple's own tend to compose one.
+
+    Modelled on a real screen, structurally rather than literally: the content
+    is invented, the shapes are not. Two habits appear here that no Apple app
+    exhibits, and both made real screens unreadable to the agent.
+
+    First, a `StaticText` that splits a field across `label` and `value`: the
+    label names the field and the value carries what it says. Reading only the
+    label hands a reader the question and hides the answer.
+
+    Second, an `Other` container carrying the entire card as its own label,
+    with only images beneath it. Apple keeps its text in `StaticText` and
+    `Cell`, so collapsing labelled `Other` nodes cost nothing on Settings and
+    cost everything here.
+    """
+    return node(
+        "Application",
+        label="Cards",
+        name="Cards",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[
+                    node(
+                        "NavigationBar",
+                        name="Profile",
+                        y=44,
+                        h=52,
+                        children=[node("StaticText", label="Profile", x=120, y=56, w=140, h=28)],
+                    ),
+                    # The label/value split.
+                    node(
+                        "StaticText",
+                        label="Date prompt:",
+                        name="Date prompt:",
+                        value="Let's get together",
+                        x=16,
+                        y=120,
+                        w=360,
+                        h=40,
+                    ),
+                    # The whole card hung on a wrapping container.
+                    node(
+                        "Other",
+                        label=(
+                            "Prompt: Something my pet thinks about me. "
+                            "Answer: She is obsessed with cuddling me"
+                        ),
+                        name="prompt_card_1",
+                        x=16,
+                        y=180,
+                        w=360,
+                        h=105,
+                        children=[
+                            node("Image", x=20, y=184, w=40, h=40),
+                            node("Button", label="Like this answer", x=320, y=230, w=50, h=50),
+                        ],
+                    ),
+                    # A container with no text of its own: still a wrapper.
+                    node(
+                        "Other",
+                        x=16,
+                        y=300,
+                        w=360,
+                        h=60,
+                        children=[node("StaticText", label="Plain row", x=20, y=310, w=200, h=24)],
+                    ),
+                    # Values that are state or noise, which must stay hidden.
+                    node("Other", label="Progress", value="45%", x=16, y=380, w=360, h=20),
+                    node("Button", label="Badge", value="1", x=16, y=410, w=60, h=30),
+                ],
+            )
+        ],
+    )

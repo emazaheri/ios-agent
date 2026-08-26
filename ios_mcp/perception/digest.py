@@ -19,6 +19,7 @@ from typing import Any
 from ios_mcp.config import DigestSettings
 from ios_mcp.perception.roles import (
     ALWAYS_COLLAPSE,
+    COLLAPSE_WHEN_EMPTY,
     CONTAINER_ROLES,
     DECORATIVE_LABELS,
     INTERACTIVE_ROLES,
@@ -84,6 +85,13 @@ class DigestNode:
             parts.append(f'"{_truncate(self.label)}"')
         if self.value and self.role in STATEFUL_ROLES:
             parts.append(f"={_truncate(self.value, 40)}")
+        elif _is_content_value(self.value, self.label):
+            # A read-only node whose value is prose, not state. iOS apps use
+            # this to separate a field's name from its content: a Hinge prompt
+            # arrives as label "Date prompt:" with value "Let's get together",
+            # and showing only the label hands the agent the question while
+            # hiding the answer.
+            parts.append(f'"{_truncate(str(self.value))}"')
         if self.identifier and self.identifier != self.label:
             parts.append(f"id={_truncate(self.identifier, 32)}")
         if self.selected:
@@ -302,12 +310,25 @@ def _collect(
 
 
 def _is_wrapper(node: SnapshotNode, role: str) -> bool:
-    """True when the node exists only to hold other nodes."""
+    """True when the node exists only to hold other nodes.
+
+    A container carrying its own text is not a wrapper, it is content. Only
+    `application` and `window` collapse unconditionally, because their labels
+    are the app name and noise.
+
+    `other` and `group` used to collapse unconditionally as well, which no
+    Apple app exposes as wrong: Settings keeps its text in `StaticText` and
+    `Cell`. Third-party apps hang the readable version of a card on the
+    wrapping `Other`, and on a real Hinge profile that habit made the whole
+    prompt invisible to the agent.
+    """
     if role in SCROLLABLE_ROLES:
         return False  # the agent needs these as scroll targets
     if role in ALWAYS_COLLAPSE:
         return True
-    return role in CONTAINER_ROLES and not _text_of(node)
+    if role in COLLAPSE_WHEN_EMPTY or role in CONTAINER_ROLES:
+        return not _text_of(node)
+    return False
 
 
 def _is_noise(
@@ -583,17 +604,50 @@ def _is_selected(node: SnapshotNode) -> bool:
 
 
 def _value_of(c: _Candidate) -> str | None:
-    """Keep a value only where it is state, not where it duplicates the label."""
-    if c.role not in STATEFUL_ROLES:
-        return None
+    """Keep a value where it is state, or where it is content in its own right.
+
+    Stateful controls keep their value because it *is* their state: a switch
+    reporting "0" is the whole point of reading it.
+
+    Everything else keeps a value only when the value is prose the label does
+    not already carry. iOS apps use the pair to separate a field's name from
+    its contents, and a Hinge prompt arrives as label "Date prompt:" with value
+    "Let's get together". Dropping the value there hands the agent the question
+    and hides the answer, which is what made a real profile unreadable.
+    """
     value = c.node.value
     if value is None or value == c.node.label:
         return None
-    return value
+    if c.role in STATEFUL_ROLES:
+        return value
+    return value if _is_content_value(value, c.node.label) else None
 
 
 def _text_of(node: SnapshotNode) -> str | None:
     return node.label or node.value or node.placeholder
+
+
+#: Values that are state rather than content. A switch says "0", a progress
+#: view says "45%"; neither is worth a line of the agent's context.
+_STATE_VALUES = frozenset({"0", "1", "true", "false", "on", "off", "yes", "no"})
+
+
+def _is_content_value(value: str | None, label: str | None) -> bool:
+    """Is this value prose the agent needs, rather than a control's state?
+
+    Only asked for roles that are not stateful, where a value is unusual
+    enough to be meaningful. Three exclusions, each one measured against real
+    screens: pure state tokens, a value that merely repeats its own label, and
+    anything short enough to be a counter or a percentage.
+    """
+    if not value:
+        return False
+    text = value.strip()
+    if len(text) < 4 or text.lower() in _STATE_VALUES:
+        return False
+    if text.rstrip("%").replace(".", "", 1).isdigit():
+        return False
+    return text.casefold() != (label or "").strip().casefold()
 
 
 def _identity_text(node: SnapshotNode) -> str | None:

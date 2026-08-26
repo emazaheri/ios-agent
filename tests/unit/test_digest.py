@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from trees import form_screen, list_screen, settings_screen
+from trees import form_screen, list_screen, settings_screen, third_party_card_screen
 
 from ios_mcp.config import DigestSettings, Settings
 from ios_mcp.perception.digest import build_digest
@@ -148,3 +148,73 @@ def test_render_is_readable_and_names_the_screen() -> None:
     assert text.startswith("screen: com.apple.Preferences")
     assert '"Settings"' in text.splitlines()[0]
     assert "airplane_switch" in text
+
+
+# -- what apps outside Apple's own do differently ---------------------------
+#
+# Every case below was found by pointing the agent at a real third-party app
+# and discovering it could not read the screen. Settings never exposes any of
+# them, which is exactly why they survived this long.
+
+
+def test_a_static_text_shows_its_value_as_well_as_its_label() -> None:
+    """A field split across label and value must surrender both.
+
+    Found on a real profile card, where the label was "Date prompt:" and the
+    value was the answer. `_text_of` returns `label or value`, so the digest
+    showed the question and silently dropped the answer, and the agent
+    reported that the app "did not expose the prompt text".
+    """
+    d = digest_of(third_party_card_screen())
+
+    assert "Date prompt:" in d.render()
+    assert "Let's get together" in d.render(), "the value was dropped, so only the question showed"
+
+
+def test_a_container_that_carries_text_is_content_not_a_wrapper() -> None:
+    """`Other` is usually an empty box and sometimes the whole screen.
+
+    Apple puts card text in `StaticText` and `Cell`, so collapsing every
+    `Other` cost nothing on Settings. Third-party apps compose a card from
+    images and hang the readable version on the wrapping container, and
+    collapsing that leaves the agent looking at unlabelled boxes.
+    """
+    d = digest_of(third_party_card_screen())
+
+    assert "Something my pet thinks about me" in d.render()
+
+
+def test_a_container_with_no_text_is_still_collapsed() -> None:
+    """The other half of the rule. Empty wrappers are still noise."""
+    d = digest_of(third_party_card_screen())
+    others = [n for n in d.nodes if n.role == "other"]
+
+    assert all(n.label for n in others), "an unlabelled container survived"
+    assert "Plain row" in d.render(), "the wrapper collapsed but took its child with it"
+
+
+def test_the_application_and_window_still_collapse_even_though_labelled() -> None:
+    """Their labels are the app name and noise, and the app is reported already."""
+    d = digest_of(third_party_card_screen())
+
+    assert not any(n.role in ("application", "window") for n in d.nodes)
+    assert d.app == "Cards"
+
+
+def test_a_value_that_is_state_or_noise_stays_hidden() -> None:
+    """Showing every value would trade one unreadable screen for a louder one.
+
+    A percentage, a badge count, and anything that merely repeats its label are
+    not content, and the budget is the scarcest thing the digest spends.
+    """
+    rendered = digest_of(third_party_card_screen()).render()
+
+    assert "45%" not in rendered
+    assert '"1"' not in rendered
+
+
+def test_a_switch_still_reports_its_state() -> None:
+    """The change to value handling must not cost the stateful roles anything."""
+    rendered = digest_of(settings_screen(airplane_on=True)).render()
+
+    assert "=1" in rendered

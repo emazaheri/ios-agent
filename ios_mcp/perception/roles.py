@@ -96,7 +96,21 @@ CONTAINER_ROLES: frozenset[str] = frozenset(
 
 #: Wrappers that are dropped even when they carry a label, because the label is
 #: already reported in the digest header (the app name and the screen title).
-ALWAYS_COLLAPSE: frozenset[str] = frozenset({"application", "window", "other", "group"})
+#: Containers whose own label is never content, so they collapse even when
+#: labelled. An application's label is its name, which the digest already
+#: carries separately, and a window's is noise.
+ALWAYS_COLLAPSE: frozenset[str] = frozenset({"application", "window"})
+
+#: Containers that are usually pure wrappers but sometimes carry the screen's
+#: whole meaning on themselves, so they collapse only when they hold no text.
+#:
+#: Apple's own apps never reveal this: Settings puts its text in `StaticText`
+#: and `Cell`, so collapsing `other` unconditionally lost nothing. Third-party
+#: apps routinely compose a card out of images and hang the readable version on
+#: the wrapping `Other`. On a real Hinge profile the entire prompt arrives that
+#: way, as one `Other` labelled "Prompt: ... Answer: ...", and collapsing it
+#: leaves the agent looking at a screen of unlabelled boxes.
+COLLAPSE_WHEN_EMPTY: frozenset[str] = frozenset({"other", "group"})
 
 #: Roles whose value is part of their state and must survive into the digest.
 STATEFUL_ROLES: frozenset[str] = frozenset(
