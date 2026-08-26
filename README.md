@@ -138,21 +138,30 @@ Two results worth stating plainly, because both contradicted the plan:
   removing one; assert it enough to save the work and one run in three finished
   **without touching the device at all**, reporting a failure it never observed.
 
-### Verified on real iOS
+### Verified on real iOS, including a physical iPhone
 
 Tier 1 runs against a scripted in-process device, so its numbers are a claim
-about a fake. Against real Settings on an iOS 26.5 simulator:
+about a fake. The same goal, `Turn on Bold Text in Settings`, across all three
+tiers:
 
-| | |
-|---|---|
-| `Open the Accessibility settings.` | 1 action, 1 observation |
-| `Turn on Bold Text in Settings.` | 3 actions, 1 observation, switch confirmed at `value="1"` |
-| digest compaction | **167 raw nodes → 14 elements, 261 tokens** |
+| | actions | observations | digest |
+|---|---|---|---|
+| scripted fake | 3 | 1 | — |
+| iOS 26.5 simulator | 3 | 1 | 167 raw nodes → 14 elements, 261 tokens |
+| **iPhone, iOS 26.6, Wi-Fi** | **3** | **1** | 140 raw nodes → 15 elements, 243 tokens |
 
-The conclusions hold: `enable_bold_text` costs 3 actions on both the fake and
-the device. Most importantly, a real no-op still reports `screen_changed=False`
-— if a real device jittered its fingerprint, the one pillar that was kept would
-be silently dead on hardware while every fake-based test stayed green.
+Identical on all three, and on the phone it took 48.6s where the simulator took
+seconds. The switch was confirmed by navigating there and reading `value="1"`
+independently of what the agent claimed, then restored.
+
+Most importantly, **a real no-op still reports `screen_changed=False` on the
+phone**. Fingerprints round positions to 4px so animation jitter does not
+register; if a physical device had moved its fingerprint between settled
+snapshots, the one pillar this phase kept would have been silently dead on
+hardware while every simulator and fake test stayed green.
+
+Tier 3 is opt-in twice over, by the `device` marker and `IOS_MCP_ALLOW_DEVICE=1`,
+because hardware being present is not consent to change settings on it.
 
 ### Approval pauses the run
 
