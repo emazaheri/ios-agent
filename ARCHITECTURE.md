@@ -148,14 +148,46 @@ picked instead.
 
 See [SAFETY.md](SAFETY.md).
 
+## The agent (`agent/ios_agent/`)
+
+A separate distribution in the uv workspace, depending on `ios-mcp` and never
+the reverse. It is a second consumer of `IosSession`, not a seventh layer: the
+policy gate is constructed inside the session, so an agent passes through it on
+the same code path the server does.
+
+The loop is one model node, one tool node, and an edge back. Eight tools rather
+than the server's thirty, because a large confusable set degrades tool
+selection. The provider is chosen through `init_chat_model`, so the package
+commits to no vendor.
+
+What is *not* in it is the interesting part. Planning, subagents and
+cross-session memory were each specified, measured, and rejected with numbers;
+see [docs/adr/](docs/adr/). The one mechanism that survived is verification,
+and it exists because actions already return the screen they produced: it reads
+`screen_changed` and the delta to notice an action the device ignored, and
+costs zero additional observations. That cut actions across the task set by 38%.
+
+The reason it can cost nothing is layer 4's design. Because an action folds its
+resulting screen into the response, the agent spends exactly one observation
+per task, which is the same number a hand-written oracle needs. The
+observation-per-step cost that this whole stack was optimised against turned
+out to be already at its floor before any agent pillar was built.
+
 ## Testing
 
-- `tests/unit` (243) runs against an in-process fake WebDriverAgent, so it
-  needs no Xcode, simulator, or phone.
+- `tests/unit` (326) runs against an in-process fake WebDriverAgent, so it
+  needs no Xcode, simulator, or phone. It also enforces the layering statically:
+  only `ios_mcp/server` may import MCP, and `ios_agent` may touch only a listed
+  public surface.
 - `tests/integration` (13) runs against a real simulator, including a chaos
   test that kills the runner mid-flow.
 - `tests/evals` (11 flows) measures tokens, wall time, action count, and
   resolution-tier distribution. These four numbers are the product metrics.
+- `tests/evals/agent` measures the agent itself: 10 goal-directed tasks against
+  a scripted device, each declaring the action count a hand-written oracle
+  needs. Three tasks inject failures taken from real hardware. A `model` tier
+  puts a real model in the loop, and a `simulator` tier runs it against real
+  iOS.
 
 The fakes cannot catch everything. Every bug in the Phase 5 commit was found
 only by running against a real device, which is why the eval suite exists.

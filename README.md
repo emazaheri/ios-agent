@@ -97,17 +97,81 @@ See [SAFETY.md](SAFETY.md). Defaults are in `ios-mcp.toml`, a `.env`, or
 list of knobs across both packages; a real environment variable always beats
 the file.
 
+## The agent
+
+`agent/ios_agent/` is a goal-directed agent built on LangGraph that takes a
+sentence ("Turn on Bold Text") and drives the phone to it. It is a **peer of
+the MCP server, not a layer above it**: both consume the same `IosSession`, and
+both pass through the same policy gate. The provider is configuration, so
+OpenAI, Anthropic, Gemini or a local Ollama model is two environment variables
+rather than a code change.
+
+```bash
+uv sync --extra openai
+IOS_AGENT_PROVIDER=openai IOS_AGENT_MODEL=gpt-5.6-sol \
+  uv run pytest tests/evals/agent -m model -s
+```
+
+### What it cost to find out which ideas were worth keeping
+
+The interesting part is not the agent, it is that the measurement was built
+first and then used to reject most of what was planned. Four "deep agent"
+pillars were specified up front. **One survived contact with a number.**
+
+| pillar | outcome | evidence |
+|---|---|---|
+| Verification | **kept** | actions 85 → 53 (−38%), cost $1.21 → $0.74 (−39%), success 21/21 |
+| Planning | rejected | agent already at a hand-written oracle's floor on 8 of 10 tasks; total headroom 1 action in 20 |
+| Subagents | rejected | 5,864 prompt tokens/run against a 1M window; no screenshots taken; resolution is already server-side |
+| Memory | rejected | hedged, it measured *worse* than no memory; asserted, the agent stopped checking the device |
+
+Each rejection is an ADR in [docs/adr/](docs/adr/) with the numbers behind it.
+
+Two results worth stating plainly, because both contradicted the plan:
+
+- The skeleton loop was predicted to look before every move. It spent **exactly
+  one observation per run**, the oracle's floor, because every action already
+  folds the resulting screen into its response. The lever the whole phase was
+  designed around was at its limit before anything was built.
+- Memory's two framings are the two ends of one dial with no good setting.
+  Hedge it enough to be safe and it motivates an investigation rather than
+  removing one; assert it enough to save the work and one run in three finished
+  **without touching the device at all**, reporting a failure it never observed.
+
+### Verified on real iOS
+
+Tier 1 runs against a scripted in-process device, so its numbers are a claim
+about a fake. Against real Settings on an iOS 26.5 simulator:
+
+| | |
+|---|---|
+| `Open the Accessibility settings.` | 1 action, 1 observation |
+| `Turn on Bold Text in Settings.` | 3 actions, 1 observation, switch confirmed at `value="1"` |
+| digest compaction | **167 raw nodes → 14 elements, 261 tokens** |
+
+The conclusions hold: `enable_bold_text` costs 3 actions on both the fake and
+the device. Most importantly, a real no-op still reports `screen_changed=False`
+— if a real device jittered its fingerprint, the one pillar that was kept would
+be silently dead on hardware while every fake-based test stayed green.
+
+See [agent/README.md](agent/README.md) for configuration.
+
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 243 tests, no device needed
-uv run pytest tests/integration   # real simulator
-uv run pytest tests/evals -s      # golden flows, with cost per flow
+uv run pytest tests/unit          # 326 tests, no device needed
+uv run pytest tests/integration   # 13 tests, real simulator
+uv run pytest tests/evals -s      # 11 golden flows, with cost per flow
+uv run pytest tests/evals/agent   # agent evals, scripted device, no model
 ```
 
 The eval suite is the quality gate: it reports tokens, wall time, action count
 and resolution-tier distribution per flow. A drift from `exact` toward
 `text-fuzzy` is the leading indicator that a flow is about to become flaky.
+
+Agent tasks additionally declare an **action floor**, the number of actions a
+hand-written oracle needs, asserted against that oracle so it cannot drift into
+an aspiration. It is what every agent number is reported against.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the layering, and
 [docs/real-device-setup.md](docs/real-device-setup.md) for physical iPhones.
