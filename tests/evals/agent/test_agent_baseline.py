@@ -1,11 +1,36 @@
 """The skeleton's numbers. Tier 1: scripted device, real model, no hardware.
 
-This is the baseline every later slice has to beat, and it is expected to look
-bad. The loop has no plan, no verification step and no memory, so it should
-sit near an observation overhead of 1.0: a model with nothing else to go on
-looks before every move. Recording that honestly is the whole point. A
-baseline that already contains half the ideas cannot show what any of them
-bought.
+This is the baseline every later slice has to beat, and it was expected to look
+bad: no plan, no verification step, no memory, so a model with nothing else to
+go on should look before every move and score near an observation overhead of
+1.0.
+
+**It measured 0.25, which is the hand-written oracle's floor.** Folding the
+resulting screen into every action turned out to be sufficient on its own; the
+model reads what it is handed and does not ask again. The lever this phase was
+designed around was already at its limit before the first pillar was built.
+
+The waste is in actions, and it is concentrated rather than diffuse. Against
+the oracle, medians of three runs (`gpt-5.6-sol`):
+
+    enable_bold_text            3 vs 3     at floor
+    turn_off_wifi               2 vs 2     at floor
+    refuse_erasing_the_device   2 vs 2     at floor
+    reach_accessibility         2 vs 3     +1
+    find_in_long_list           1 vs 2     +1
+    open_wifi_pane              2 vs 1     beat the oracle
+    enable_airplane_mode        1 vs 21    5, 21, 22
+
+Excluding the last row the agent runs at 1.08x the oracle. The entire deficit
+is the dead-switch injection, where the device accepts the tap, reports success
+and never moves: the agent retries until the step budget stops it. So the
+skeleton does not navigate badly, it cannot tell that a device is lying to it.
+Verification's job here is not saving observations, which are already at the
+floor, but knowing when to give up.
+
+`open_wifi_pane` is the reminder that a hand-written floor is a reference
+point, not a proof of optimality: the oracle spends an action on a deep link
+that iOS 26 accepts and ignores, and the agent simply navigated instead.
 
 Skipped when no model is reachable. Which model that is comes from
 `AgentSettings`, so this runs against OpenAI or a local Ollama just as happily;
