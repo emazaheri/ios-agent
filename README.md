@@ -163,6 +163,25 @@ hardware while every simulator and fake test stayed green.
 Tier 3 is opt-in twice over, by the `device` marker and `IOS_MCP_ALLOW_DEVICE=1`,
 because hardware being present is not consent to change settings on it.
 
+### Giving it a task
+
+```bash
+uv run python scripts/ask.py --list                      # what is reachable
+uv run python scripts/ask.py "turn on bold text"         # a simulator
+uv run python scripts/ask.py --device "iPhone" \
+    --app com.apple.Preferences "turn wi-fi off"         # your phone
+```
+
+It prints what the agent did, what it cost, what it claims, and the screen it
+ended on. In code the whole API is one call:
+
+```python
+outcome = await run_goal(session, "turn on bold text")
+```
+
+`--device` matters: without it the pool prefers a simulator, because acting on
+a real phone should take intent rather than being whatever was nearest.
+
 ### Approval pauses the run
 
 Anything destructive stops the graph and asks, rather than deciding for the
