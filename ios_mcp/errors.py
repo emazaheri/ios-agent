@@ -18,6 +18,7 @@ class ErrorCode(StrEnum):
     DEVICE_UNAVAILABLE = "device_unavailable"
     DEVICE_NOT_READY = "device_not_ready"
     DEVICE_LOCKED = "device_locked"
+    APP_NOT_FOUND = "app_not_found"
     TUNNEL_DOWN = "tunnel_down"
     SIGNING_INVALID = "signing_invalid"
 
@@ -90,6 +91,17 @@ class IosAutomationError(Exception):
 
 
 # --- Layer 1 ---------------------------------------------------------------
+
+
+class AppNotFound(IosAutomationError):
+    """A bundle id that is not installed on this device.
+
+    Separate from `AppNotAllowed`, which is the policy gate refusing an app
+    that does exist. This one is a typo or a wrong guess, and the fix is to
+    look the id up rather than to change any setting.
+    """
+
+    code = ErrorCode.APP_NOT_FOUND
 
 
 class ToolchainMissing(IosAutomationError):

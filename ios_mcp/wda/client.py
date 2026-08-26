@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from typing import Any
 
 import httpx
 
 from ios_mcp.config import WdaSettings
 from ios_mcp.errors import (
+    AppNotFound,
     DeviceLocked,
     ElementNotFound,
     ElementNotInteractable,
@@ -153,6 +155,24 @@ class WdaClient:
                 recoverable=True,
             )
 
+        # An app that is not installed is the commonest mistake when someone
+        # types a bundle id by hand, and WDA reports it as a `session_lost`
+        # carrying four nested Apple error domains. Left alone it reads like a
+        # crashed runner, which sends people debugging the wrong thing.
+        missing = _missing_app(message)
+        if missing is not None:
+            return AppNotFound(
+                f"No app with bundle id {missing!r} is installed on this device",
+                hint=(
+                    "Check the id. Many are not what you would guess: Hinge is "
+                    "`co.hinge.mobile.ios`, not `com.hinge...`. List what is "
+                    "installed with `ios_list_apps`, or "
+                    "`xcrun devicectl device info apps --device <udid> "
+                    "--include-all-apps`."
+                ),
+                details={"bundle_id": missing},
+            )
+
         cls = _ERROR_MAP.get(kind, WdaError)
         recoverable = issubclass(cls, (SessionLost, ElementStale, RunnerCrashed))
         return cls(
@@ -194,6 +214,31 @@ class WdaClient:
         return base64.b64decode(encoded)
 
 
+#: SpringBoard's way of saying it has never heard of that bundle id.
+_MISSING_APP_MARKERS = (
+    "fbsapplicationlibrary",
+    "application info provider",
+)
+
+
+def _missing_app(message: str) -> str | None:
+    """Pull the bundle id out of a failed-to-open error, if that is what it is.
+
+    Matching on the message rather than the code because WDA reports this as
+    `session_lost`, the same code a genuinely dead session uses, and the two
+    need completely different responses from the caller.
+    """
+    lowered = message.lower()
+    if "failed" not in lowered or not any(m in lowered for m in _MISSING_APP_MARKERS):
+        return None
+
+    # Not by pairing quotes. Apple nests them -- `"The request to open
+    # "com.x.y" failed."` -- so a naive pair match captures the text either
+    # side of the id and never the id itself. Read it from the phrase instead.
+    found = re.search(r'to open "?([A-Za-z0-9_.-]+\.[A-Za-z0-9_.-]+)"?', message)
+    return found.group(1) if found else None
+
+
 def _is_locked(message: str) -> bool:
     lowered = message.lower()
     return "could not be, unlocked" in lowered or ("passcode" in lowered and "locked" in lowered)
@@ -203,7 +248,9 @@ def _message_of(value: Any) -> str | None:
     if isinstance(value, dict):
         message = value.get("message") or value.get("description")
         if message:
-            return str(message).splitlines()[0][:400]
+            # Kept to one line, but long enough to carry the nested Apple
+            # domains that `_missing_app` reads the bundle id out of.
+            return str(message).splitlines()[0][:600]
     return None
 
 
