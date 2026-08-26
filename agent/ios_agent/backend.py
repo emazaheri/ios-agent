@@ -25,8 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from ios_agent.memory import Memory
-from ios_agent.verify import Attempt, Judgement, Verifier, attempt_key
+from ios_agent.verify import Attempt, Verifier, attempt_key
 from ios_mcp.actions.result import ActionResult
 from ios_mcp.session import IosSession
 
@@ -85,27 +84,13 @@ class Backend(Protocol):
 class SessionBackend:
     """Calls `IosSession` in-process. No transport, no serialisation."""
 
-    def __init__(
-        self,
-        session: IosSession,
-        verifier: Verifier | None = None,
-        memory: Memory | None = None,
-    ) -> None:
+    def __init__(self, session: IosSession, verifier: Verifier | None = None) -> None:
         self.session = session
         self.stats = BackendStats()
         self.last_screen = ""
         #: Judges each action from the screen it returned. Never re-reads the
         #: screen; a test asserts that.
         self.verifier = verifier or Verifier()
-        #: Optional. What it learns comes from the verifier rather than from the
-        #: model, so every note traces to something the device actually did and
-        #: can be contradicted by the device later.
-        self.memory = memory
-        #: Which app the last observation was of, so a note can be filed under
-        #: it. Read from the digest rather than from the WDA session because
-        #: this is what the agent was actually shown.
-        self.app: str | None = None
-        self.fingerprint: str | None = None
 
     # -- perception --------------------------------------------------------
 
@@ -114,8 +99,6 @@ class SessionBackend:
         self.stats.observations += 1
         self._charge(digest.to_dict())
         self.last_screen = digest.render()
-        self.app = digest.app or self.app
-        self.fingerprint = digest.fingerprint
         return self.last_screen
 
     # -- actions -----------------------------------------------------------
@@ -192,34 +175,8 @@ class SessionBackend:
         self._charge(payload)
 
         verdict = self.verifier.record(key, result)
-        self._remember(key, verdict.judgement, result)
         rendered = self._render(result, payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
-
-    def _remember(self, key: Attempt, judgement: Judgement, result: ActionResult) -> None:
-        """Keep what the verifier just worked out, and drop what it disproved.
-
-        Only a *repeated* no-op is recorded. One can be a slow transition or a
-        control already in the requested state, and filing that as "does not
-        work" would poison later sessions with a note that was never true.
-        """
-        if self.memory is None or self.app is None:
-            return
-        _, target, _ = key
-        if not target:
-            return
-
-        if judgement is Judgement.PROGRESSED:
-            # The device just contradicted any note about this control.
-            self.memory.forget(self.app, target)
-            return
-        if judgement is Judgement.REPEATED_NO_OP:
-            self.memory.note_unresponsive(
-                self.app,
-                target,
-                attempts=self.verifier.no_ops(key),
-                fingerprint=self.fingerprint,
-            )
 
     def _render(self, result: ActionResult, payload: dict[str, object]) -> str:
         """Hand back the screen the action produced, not just whether it worked.
@@ -245,8 +202,6 @@ class SessionBackend:
             lines.append(result.delta.render())
         if result.digest is not None:
             self.last_screen = result.digest.render()
-            self.app = result.digest.app or self.app
-            self.fingerprint = result.digest.fingerprint
             lines.append(self.last_screen)
         return "\n".join(lines)
 

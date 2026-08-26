@@ -95,21 +95,11 @@ def build_graph(
     return builder.compile()
 
 
-def opening_messages(
-    system_prompt: str, goal: str, *, briefing: str | None = None
-) -> list[AnyMessage]:
+def opening_messages(system_prompt: str, goal: str) -> list[AnyMessage]:
     """The transcript the loop starts from.
 
     The goal arrives as a user turn rather than being folded into the system
     prompt, so the system prompt stays byte-identical across every task and
     stays cacheable.
-
-    A memory briefing goes after the system prompt for the same reason: it
-    varies per app and per session, and putting it in the system prompt would
-    invalidate the cached prefix on every run.
     """
-    messages: list[AnyMessage] = [SystemMessage(content=system_prompt)]
-    if briefing:
-        messages.append(SystemMessage(content=briefing))
-    messages.append(HumanMessage(content=goal))
-    return messages
+    return [SystemMessage(content=system_prompt), HumanMessage(content=goal)]

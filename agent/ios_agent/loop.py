@@ -25,7 +25,6 @@ from langchain.messages import AIMessage, AnyMessage
 from ios_agent.backend import Backend, SessionBackend
 from ios_agent.config import AgentSettings, export_provider_credentials
 from ios_agent.graph import build_graph, opening_messages
-from ios_agent.memory import Memory
 from ios_agent.state import Outcome
 from ios_agent.tools import Run, build_tools
 from ios_mcp.session import IosSession
@@ -84,7 +83,6 @@ async def run_goal(
     model: ModelFactory | None = None,
     backend: Backend | None = None,
     settings: AgentSettings | None = None,
-    memory: Memory | None = None,
     max_steps: int | None = None,
 ) -> Outcome:
     """Drive one goal to a stopping point and report what it cost."""
@@ -105,15 +103,8 @@ async def run_goal(
             completion_tokens += usage.get("output_tokens", 0)
         return reply
 
-    # Only notes about the app in front of the agent. Handing it everything
-    # ever learned would spend context on screens this task will never reach.
-    briefing = memory.briefing(session.wda.bundle_id) if memory else None
-
     graph = build_graph(run, metered, tools, max_steps=max_steps or cfg.max_steps)
-    await graph.ainvoke({"messages": opening_messages(operator_prompt(), goal, briefing=briefing)})
-
-    if memory is not None:
-        memory.save()
+    await graph.ainvoke({"messages": opening_messages(operator_prompt(), goal)})
 
     return Outcome(
         goal=goal,
