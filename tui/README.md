@@ -58,3 +58,28 @@ key, about a second. It exists because a green test suite says nothing about
 what a terminal app looks like, and the first run of it found two bugs every
 test was passing through: an empty transcript pane, and a header that
 recoloured the screen below it.
+
+## Debugging it in a real terminal
+
+The screenshots above render the app through Textual's own pipeline, which is
+enough for layout but is not a terminal: no TTY, no terminal emulator, no
+keyboard. For the real thing, run it inside tmux, which allocates a PTY of its
+own and can be driven and read without a person at the keyboard.
+
+```bash
+tmux new-session -d -s ios -x 120 -y 34 -c "$PWD"
+tmux send-keys -t ios 'uv run ios-agent manual --app com.apple.Preferences' Enter
+sleep 45                                   # a cold simulator takes a while
+
+tmux send-keys -t ios 'tap Accessibility' Enter
+tmux capture-pane -t ios -p                # what is on screen, as text
+tmux capture-pane -t ios -p -e             # the same, with colour escapes
+
+tmux send-keys -t ios C-l                  # a key binding
+tmux send-keys -t ios C-q                  # quit, releasing the device
+tmux kill-session -t ios
+```
+
+This is the only way to check the things `run_test` cannot: that key bindings
+reach the app, that colour is actually emitted, and that the layout survives a
+real terminal at a real size.
