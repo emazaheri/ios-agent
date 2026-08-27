@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print to stdout instead of taking over the terminal.",
     )
     run.add_argument(
+        "-p",
+        "--pick",
+        action="store_true",
+        help="Choose the device from a list instead of letting the pool decide.",
+    )
+    run.add_argument(
         "--inline",
         action="store_true",
         help="Run in a short live region under the prompt instead of full screen.",
@@ -71,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     manual.add_argument("--device", help="UDID or part of a device name.")
     manual.add_argument("--app", help="Bundle id to open first.")
     manual.add_argument("--inline", action="store_true", help="Run under the prompt.")
+    manual.add_argument("-p", "--pick", action="store_true", help="Choose the device.")
     manual.add_argument("-v", "--verbose", action="store_true")
 
     devices = sub.add_parser("devices", help="List simulators and attached devices")
@@ -206,7 +213,7 @@ def _cmd_manual(settings: Settings, args: argparse.Namespace) -> int:
     def factory(sink: EventSink) -> GoalRunner:
         return GoalRunner(sink, cfg, device=args.device, bundle_id=args.app)
 
-    app = IosAgentApp(factory, manual=True, inline=args.inline)
+    app = IosAgentApp(factory, manual=True, inline=args.inline, pick=args.pick)
     return app.run(inline=args.inline, inline_no_clear=args.inline) or 0
 
 
@@ -241,6 +248,7 @@ def _run_app(settings: Settings, args: argparse.Namespace) -> int:
         approve=args.approve,
         max_steps=args.max_steps,
         inline=args.inline,
+        pick=args.pick,
     )
     # `inline_no_clear` keeps the last frame in scrollback instead of wiping
     # the region on exit, which is the difference between a live view and one

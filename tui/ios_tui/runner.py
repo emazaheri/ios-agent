@@ -86,7 +86,9 @@ class GoalRunner:
         self.sink = sink
         self.settings = settings
         self.agent = agent or AgentSettings()
-        self._device = device
+        #: Which device to acquire. Public because the picker sets it after
+        #: the runner exists but before `start()` has been called.
+        self.device = device
         self._bundle_id = bundle_id
         self._pool: DevicePool | None = None
         self._acquire = acquire
@@ -122,7 +124,7 @@ class GoalRunner:
         if self._acquire is not None:
             return await self._acquire()
         self._pool = DevicePool(self.settings)
-        return await self._pool.acquire(self._device, bundle_id=self._bundle_id)
+        return await self._pool.acquire(self.device, bundle_id=self._bundle_id)
 
     async def close(self) -> None:
         """Always run this. `DevicePool.acquire` has no cleanup of its own on

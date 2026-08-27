@@ -6,9 +6,21 @@ A terminal front end for `ios-agent`. Installs the `ios-agent` command.
 ios-agent doctor                        # is this machine set up
 ios-agent devices                       # what is reachable
 ios-agent "turn on bold text"           # a simulator
+ios-agent --pick "turn on bold text"    # choose the device from a list
 ios-agent --device "iPhone" --approve \
     --app com.apple.Preferences "turn wi-fi off"
 ```
+
+`--pick` lists everything reachable and lets you choose. The cursor starts
+wherever `DevicePool.resolve(None)` points, which is the same device an
+unattended run would take, so a physical phone is never pre-selected: reaching
+one always costs a keystroke. Devices that cannot be driven are listed too,
+dimmed and unselectable, with their blockers spelled out, because hiding an
+unusable device hides the reason it is unusable.
+
+The picker also appears on its own when `--device` matches nothing or matches
+several things. That is a question rather than a dead end, and the answer is
+on the list.
 
 ## Why this is its own distribution
 

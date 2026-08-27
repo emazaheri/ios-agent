@@ -191,6 +191,18 @@ async def _ask_for_approval(app: IosAgentApp, pilot: Any) -> None:
     await pilot.pause()
 
 
+async def _pick_a_device(app: IosAgentApp, pilot: Any) -> None:
+    from ios_tui.devices import DevicePicker
+
+    picker = DevicePicker(settings())
+    app.push_screen(picker)
+    await pilot.pause()
+    async with asyncio.timeout(60):
+        while not picker.devices:
+            await asyncio.sleep(0.05)
+    await pilot.pause()
+
+
 async def _fail(app: IosAgentApp, pilot: Any) -> None:
     app._apply(
         Failed(
@@ -211,6 +223,8 @@ SHAPES = {
     "log": lambda: capture("log", goal="Turn on Bold Text.", after=_open_the_log),
     "approval": lambda: capture("approval", after=_ask_for_approval),
     "failure": lambda: capture("failure", after=_fail),
+    # Reads the real device list, so this one needs a machine with devices.
+    "picker": lambda: capture("picker", after=_pick_a_device),
     # The two that found the layout bugs: a long history in a small terminal.
     "narrow": lambda: capture(
         "narrow", size=(64, 24), goal="Scroll to the bottom.", script=SCROLLING

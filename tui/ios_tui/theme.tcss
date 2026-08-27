@@ -176,6 +176,44 @@ ApprovalModal {
     color: $text-muted;
 }
 
+/* -- the device picker ---------------------------------------------------- */
+
+DevicePicker {
+    align: center middle;
+}
+
+#picker {
+    width: 100%;
+    max-width: 78;
+    height: auto;
+    max-height: 100%;
+    padding: 1 2;
+    border: thick $panel;
+    background: $surface;
+}
+
+#picker-title {
+    text-style: bold;
+}
+
+#picker-status {
+    color: $text-muted;
+    height: auto;
+}
+
+#picker-list {
+    height: auto;
+    max-height: 16;
+    margin-top: 1;
+    background: $surface;
+    border: none;
+}
+
+#picker-keys {
+    margin-top: 1;
+    color: $text-muted;
+}
+
 /* -- inline ---------------------------------------------------------------
  *
  * A fixed height under the prompt rather than the whole terminal. Note that

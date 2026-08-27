@@ -172,6 +172,7 @@ distribution (`tui/`, [ADR 0008](docs/adr/0008-the-front-end-is-a-third-distribu
 uv run ios-agent doctor                        # is this machine set up
 uv run ios-agent devices                       # what is reachable
 uv run ios-agent "turn on bold text"           # a simulator
+uv run ios-agent --pick "turn on bold text"    # choose the device from a list
 uv run ios-agent --device "iPhone" \
     --app com.apple.Preferences "turn wi-fi off"         # your phone
 uv run ios-agent manual                        # drive it by hand, no model

@@ -30,8 +30,10 @@ from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer
 
+from ios_mcp.errors import DeviceUnavailable
 from ios_tui.approval import ApprovalModal
 from ios_tui.bus import EventSink, QueueSink, drain
+from ios_tui.devices import DevicePicker
 from ios_tui.events import (
     ActionFinished,
     ApprovalAsked,
@@ -83,6 +85,7 @@ class IosAgentApp(App[int]):
         max_steps: int | None = None,
         inline: bool = False,
         manual: bool = False,
+        pick: bool = False,
     ) -> None:
         super().__init__()
         self._runner_factory = runner_factory
@@ -93,6 +96,8 @@ class IosAgentApp(App[int]):
         self.inline_mode = inline
         #: No model in the loop: typed commands go straight to the backend.
         self.manual_mode = manual
+        #: Ask which device before acquiring one.
+        self.pick = pick
 
         self.runner: GoalRunner | None = None
         self._run_worker: Any = None
@@ -236,8 +241,25 @@ class IosAgentApp(App[int]):
         self._last_progress_at = monotonic()
         self.runner = self._runner_factory(QueueSink(self._queue, loop))
         assert self.runner is not None
+
+        if self.pick and not await self._choose_device():
+            self.exit(0)
+            return
+
         try:
             await self.runner.start()
+        except DeviceUnavailable as exc:
+            # A named device that does not resolve is a question, not a dead
+            # end: the answer is on the list this screen shows, and the list
+            # also carries the blockers explaining anything unusable.
+            self.transcript.note(str(exc), "yellow")
+            if not await self._choose_device():
+                self.exit(1)
+                return
+            try:
+                await self.runner.start()
+            except Exception:
+                return  # already reported as a `Failed` event
         except Exception:
             # Already reported as a `Failed` event by the runner itself.
             return
@@ -245,6 +267,16 @@ class IosAgentApp(App[int]):
             self.submit(self._first_goal)
         else:
             self.query_one(GoalInput).focus()
+
+    async def _choose_device(self) -> bool:
+        """Ask which device. False means the person declined to pick one."""
+        assert self.runner is not None
+        chosen = await self.push_screen_wait(DevicePicker(self.runner.settings))
+        if chosen is None:
+            return False
+        self.runner.device = chosen
+        self._last_progress_at = monotonic()
+        return True
 
     # -- running a goal ----------------------------------------------------
 
