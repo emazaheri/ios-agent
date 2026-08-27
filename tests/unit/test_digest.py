@@ -369,3 +369,38 @@ def test_a_disclosure_glyph_named_only_by_its_id_is_still_noise() -> None:
     d = digest_of(tree)
 
     assert [n.identifier for n in d.nodes] == ["com.apple.settings.general"]
+
+
+def test_a_drawn_header_stays_in_the_elements_it_titles() -> None:
+    """A drawn header is the only copy of its text, so it cannot be suppressed.
+
+    The echo filter is seeded with the screen title because a navigation bar
+    reports its title twice, once as the bar and once as a StaticText inside
+    it, and dropping the duplicate loses nothing. A drawn header has no
+    duplicate. Seeding it deleted content: real Settings shows search results
+    under no navigation bar, so `No Results for "Airplane"` became the title
+    and was then dropped as an echo of itself, leaving no node on screen
+    carrying the word that was searched for.
+    """
+    tree = node(
+        "Application",
+        label="Settings",
+        name="Settings",
+        h=852,
+        children=[
+            node("StaticText", label='No Results for "Airplane"', x=74, y=212, w=254, h=94),
+            node("StaticText", label="Check the spelling.", x=74, y=318, w=254, h=40),
+        ],
+    )
+    d = digest_of(tree)
+
+    assert d.title == 'No Results for "Airplane"'
+    assert any("Airplane" in (n.text or "") for n in d.nodes), d.render()
+
+
+def test_a_navigation_bar_title_is_still_reported_only_once() -> None:
+    """The other half. Chrome repeats itself and the duplicate stays dropped."""
+    d = digest_of(settings_screen())
+
+    assert d.title == "Settings"
+    assert not any(n.text == "Settings" for n in d.nodes)

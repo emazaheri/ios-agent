@@ -203,10 +203,24 @@ def build_digest(
     dense screen can zoom in without paying for the whole tree again.
     """
     screen = region or root.rect
-    title = _screen_title(root)
-    # Seed the echo filter with the screen title: the navigation bar's
-    # StaticText always repeats it, and the digest header already reports it.
-    candidates = _collect(root, settings, screen=screen, depth=0, inherited_text=title)
+    title, title_is_chrome = _screen_title(root)
+    # Seed the echo filter with the screen title, but only when the title came
+    # from a navigation bar: that bar's StaticText always repeats it, and the
+    # digest header already reports it.
+    #
+    # A drawn header is the opposite case and seeding it deleted content. Real
+    # Settings shows search results under no navigation bar at all, so
+    # `No Results for "Airplane"` was promoted to the title and then dropped as
+    # an echo of itself, taking the only node carrying that text with it. The
+    # integration suite caught it. Duplicating a header line costs a few tokens;
+    # deleting the screen's one piece of content costs the answer.
+    candidates = _collect(
+        root,
+        settings,
+        screen=screen,
+        depth=0,
+        inherited_text=title if title_is_chrome else None,
+    )
     candidates = _dedupe_colocated(candidates)
     candidates = _collapse_repeats(candidates, settings)
 
@@ -823,7 +837,7 @@ def _intersects(a: Rect, b: Rect) -> bool:
 _HEADER_BAND = 0.25
 
 
-def _screen_title(root: SnapshotNode) -> str | None:
+def _screen_title(root: SnapshotNode) -> tuple[str | None, bool]:
     """How a person would name this screen.
 
     The navigation bar first, because where there is one it is authoritative.
@@ -835,15 +849,20 @@ def _screen_title(root: SnapshotNode) -> str | None:
     leaves two structurally similar screens hashing to the same value. That is
     the split-view failure already recorded in CLAUDE.md, reached by a
     different route.
+
+    Returns the title and whether it came from chrome. The caller needs the
+    second half: a navigation bar's title is *also* reported as a StaticText
+    inside it, so suppressing that duplicate loses nothing, while a drawn
+    header is the only copy there is and suppressing it deletes content.
     """
     for node in root.walk():
         if role_of(node.type) == "nav":
             if node.label:
-                return node.label
+                return node.label, True
             for child in node.walk()[1:]:
                 if role_of(child.type) == "text" and child.label:
-                    return child.label
-    return _drawn_header(root)
+                    return child.label, True
+    return _drawn_header(root), False
 
 
 def _drawn_header(root: SnapshotNode) -> str | None:
