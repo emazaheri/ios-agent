@@ -18,8 +18,9 @@ import pytest
 from ios_tui.app import IosAgentApp
 from ios_tui.events import ActionFinished, DeviceReady, Observed, Progress, StatsSnapshot
 from ios_tui.runner import GoalRunner
-from ios_tui.widgets import StatusBar
+from ios_tui.widgets import ScreenPane, StatsBar, StatusBar
 from screens import DeviceModel, build_session
+from textual.widgets import Static
 from tui_harness import ScriptedModel, settings
 
 NARROW = (64, 24)
@@ -57,22 +58,29 @@ async def _ready(app: IosAgentApp) -> None:
 
 
 @pytest.mark.parametrize("size", [NARROW, WIDE])
-async def test_no_transcript_line_is_wider_than_the_pane(size: tuple[int, int]) -> None:
-    """A line that overflows wraps, and a wrapped column is unreadable.
+async def test_a_transcript_row_is_never_padded_past_the_pane(size: tuple[int, int]) -> None:
+    """Rows are as long as their content, and never longer.
 
-    At 64 columns the target column was fixed at 38 against a pane of 39, so
-    every action wrapped and the tail of a refusal landed on its own line as an
-    orange fragment reading "reached the device".
+    They used to pad the target out to a column measured against the pane,
+    which was wrong twice over. At 64 columns the column was wider than the
+    pane, so every row wrapped and the tail of a refusal landed alone on the
+    next line. And the measurement itself could not be trusted: `RichLog` fixes
+    a line's wrapping when the line is written, from a region it does not have
+    until it has been rendered, so rows written during startup were padded to a
+    width the pane did not have and wrapped at 80 columns regardless.
+
+    Content-sized rows are correct at any width and at any moment. Genuinely
+    long content still wraps, which is ordinary text behaviour and reads as
+    such; padding that wraps reads as a broken layout.
     """
     app = _app()
     async with app.run_test(size=size) as pilot:
         await _ready(app)
-        transcript = app.transcript
         for i in range(12):
             app._apply(
                 ActionFinished(
                     verb="set_value",
-                    args={"target": "Differentiate Without Colour", "value": "on"},
+                    args={"target": "Bold Text", "value": "on"},
                     elapsed_ms=3721,
                     stats=StatsSnapshot(actions=i + 1),
                 )
@@ -80,11 +88,15 @@ async def test_no_transcript_line_is_wider_than_the_pane(size: tuple[int, int]) 
         app._apply(Observed(stats=StatsSnapshot(observations=1, device_tokens=1275)))
         await pilot.pause()
 
-        # Two columns of headroom for the scrollbar, which appears once there
-        # is history and is not deducted from `size.width`.
+        transcript = app.transcript
         budget = transcript.size.width - 2
         too_wide = [line.text for line in transcript.lines if len(line.text.rstrip()) > budget]
-        assert too_wide == [], f"lines wider than {budget} columns:\n" + "\n".join(too_wide)
+        assert too_wide == [], (
+            f"rows of ordinary length wrapped in {budget} columns:\n" + "\n".join(too_wide)
+        )
+        # One rendered line per row, at both widths, is what "never padded"
+        # buys: the same transcript reads the same way in any terminal.
+        assert len(transcript.lines) == 13
 
 
 async def test_a_refusal_stays_visible_when_the_columns_are_squeezed() -> None:
@@ -218,3 +230,39 @@ async def test_nothing_in_the_approval_modal_falls_off_the_screen(size: tuple[in
         # person with only one button.
         assert modal.query_one("#refuse").size.width > 0
         assert modal.query_one("#allow").size.width > 0
+
+
+@pytest.mark.parametrize("size", [NARROW, WIDE])
+async def test_no_status_row_ends_in_a_dangling_separator(size: tuple[int, int]) -> None:
+    """A cut sentence reads as a rendering fault; a short whole one does not.
+
+    Both bars used to be written left to right and left to truncate, so a
+    narrow terminal sliced the last field mid-word and left the separator that
+    introduced it stranded at the edge: `... 9 refused ·`.
+
+    The stats bar now drops whole segments from the right, and the currency
+    strip picks the longest wording that fits. Neither ever renders a partial
+    field.
+    """
+    app = _app()
+    async with app.run_test(size=size) as pilot:
+        await _ready(app)
+        bars = app.query_one(StatsBar)
+        bars.stats = StatsSnapshot(observations=1, actions=3, device_tokens=271, refusals=9)
+        bars.prompt_tokens, bars.completion_tokens, bars.elapsed_s = 8429, 110, 24.0
+        pane = app.query_one(ScreenPane)
+        pane.show('screen: com.apple.Preferences / "Settings"')
+        for _ in range(3):
+            pane.overtaken()
+        await pilot.pause()
+
+        for rendered, where in (
+            (bars.render(), "stats bar"),
+            (pane.query_one("#screen-currency", Static).content, "currency strip"),
+        ):
+            text = str(rendered).rstrip()
+            assert not text.endswith("·"), f"the {where} ends in a stranded separator: {text!r}"
+            assert len(text) <= size[0], f"the {where} overflowed its row: {text!r}"
+
+        # The count survives at any width; only the hint after it is dropped.
+        assert "3 actions behind" in str(pane.query_one("#screen-currency", Static).content)

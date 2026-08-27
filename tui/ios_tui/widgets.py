@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Input, RichLog, Static
 
@@ -92,82 +92,145 @@ class StatsBar(Static):
     elapsed_s: reactive[float] = reactive(0.0)
 
     def render(self) -> Text:
+        """Segments, dropped from the right until the row fits.
+
+        Written left to right and left to truncate, a narrow terminal cut the
+        last field mid-word and stranded the separator that introduced it:
+        `... 9 refused ·`. The order below is the priority order: what the
+        device cost first, what the model cost next, wall time last.
+        """
         s = self.stats
-        line = Text(style="dim")
-        line.append(f" {s.actions} actions · {s.observations} obs")
-        if s.actions:
-            line.append(f" ({s.observation_overhead:.2f}/action)")
-        line.append(f" · {s.device_tokens} device tok")
+        overhead = f" ({s.observation_overhead:.2f}/action)" if s.actions else ""
+        segments: list[tuple[str, str]] = [
+            (f"{s.actions} actions · {s.observations} obs{overhead}", "dim"),
+            (f"{s.device_tokens} device tok", "dim"),
+        ]
         if s.refusals:
-            line.append(f" · {s.refusals} refused", style="yellow")
+            segments.append((f"{s.refusals} refused", "yellow"))
         if self.prompt_tokens or self.completion_tokens:
-            line.append(f" · model {self.prompt_tokens}/{self.completion_tokens}")
+            segments.append((f"model {self.prompt_tokens}/{self.completion_tokens}", "dim"))
         if self.elapsed_s:
-            line.append(f" · {self.elapsed_s:.1f}s")
+            segments.append((f"{self.elapsed_s:.1f}s", "dim"))
+
+        width = self.size.width or 80
+        while len(segments) > 1 and _joined_width(segments) + 1 > width:
+            segments.pop()
+
+        line = Text(" ", style="dim")
+        for index, (text, style) in enumerate(segments):
+            if index:
+                line.append(" · ", style="dim")
+            line.append(text, style=style)
         return line
+
+
+#: One row of the transcript, kept as data so it can be laid out again.
+Entry = tuple[str, object]
 
 
 class Transcript(RichLog):
     """What was said and done, in order.
 
-    Streamed model text does not come here token by token. A `RichLog` line is
-    committed once written, so appending per delta produces one line per token;
-    the live fragment lives in `Thinking` below and is promoted here when the
-    turn completes.
+    Two things about `RichLog` shape this class.
+
+    **A line is committed when it is written.** Appending streamed model text
+    per delta would produce one line per token, so the live fragment lives in
+    `Thinking` below and is promoted here once the turn completes.
+
+    **A line's wrapping is fixed when it is written**, against a width the
+    widget does not know until it has been rendered. That is why no row here
+    pads to the pane: a layout measured against the pane is measured against
+    the wrong number for every row written during startup, and those rows wrap
+    at `RichLog`'s 80-column default however wide the pane actually is. Rows
+    are sized by their content instead, which is correct at any width and at
+    every moment. See `_action_row`.
     """
 
     def __init__(self, id: str = "transcript") -> None:
         super().__init__(markup=True, wrap=True, id=id)
+        #: Kept as data, not only as rendered lines. Nothing re-lays them out
+        #: today, but a row is a record of something that happened and the log
+        #: is the only place it exists.
+        self._entries: list[Entry] = []
+
+    # -- what happened -----------------------------------------------------
 
     def goal(self, text: str) -> None:
-        self.write(Text(f"\n> {text}", style="bold"))
+        self._add(("goal", text))
 
     def said(self, text: str) -> None:
         if text.strip():
-            self.write(Text(text.strip(), style="italic"))
+            self._add(("said", text.strip()))
 
     def acted(self, event: ActionFinished) -> None:
-        line = Text("  ")
-        # A refusal never reached the device, so it is the verb that is
-        # remarkable rather than the timing. Marking it in the first column
-        # means it survives any width; a note tacked on the end does not, and
-        # at 64 columns it vanished entirely while the counter still said nine.
-        style = "yellow" if event.refused else ("cyan" if event.verb in _ACTING else "dim")
-        line.append(f"{event.verb:<12}", style=style)
-        line.append(_pad(_target_of(event.args), self._target_width()))
-        if event.refused:
-            line.append(f"{'refused':>{_RIGHT}}", style="yellow")
-        else:
-            line.append(f"{event.elapsed_ms:>{_RIGHT - 2}}ms", style="dim")
-        self.write(line)
+        self._add(("acted", event))
 
     def observed(self, event: Observed) -> None:
-        target = _pad("", self._target_width())
-        tokens = f"{event.stats.device_tokens:>{_RIGHT - 4}} tok"
-        self.write(Text(f"  {'observe':<12}{target}{tokens}", "dim"))
-
-    def _target_width(self) -> int:
-        """How much room the middle column actually has.
-
-        Fixed at 38 it was wider than the whole pane on a narrow terminal, so
-        every action wrapped and the tail of a refusal appeared on its own line
-        as an orange fragment reading "reached the device".
-
-        The two extra columns are the vertical scrollbar, which appears once
-        the transcript overflows and is not deducted from `size.width`. Without
-        them the right-hand column loses its last characters exactly when there
-        is enough history to be worth reading.
-        """
-        return max(6, (self.size.width or 80) - 2 - 12 - _RIGHT - 2)
+        self._add(("observed", event))
 
     def note(self, text: str, style: str = "dim") -> None:
-        self.write(Text(f"  {text}", style=style))
+        self._add(("note", (text, style)))
 
     def finished(self, event: GoalFinished) -> None:
-        style = "green" if event.succeeded else "yellow"
-        self.write(Text(f"  {event.summary or '(no summary)'}", style=style))
-        if event.stopped_because:
-            self.write(Text(f"  stopped: {event.stopped_because}", style="yellow"))
+        self._add(("finished", event))
+
+    def _add(self, entry: Entry) -> None:
+        self._entries.append(entry)
+        for line in self._rows(entry):
+            self.write(line)
+
+    def _rows(self, entry: Entry) -> list[Text]:
+        kind, data = entry
+        match kind:
+            case "goal":
+                return [Text(f"\n> {data}", style="bold")]
+            case "said":
+                return [Text(str(data), style="italic")]
+            case "note":
+                assert isinstance(data, tuple)
+                note, note_style = data
+                return [Text(f"  {note}", style=str(note_style))]
+            case "acted":
+                assert isinstance(data, ActionFinished)
+                return [self._action_row(data)]
+            case "observed":
+                assert isinstance(data, Observed)
+                return [Text(f"  {'observe':<12}{data.stats.device_tokens} tok", "dim")]
+            case _:
+                assert isinstance(data, GoalFinished)
+                style = "green" if data.succeeded else "yellow"
+                rows = [Text(f"  {data.summary or '(no summary)'}", style=style)]
+                if data.stopped_because:
+                    rows.append(Text(f"  stopped: {data.stopped_because}", style="yellow"))
+                return rows
+
+    def _action_row(self, event: ActionFinished) -> Text:
+        """Verb, then what it was aimed at, then what it cost.
+
+        Only the verb is padded. The target runs to its natural length and the
+        cost follows it, so a row is as long as its content and never longer.
+
+        A right-aligned cost column would scan better and was tried twice. It
+        cannot be done reliably here: the padding has to be measured against
+        the pane, and `RichLog` fixes a line's wrapping when the line is
+        written, from a region it does not have until it has been rendered. Rows
+        written during startup were padded to a width the pane did not have and
+        wrapped at 80 columns regardless, which is far worse than ragged.
+        """
+        line = Text("  ")
+        # A refusal never reached the device, so the verb is what is
+        # remarkable rather than the timing. Colouring the first column means
+        # it survives any width; a note at the end of the row does not.
+        style = "yellow" if event.refused else ("cyan" if event.verb in _ACTING else "dim")
+        line.append(f"{event.verb:<12}", style=style)
+        target = _target_of(event.args)
+        if target:
+            line.append(f"{target}  ")
+        if event.refused:
+            line.append("refused", style="yellow")
+        else:
+            line.append(f"{event.elapsed_ms}ms", style="dim")
+        return line
 
 
 class Thinking(Static):
@@ -193,25 +256,34 @@ class Thinking(Static):
         return text
 
 
-class ScreenPane(VerticalScroll):
-    """Where the phone is, in the agent's own words.
+class ScreenPane(Vertical):
+    """The phone, as the model reads it.
 
-    This is `Digest.render()` verbatim: the exact text the model was handed.
-    Showing anything prettier would mean the person and the model are looking
-    at different screens, and every disagreement about what went wrong would
-    start with working out which one was right.
+    The body is `Digest.render()` verbatim: the exact text the model was
+    handed. Showing anything prettier would mean the person and the model are
+    looking at different screens, and every disagreement about what went wrong
+    would start with working out which one was right.
+
+    Above it sits one row of chrome saying whether that text is still true.
+    This pane is a readout, and a readout nobody can date is worth less than no
+    readout at all: most actions hand back a delta rather than a whole screen,
+    so what is displayed falls behind the phone constantly and by design.
+
+    The currency line lives here rather than in the body deliberately. It was
+    prepended into the digest text, which mixed chrome into the one string that
+    is supposed to be exactly what the model saw.
     """
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self.text = ""
-        #: Actions since this screen was captured. Not zero for long: most
-        #: actions hand back a delta rather than a whole screen, which is what
-        #: keeps a long flow cheap and what makes this counter necessary.
+        #: Actions since this screen was captured.
         self.stale_by = 0
 
     def compose(self) -> ComposeResult:
-        yield Static("", id="screen-text")
+        yield Static("", id="screen-currency")
+        with VerticalScroll(id="screen-scroll"):
+            yield Static("", id="screen-text")
 
     def on_mount(self) -> None:
         # Drawn once on mount so the placeholder and every later update go
@@ -221,7 +293,7 @@ class ScreenPane(VerticalScroll):
 
     @property
     def displayed_text(self) -> str:
-        """What is on screen, placeholder included."""
+        """What is in the body, placeholder included."""
         return self.text or "(nothing read yet)"
 
     def show(self, text: str) -> None:
@@ -235,24 +307,59 @@ class ScreenPane(VerticalScroll):
         self._draw()
 
     def _draw(self) -> None:
-        # Assembled rather than concatenated. `Text(a, style=...) + Text(b)`
-        # carries the first operand's style onto the whole result, which turned
-        # the entire digest yellow whenever the header was present.
-        parts: list[tuple[str, str]] = []
-        if self.stale_by:
-            parts.append(
-                (
-                    f"{self.stale_by} action(s) since this was read, ctrl+r to re-read\n",
-                    "yellow",
-                )
-            )
-        parts.append((self.displayed_text, "" if self.text else "dim"))
-        self.query_one("#screen-text", Static).update(Text.assemble(*parts))
+        self.query_one("#screen-text", Static).update(
+            Text(self.displayed_text, style="" if self.text else "dim")
+        )
+        self.query_one("#screen-currency", Static).update(self._currency())
+
+    def _currency(self) -> Text:
+        """One row: is this what the phone shows?
+
+        The wording is the point. "behind" rather than "ago" because the unit
+        is actions, not time; a run can sit on one snapshot for a minute and be
+        perfectly current.
+
+        Written to the room available, longest form first. Letting it truncate
+        cut "ctrl+r to re-read" mid-phrase and left a dangling separator, which
+        is the same failure the status bar had: the fix is to choose a shorter
+        sentence, not to let one be sliced.
+        """
+        width = self.size.width or 40
+        if not self.text:
+            return Text(_fit(width, "waiting for the first screen", "waiting"), style="dim")
+        if not self.stale_by:
+            return Text(" current", style="dim")
+        plural = "" if self.stale_by == 1 else "s"
+        return Text(
+            _fit(
+                width,
+                f"{self.stale_by} action{plural} behind \u00b7 ctrl+r to re-read",
+                f"{self.stale_by} action{plural} behind",
+                f"{self.stale_by} behind",
+            ),
+            style="yellow",
+        )
 
 
 class GoalInput(Input):
     def __init__(self) -> None:
         super().__init__(placeholder="what should it do?", id="goal-input")
+
+
+def _joined_width(segments: list[tuple[str, str]]) -> int:
+    return sum(len(text) for text, _ in segments) + 3 * (len(segments) - 1)
+
+
+def _fit(width: int, *options: str) -> str:
+    """The longest of `options` that fits, with a leading space for the gutter.
+
+    Never returns a truncation: a cut sentence reads as a rendering fault, and
+    a shorter sentence that is whole does not.
+    """
+    for option in options:
+        if len(option) + 1 <= width:
+            return f" {option}"
+    return f" {options[-1]}"
 
 
 def _pad(text: str, width: int) -> str:

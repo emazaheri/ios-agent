@@ -1,4 +1,14 @@
-/* Two shapes, one widget tree.
+/* Three grounds, and they mean something.
+ *
+ *   $background  the app itself: the transcript, which is the record
+ *   $surface     a panel set into it: the device readout
+ *   $panel       chrome: the status bar, the stats bar, the currency strip
+ *
+ * That is the whole visual system, and it is why there is no rule drawn
+ * between the two panes. A `|` would say "two columns of one table", and
+ * these are not that.
+ *
+ * Two shapes, one widget tree.
  *
  * Inline mode is a set of rules here rather than a second compose(), so a bug
  * fixed in one shape is fixed in both. What it drops is the screen pane and
@@ -10,6 +20,37 @@ Screen {
     layout: vertical;
 }
 
+/* Scrollbars are chrome, and chrome that draws the eye is a bug.
+ *
+ * The defaults are a wide thumb in a contrasting track, and two of those
+ * sitting either side of the gutter read as exactly the doubled rule this
+ * layout exists to avoid. Narrowed to one cell and toned to the ground each
+ * one sits on, so a scrollbar is visible when you need it and is otherwise
+ * part of the background.
+ *
+ * Set per widget rather than through `*`: a universal selector loses to
+ * Textual's own widget styles, and the bars stayed default grey.
+ */
+#transcript, #log-pane {
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $background;
+    scrollbar-background-hover: $background;
+    scrollbar-background-active: $background;
+    scrollbar-color: $surface-lighten-1;
+    scrollbar-color-hover: $panel-lighten-2;
+    scrollbar-color-active: $panel-lighten-2;
+}
+
+#screen-scroll {
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $surface;
+    scrollbar-background-hover: $surface;
+    scrollbar-background-active: $surface;
+    scrollbar-color: $panel;
+    scrollbar-color-hover: $panel-lighten-2;
+    scrollbar-color-active: $panel-lighten-2;
+}
+
 #status-bar {
     height: 1;
     dock: top;
@@ -19,14 +60,29 @@ Screen {
     height: 1fr;
 }
 
+/* No rule between the panes.
+ *
+ * A drawn `|` says "two columns of one table", and these are not that: the
+ * left is the record of what happened, the right is a live readout from a
+ * device. The boundary is carried by tone instead, which is quieter and says
+ * the true thing: one of these is a panel set into the app, the other is the
+ * app. The gutter is the left pane's right padding.
+ */
 #left {
     width: 2fr;
-    border-right: solid $panel;
 }
 
+/* On the app's own ground, not on a panel.
+ *
+ * `RichLog` defaults to `$surface`, which is the same tone this layout gives
+ * the readout, so both panes were painted identically and what looked like a
+ * divider was the darker ground showing through the gutter between them. The
+ * boundary was an accident of spacing rather than a decision.
+ */
 #transcript {
     height: 1fr;
     padding: 0 1;
+    background: $background;
     /* The lines wrap, so a horizontal scrollbar is only ever a stripe across
      * the bottom of the pane that nothing needs. */
     overflow-x: hidden;
@@ -40,13 +96,30 @@ Screen {
     padding: 0 1;
 }
 
+/* The instrument panel. Lifted off the background rather than fenced off it.
+ * `$boost` is 4% white, which is invisible on a near-black ground; `$surface`
+ * is one real step up. */
 #screen-pane {
     width: 1fr;
+    background: $surface;
+}
+
+#screen-scroll {
     padding: 0 1;
+}
+
+/* One row of chrome, and the only thing in this pane that is not verbatim
+ * from the device. Kept flush against the top of the panel so it reads as a
+ * label on the instrument rather than as a first line of its output. */
+#screen-currency {
+    height: 1;
+    background: $panel;
+    color: $text-muted;
 }
 
 #log-pane {
     height: 8;
+    background: $background;
     overflow-x: hidden;
     border-top: solid $panel;
     padding: 0 1;
