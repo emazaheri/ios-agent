@@ -11,7 +11,16 @@ ios-agent --device "iPhone" --approve \
     --app com.apple.Preferences "turn wi-fi off"
 ```
 
-`--pick` lists everything reachable and lets you choose. The cursor starts
+Inside the app, `/device` (or `ctrl+o`) opens the same list at any point and
+switches to whatever you choose, releasing the current device first. `--pick`
+asks the same question before the first device is acquired.
+
+Typed commands all take a leading slash: `/device`, `/log`, `/save`, `/quit`.
+A goal is a sentence about a phone and a command is an instruction to the front
+end, so the slash tells them apart without reserving English words; someone
+whose goal genuinely is "device settings" can still ask for it.
+
+The cursor starts
 wherever `DevicePool.resolve(None)` points, which is the same device an
 unattended run would take, so a physical phone is never pre-selected: reaching
 one always costs a keystroke. Devices that cannot be driven are listed too,

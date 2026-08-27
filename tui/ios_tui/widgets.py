@@ -343,7 +343,7 @@ class ScreenPane(Vertical):
 
 class GoalInput(Input):
     def __init__(self) -> None:
-        super().__init__(placeholder="what should it do?", id="goal-input")
+        super().__init__(placeholder="what should it do?  (/device to switch)", id="goal-input")
 
 
 def _joined_width(segments: list[tuple[str, str]]) -> int:

@@ -126,6 +126,22 @@ class GoalRunner:
         self._pool = DevicePool(self.settings)
         return await self._pool.acquire(self.device, bundle_id=self._bundle_id)
 
+    async def switch(self, device: str) -> IosSession:
+        """Let go of the current device and take another.
+
+        The session, the pool lease and the last screen all belong to the
+        device being left, so all three go. The audit trail goes with the
+        session for the same reason: it is that device's record of what was
+        done to it, and carrying it onto the next one would make one trail
+        claim to describe two phones.
+        """
+        await self.close()
+        self._pool = None
+        self.session = None
+        self._last_screen = ""
+        self.device = device
+        return await self.start()
+
     async def close(self) -> None:
         """Always run this. `DevicePool.acquire` has no cleanup of its own on
         cancellation, so a cancelled start can leave a runner holding the

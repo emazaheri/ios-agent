@@ -13,8 +13,10 @@ import asyncio
 import pytest
 from ios_tui.app import IosAgentApp
 from ios_tui.devices import DevicePicker
+from ios_tui.events import ActionFinished, DeviceReady, ScreenUpdated, StatsSnapshot
 from ios_tui.runner import GoalRunner
-from textual.widgets import OptionList, Static
+from ios_tui.widgets import ScreenPane, StatsBar, StatusBar
+from textual.widgets import Input, OptionList, Static
 from tui_harness import ScriptedModel, settings
 
 from ios_mcp.devices.base import DeviceInfo
@@ -61,6 +63,13 @@ def devices(monkeypatch: pytest.MonkeyPatch) -> list[DeviceInfo]:
 
 def _app() -> IosAgentApp:
     return IosAgentApp(lambda sink: GoalRunner(sink, settings(), model=ScriptedModel([])))
+
+
+async def _settle(app: IosAgentApp, until: object, timeout: float = 10.0) -> None:
+    assert callable(until)
+    async with asyncio.timeout(timeout):
+        while not until():
+            await asyncio.sleep(0.02)
 
 
 async def _picker(app: IosAgentApp) -> DevicePicker:
@@ -174,3 +183,179 @@ async def test_an_empty_list_says_what_to_run_next(monkeypatch: pytest.MonkeyPat
 
         status = str(picker.query_one("#picker-status", Static).content)
         assert "doctor" in status, "the empty state should name the command that explains it"
+
+
+# -- switching device from inside the running app --------------------------
+
+
+class _SwitchableRunner(GoalRunner):
+    """Records what it was asked to switch to, without touching a device."""
+
+    def __init__(self, sink: object) -> None:
+        super().__init__(sink, settings(), model=ScriptedModel([]))  # type: ignore[arg-type]
+        self.switched_to: list[str] = []
+        self.closed = 0
+
+    async def start(self) -> object:
+        from screens import DeviceModel, build_session
+
+        session, _, _ = build_session(DeviceModel(), settings())
+        self.session = session
+        self.sink.emit(
+            DeviceReady(
+                lease={
+                    "device": {
+                        "name": self.device or "iPhone 17",
+                        "os_version": "26.5",
+                        "kind": "simulator",
+                    }
+                }
+            )
+        )
+        return session
+
+    async def switch(self, device: str) -> object:
+        self.switched_to.append(device)
+        self.closed += 1
+        self.device = device
+        self._last_screen = ""
+        return await self.start()
+
+    async def close(self) -> None:
+        self.closed += 1
+
+
+def _switchable() -> IosAgentApp:
+    return IosAgentApp(_SwitchableRunner)
+
+
+async def test_the_shortcut_switches_device_without_leaving_the_app(
+    devices: list[DeviceInfo],
+) -> None:
+    """The point of the binding: no restart, no flag, no remembering a name."""
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        await pilot.press("ctrl+o")
+        await _settle(app, lambda: isinstance(app.screen, DevicePicker))
+        picker = app.screen
+        assert isinstance(picker, DevicePicker)
+        await _settle(app, lambda: bool(picker.devices))
+
+        listing = picker.query_one("#picker-list", OptionList)
+        listing.highlighted = next(i for i, d in enumerate(devices) if d.udid == "sim-cold")
+        await pilot.press("enter")
+
+        runner = app.runner
+        assert isinstance(runner, _SwitchableRunner)
+        await _settle(app, lambda: bool(runner.switched_to))
+        assert runner.switched_to == ["sim-cold"]
+
+
+async def test_switching_clears_what_belonged_to_the_old_device(
+    devices: list[DeviceInfo],
+) -> None:
+    """The screen and the counters describe a device, not the app.
+
+    Carrying either across a switch means the pane shows one phone's screen
+    while the header names another, which is the exact confusion the currency
+    strip exists to prevent.
+    """
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app._apply(ScreenUpdated(text='screen: com.apple.Preferences / "Settings"'))
+        app._apply(
+            ActionFinished(verb="tap", args={"target": "Wi-Fi"}, stats=StatsSnapshot(actions=4))
+        )
+        await pilot.pause()
+        assert app.query_one(ScreenPane).text
+        assert app.query_one(StatsBar).stats.actions == 4
+
+        await pilot.press("ctrl+o")
+        await _settle(app, lambda: isinstance(app.screen, DevicePicker))
+        picker = app.screen
+        assert isinstance(picker, DevicePicker)
+        await _settle(app, lambda: bool(picker.devices))
+        picker.query_one("#picker-list", OptionList).highlighted = next(
+            i for i, d in enumerate(devices) if d.udid == "sim-cold"
+        )
+        await pilot.press("enter")
+
+        runner = app.runner
+        assert isinstance(runner, _SwitchableRunner)
+        await _settle(app, lambda: bool(runner.switched_to))
+        await pilot.pause()
+
+        assert app.query_one(ScreenPane).text == "", "the old device's screen survived"
+        assert app.query_one(StatsBar).stats.actions == 0, "the old device's counters survived"
+
+
+async def test_switching_is_refused_while_a_goal_is_running(
+    devices: list[DeviceInfo],
+) -> None:
+    """Taking the device away mid-action leaves the phone somewhere unrecorded."""
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+        app._run_worker = object()  # a run is in flight
+
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, DevicePicker), "the picker opened during a run"
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "stop the current run first" in written
+
+
+async def test_slash_device_opens_the_picker(devices: list[DeviceInfo]) -> None:
+    """The discoverable form, and the one the shortcut exists to shortcut.
+
+    `ctrl+d` would have been the obvious key and is unusable: `Input` binds it
+    to `delete_right`, so with the goal box focused it deletes a character.
+    A typed command cannot collide with a widget's keymap.
+    """
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        goal_input = app.query_one("#goal-input", Input)
+        goal_input.value = "/device"
+        await pilot.press("enter")
+
+        await _settle(app, lambda: isinstance(app.screen, DevicePicker))
+        assert goal_input.value == "", "the command was left in the box"
+
+
+async def test_a_slash_command_is_never_mistaken_for_a_goal(
+    devices: list[DeviceInfo],
+) -> None:
+    """A goal is a sentence about a phone; a command instructs the front end.
+
+    The slash is what tells them apart, so someone whose goal genuinely is
+    "device settings" can still ask for it.
+    """
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app.query_one("#goal-input", Input).value = "device settings"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, DevicePicker), "a goal was read as a command"
+
+
+async def test_an_unknown_command_lists_the_real_ones(devices: list[DeviceInfo]) -> None:
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app.query_one("#goal-input", Input).value = "/frobnicate"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "/device" in written

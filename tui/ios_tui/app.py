@@ -47,6 +47,7 @@ from ios_tui.events import (
     Observed,
     Progress,
     ScreenUpdated,
+    StatsSnapshot,
     Stopping,
 )
 from ios_tui.runner import GoalRunner
@@ -71,6 +72,11 @@ class IosAgentApp(App[int]):
         Binding("escape", "stop", "Stop", show=True),
         Binding("ctrl+q", "quit", "Quit", show=True),
         Binding("ctrl+l", "toggle_log", "Log", show=True),
+        # Not ctrl+d, which would have been the obvious mnemonic: `Input`
+        # binds it to `delete_right`, so with the goal box focused (which is
+        # always) the binding never fires. `/device` is the discoverable form;
+        # this is the shortcut.
+        Binding("ctrl+o", "device", "Device", show=True),
         Binding("ctrl+r", "reread", "Re-read screen", show=False),
         Binding("ctrl+s", "save", "Save trail", show=False),
     ]
@@ -278,14 +284,79 @@ class IosAgentApp(App[int]):
         self._last_progress_at = monotonic()
         return True
 
+    @work(group="lifecycle")
+    async def action_device(self) -> None:
+        """Switch device, at any point, without leaving the app.
+
+        Refused while a goal is running rather than interrupting one. Stopping
+        mid-action and then taking the device away leaves the phone in a state
+        nothing recorded, and `esc` already exists for stopping deliberately.
+        """
+        if self.runner is None or self._run_worker is not None:
+            self.transcript.note("finish or stop the current run first (esc)", "yellow")
+            return
+
+        current = self.runner.device
+        chosen = await self.push_screen_wait(DevicePicker(self.runner.settings))
+        if chosen is None or chosen == current:
+            return
+
+        status = self.query_one(StatusBar)
+        status.state = "starting"
+        self._last_progress_at = monotonic()
+        self.transcript.note("switching device")
+        try:
+            await self.runner.switch(chosen)
+        except Exception:
+            # Reported as a `Failed` event by the runner. The old device is
+            # already released at that point, so there is nothing to fall back
+            # to and saying so is all that is left.
+            self.transcript.note("no device attached. ctrl+d to choose another.", "red")
+            return
+
+        # Everything on screen described the device just released.
+        self._manual_backend = None
+        self._stale = False
+        self.query_one(ScreenPane).show("")
+        bar = self.query_one(StatsBar)
+        bar.stats = StatsSnapshot()
+        bar.prompt_tokens = bar.completion_tokens = 0
+        bar.elapsed_s = 0.0
+        self.query_one(GoalInput).focus()
+
     # -- running a goal ----------------------------------------------------
 
     def on_input_submitted(self, event: GoalInput.Submitted) -> None:
-        goal = event.value.strip()
-        if not goal:
+        typed = event.value.strip()
+        if not typed:
             return
         event.input.value = ""
-        self.submit(goal)
+        if typed.startswith("/"):
+            self._command(typed[1:].strip().lower())
+            return
+        self.submit(typed)
+
+    def _command(self, name: str) -> None:
+        """Anything typed with a leading slash is addressed to the app.
+
+        A goal is a sentence about a phone and a command is an instruction to
+        the front end, so the two need to be told apart. The slash is the
+        cheapest way to do that without reserving English words: someone whose
+        goal genuinely is "device settings" can still type it.
+        """
+        if name in {"device", "devices"}:
+            self.action_device()
+        elif name in {"log", "logs"}:
+            self.action_toggle_log()
+        elif name == "save":
+            self.action_save()
+        elif name in {"quit", "exit"}:
+            # Async, unlike the others, because quitting releases the device.
+            self.run_worker(self.action_quit(), group="lifecycle")
+        else:
+            self.transcript.note(
+                f"no command {name!r}. Try /device, /log, /save, /quit.", "yellow"
+            )
 
     def submit(self, goal: str) -> None:
         if self.runner is None or self._run_worker is not None:
