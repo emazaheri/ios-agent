@@ -272,6 +272,9 @@ class DeviceModel:
     #: wrapper's label, so the tap has a consequence the agent can see. A
     #: target that accepts a tap and changes nothing is the dead-switch failure
     #: wearing a different hat, and this is not the task that tests for it.
+    #:
+    #: One-way: see `_tap_card`. A like that a second tap undoes measures tap
+    #: discipline, which is not what this screen is here to measure.
     likes: dict[str, bool] = field(
         default_factory=lambda: {
             card.identifier: False for pane in PANES.values() for card in pane.cards
@@ -541,7 +544,13 @@ class DeviceModel:
         """
         for index, card in enumerate(pane.cards):
             if _hit(_like_rect(index), x, y):
-                self.likes[card.identifier] = not self.likes[card.identifier]
+                # Liking is one-way, not a toggle. Modelled as a toggle first,
+                # which made a second tap silently undo the first and turned
+                # this task into a test of tapping exactly once. The task
+                # exists to measure whether a *drawn* control can be found at
+                # all, so counting taps measures the fake instead of the agent.
+                # A like on the app this models is sent, not held down.
+                self.likes[card.identifier] = True
                 return
 
     def _toggle(self, row: Row, x: float, y: float) -> None:
