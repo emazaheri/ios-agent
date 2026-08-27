@@ -69,13 +69,19 @@ ApprovalModal {
     align: center middle;
 }
 
+/* Fixed at 70 columns this overflowed a 64-column terminal and cut the reason
+ * off at the right edge. That is the worst possible thing to truncate: the
+ * reason is why the action was flagged, and approving without it is consent to
+ * something nobody read. It now fits whatever room there is. */
 #approval {
     grid-size: 2;
     grid-gutter: 1 2;
     grid-rows: auto auto auto auto 3;
     padding: 1 2;
-    width: 70;
+    width: 100%;
+    max-width: 70;
     height: auto;
+    max-height: 100%;
     border: thick $error;
     background: $surface;
 }
@@ -89,6 +95,7 @@ ApprovalModal {
 #approval-signature,
 #approval-goal {
     column-span: 2;
+    height: auto;
 }
 
 #approval-signature,

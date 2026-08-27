@@ -18,7 +18,7 @@ import pytest
 from ios_tui.app import IosAgentApp
 from ios_tui.events import ActionFinished, DeviceReady, Observed, Progress, StatsSnapshot
 from ios_tui.runner import GoalRunner
-from ios_tui.widgets import ScreenPane, StatusBar
+from ios_tui.widgets import StatusBar
 from screens import DeviceModel, build_session
 from tui_harness import ScriptedModel, settings
 
@@ -93,6 +93,11 @@ async def test_a_refusal_stays_visible_when_the_columns_are_squeezed() -> None:
     The stats bar would say nine refused while not one transcript row showed
     which. A refusal never reached the device, so it belongs in the verb column
     where nothing can truncate it away.
+
+    The assertion is against the *visible* width, not the line's text. A
+    `RichLog` keeps the whole string it was handed whether or not the pane can
+    show it, so `"refused" in line.text` is true even when a person cannot see
+    it, and the first version of this test passed against the bug.
     """
     app = _app()
     async with app.run_test(size=NARROW) as pilot:
@@ -107,8 +112,12 @@ async def test_a_refusal_stays_visible_when_the_columns_are_squeezed() -> None:
         )
         await pilot.pause()
 
-        written = "\n".join(line.text for line in app.transcript.lines)
-        assert "refused" in written
+        visible = max(1, app.transcript.size.width - 2)
+        shown = "\n".join(line.text[:visible] for line in app.transcript.lines)
+        assert "refused" in shown, (
+            f"the refusal is past column {visible}, so nothing on screen says the "
+            f"action never ran:\n" + "\n".join(line.text for line in app.transcript.lines)
+        )
 
 
 @pytest.mark.parametrize("size", [NARROW, WIDE])
@@ -132,10 +141,80 @@ async def test_the_status_bar_never_drops_the_state(size: tuple[int, int]) -> No
 
 
 async def test_the_screen_pane_says_so_before_anything_has_been_read() -> None:
-    """An empty pane and a pane showing an empty screen look the same."""
+    """An empty pane and a pane showing an empty screen look the same.
+
+    Asserted against the `Static`'s own content rather than against the pane's
+    `displayed_text` property. The property was always right; the bug was that
+    nothing drew it, because the placeholder lived in `compose` and every later
+    update went through `_draw`. Testing the property tests the wrong half.
+    """
+    from textual.widgets import Static
+
     app = _app()
     async with app.run_test(size=WIDE) as pilot:
         await _ready(app)
         await pilot.pause()
 
-        assert "nothing read yet" in app.query_one(ScreenPane).displayed_text
+        drawn = str(app.query_one("#screen-text", Static).content)
+        assert "nothing read yet" in drawn
+
+
+@pytest.mark.parametrize("size", [NARROW, WIDE])
+async def test_nothing_in_the_approval_modal_falls_off_the_screen(size: tuple[int, int]) -> None:
+    """The one widget where cut text is a safety problem, not a cosmetic one.
+
+    Fixed at 70 columns the modal overflowed a 64-column terminal: the reason
+    widget's right edge sat at column 67, three columns past the end of the
+    display, and the sentence explaining why the action was flagged was clipped
+    to one row. Approving an action whose justification ran off the screen is
+    consent to something nobody read.
+
+    The assertion is on `region`, the widget's absolute position, rather than
+    on `size`. `size` is the content box and excludes the border, so in the
+    broken case it reported a comfortable 64 while the modal was painting past
+    the edge of the terminal. Asserting the wrong box is how the first version
+    of this test passed against the bug it was written for.
+    """
+    from ios_tui.approval import ApprovalModal
+
+    reason = "type_text on 'Search' matches the destructive rule 'delete'"
+    goal = "search my messages for the word delete and remove every one of them"
+
+    app = _app()
+    async with app.run_test(size=size) as pilot:
+        await _ready(app)
+        app.push_screen(
+            ApprovalModal(
+                {
+                    "action": "type_text",
+                    "signature": "type_text:Search|delete everything",
+                    "reason": reason,
+                    "goal": goal,
+                }
+            )
+        )
+        await pilot.pause()
+        modal = app.screen
+        assert isinstance(modal, ApprovalModal)
+
+        width, height = size
+        overflowing = [
+            f"{widget.id or type(widget).__name__} occupies {widget.region!r}"
+            for widget in modal.query("*")
+            if widget.region.right > width or widget.region.bottom > height
+        ]
+        assert overflowing == [], (
+            f"parts of the approval modal are outside a {width}x{height} terminal:\n"
+            + "\n".join(overflowing)
+        )
+
+        # And the sentences wrapped rather than being cut to one row.
+        for widget_id, sentence in (("#approval-reason", reason), ("#approval-goal", goal)):
+            widget = modal.query_one(widget_id)
+            if len(sentence) > widget.size.width:
+                assert widget.size.height > 1, f"{widget_id} was clipped to a single row"
+
+        # Both answers stay reachable: a narrow terminal must not leave a
+        # person with only one button.
+        assert modal.query_one("#refuse").size.width > 0
+        assert modal.query_one("#allow").size.width > 0

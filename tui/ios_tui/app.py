@@ -291,6 +291,9 @@ class IosAgentApp(App[int]):
         try:
             command = parse(line)
         except Unknown as usage:
+            # Say why the grammar appeared. Printing it alone reads as though
+            # the command worked and produced a list.
+            transcript.note(f"I do not understand {line.split(' ')[0]!r}. What I know:", "yellow")
             for row in str(usage).splitlines():
                 transcript.note(row)
             return

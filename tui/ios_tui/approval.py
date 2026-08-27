@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Grid
@@ -48,9 +49,12 @@ class ApprovalModal(ModalScreen[bool]):
 
         with Grid(id="approval"):
             yield Label(f"Allow {action}?", id="approval-title")
-            yield Static(reason, id="approval-reason")
-            yield Static(f"on: {signature}", id="approval-signature")
-            yield Static(f"goal: {goal}", id="approval-goal")
+            # Wrapped, not truncated. Every one of these is a sentence a person
+            # has to read before answering, and a `Static` defaults to clipping
+            # what does not fit.
+            yield Static(Text(reason), id="approval-reason")
+            yield Static(Text(f"on: {signature}"), id="approval-signature")
+            yield Static(Text(f"goal: {goal}"), id="approval-goal")
             yield Button("Refuse  (n)", variant="primary", id="refuse")
             yield Button("Allow  (y)", variant="error", id="allow")
 

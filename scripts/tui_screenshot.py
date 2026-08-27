@@ -24,11 +24,19 @@ failed a test:
 - the status bar put the state last, so a narrow terminal cut the one field
   saying whether anything was happening and kept the device name;
 - the screen pane rendered blank before the first read, which looks the same as
-  a screen with nothing on it.
+  a screen with nothing on it;
+- the approval modal was fixed at 70 columns and painted three columns past the
+  edge of a 64-column terminal, clipping the sentence saying why the action was
+  flagged. That one is a safety bug rather than a cosmetic one: approving an
+  action whose justification ran off the screen is consent to something nobody
+  read.
 
 None is detectable by asserting on widget state, which is what the tests do.
-All are obvious in a picture. `tests/tui/test_layout.py` keeps the last four
-found once `scripts/tui_screenshot.py narrow` had shown them.
+All are obvious in a picture. `tests/tui/test_layout.py` keeps the last five,
+and each of those was checked by reintroducing the bug and confirming the test
+fails: three of them passed against the bug they were written for on the first
+attempt, because they asserted on the wrong box (`size` excludes the border) or
+on stored text rather than on what a pane can actually show.
 
 It runs against the scripted device, so it needs no simulator, no model and no
 API key, and takes about a second.
