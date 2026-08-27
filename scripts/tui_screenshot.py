@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
 """Render the terminal app to PNGs, so it can be looked at rather than guessed at.
 
-    uv run python scripts/tui_screenshot.py            # all three shapes
-    uv run python scripts/tui_screenshot.py fullscreen
+    uv run python scripts/tui_screenshot.py            # every shape
+    uv run python scripts/tui_screenshot.py narrow
 
 This exists because a passing test suite says nothing about what a TUI looks
-like. The first time these images were generated they showed two bugs that
-every test was green through:
+like. Seven bugs have been found by looking at these images, none of which
+failed a test:
 
 - the entire transcript pane was empty, because `LogPane` subclassed
   `Transcript` and `query_one(Transcript)` returned the hidden log pane, so
   every line written went somewhere invisible;
 - the "screen is stale" header turned the whole digest yellow, because
   `Text(a, style=...) + Text(b)` carries the first operand's style onto the
-  result.
+  result;
+- the log pane was empty when opened, because a `display: none` RichLog has no
+  width and drops what it is told to write;
+- the transcript's fixed 38-column target field was wider than the pane on a
+  narrow terminal, so every row wrapped and the tail of a refusal appeared
+  alone in orange reading "reached the device";
+- the refusal marker was tacked on the end of a row, so it was the first thing
+  truncated: the stats bar said nine refused while no row showed which;
+- the status bar put the state last, so a narrow terminal cut the one field
+  saying whether anything was happening and kept the device name;
+- the screen pane rendered blank before the first read, which looks the same as
+  a screen with nothing on it.
 
-Neither is detectable by asserting on widget state, which is what the tests do.
-Both are obvious in a picture.
+None is detectable by asserting on widget state, which is what the tests do.
+All are obvious in a picture. `tests/tui/test_layout.py` keeps the last four
+found once `scripts/tui_screenshot.py narrow` had shown them.
 
 It runs against the scripted device, so it needs no simulator, no model and no
 API key, and takes about a second.
@@ -45,7 +57,8 @@ sys.path[:0] = [
 ]
 
 from ios_tui.app import IosAgentApp  # noqa: E402
-from ios_tui.events import DeviceReady, Progress  # noqa: E402
+from ios_tui.approval import ApprovalModal  # noqa: E402
+from ios_tui.events import DeviceReady, Failed, Progress  # noqa: E402
 from ios_tui.runner import GoalRunner  # noqa: E402
 from ios_tui.widgets import StatsBar, StatusBar  # noqa: E402
 from screens import DeviceModel, build_session  # noqa: E402
@@ -63,12 +76,22 @@ BOLD_TEXT = [
 ]
 
 
+#: Twelve scrolls, of which the verifier refuses the last nine. The state that
+#: showed the layout breaking: a long history, a narrow pane, and a marker that
+#: has to survive both.
+SCROLLING = (
+    [[("observe", {})]]
+    + [[("scroll", {"direction": "down"})]] * 12
+    + [[("done", {"succeeded": True, "summary": "Reached the end of the list."})]]
+)
+
+
 class _Stub(GoalRunner):
     """A runner over the scripted phone. No pool, no device, no model."""
 
-    def __init__(self, sink: Any, model: DeviceModel) -> None:
+    def __init__(self, sink: Any, model: DeviceModel, script: list[Any] = BOLD_TEXT) -> None:
         session, _, _ = build_session(model, settings())
-        super().__init__(sink, settings(), model=ScriptedModel(BOLD_TEXT))
+        super().__init__(sink, settings(), model=ScriptedModel(script))
         self.session = session
 
     async def start(self) -> Any:
@@ -91,10 +114,13 @@ async def capture(
     inline: bool = False,
     manual: bool = False,
     goal: str | None = None,
+    script: list[Any] = BOLD_TEXT,
     after: Callable[[IosAgentApp, Any], Awaitable[None]] | None = None,
 ) -> None:
     model = DeviceModel()
-    app = IosAgentApp(lambda sink: _Stub(sink, model), goal=goal, manual=manual, inline=inline)
+    app = IosAgentApp(
+        lambda sink: _Stub(sink, model, script), goal=goal, manual=manual, inline=inline
+    )
     async with app.run_test(size=size) as pilot:
         async with asyncio.timeout(30):
             while app.query_one(StatusBar).state == "starting":
@@ -131,17 +157,60 @@ async def _type_a_few(app: IosAgentApp, pilot: Any) -> None:
     await pilot.pause()
 
 
+async def _open_the_log(app: IosAgentApp, pilot: Any) -> None:
+    await pilot.press("ctrl+l")
+    await pilot.pause()
+
+
+async def _ask_for_approval(app: IosAgentApp, pilot: Any) -> None:
+    app.run_worker(
+        app.push_screen_wait(
+            ApprovalModal(
+                {
+                    "action": "tap",
+                    "signature": "tap:Delete All",
+                    "reason": "tap on 'Delete All' matches the destructive rule 'delete'",
+                    "matched": "delete",
+                    "goal": "clear my messages",
+                }
+            )
+        ),
+        group="screenshot",
+    )
+    async with asyncio.timeout(10):
+        while not isinstance(app.screen, ApprovalModal):
+            await asyncio.sleep(0.02)
+    await pilot.pause()
+
+
+async def _fail(app: IosAgentApp, pilot: Any) -> None:
+    app._apply(
+        Failed(
+            where="acquire",
+            message=(
+                "Cannot reach WebDriverAgent at http://127.0.0.1:8100. "
+                "The runner process is not listening. It usually needs restarting."
+            ),
+        )
+    )
+    await pilot.pause()
+
+
 SHAPES = {
     "fullscreen": lambda: capture("fullscreen", goal="Turn on Bold Text."),
     "manual": lambda: capture("manual", manual=True, after=_type_a_few),
     "inline": lambda: capture("inline", size=(120, 20), inline=True, goal="Turn on Bold Text."),
     "log": lambda: capture("log", goal="Turn on Bold Text.", after=_open_the_log),
+    "approval": lambda: capture("approval", after=_ask_for_approval),
+    "failure": lambda: capture("failure", after=_fail),
+    # The two that found the layout bugs: a long history in a small terminal.
+    "narrow": lambda: capture(
+        "narrow", size=(64, 24), goal="Scroll to the bottom.", script=SCROLLING
+    ),
+    "refusals": lambda: capture(
+        "refusals", goal="Scroll to the bottom of the contacts list.", script=SCROLLING
+    ),
 }
-
-
-async def _open_the_log(app: IosAgentApp, pilot: Any) -> None:
-    await pilot.press("ctrl+l")
-    await pilot.pause()
 
 
 async def main() -> int:

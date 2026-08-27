@@ -27,6 +27,9 @@ Screen {
 #transcript {
     height: 1fr;
     padding: 0 1;
+    /* The lines wrap, so a horizontal scrollbar is only ever a stripe across
+     * the bottom of the pane that nothing needs. */
+    overflow-x: hidden;
 }
 
 /* The live model fragment. Hidden until there is something in it, so an idle
@@ -44,6 +47,7 @@ Screen {
 
 #log-pane {
     height: 8;
+    overflow-x: hidden;
     border-top: solid $panel;
     padding: 0 1;
 }

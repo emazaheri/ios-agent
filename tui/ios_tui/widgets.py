@@ -21,6 +21,11 @@ from ios_tui.events import ActionFinished, GoalFinished, Observed, StatsSnapshot
 #: where everything looks the same is a log, not a view.
 _ACTING = {"tap", "type_text", "set_value", "scroll", "press_button", "open_url"}
 
+#: Width of the transcript's right-hand column: timing, token count, or the
+#: word "refused". Wide enough for "refused" and for four digits of
+#: milliseconds, which covers a real device's ~3.7s snapshots.
+_RIGHT = 8
+
 
 class StatusBar(Static):
     """Who we are talking to, and what state the app is in."""
@@ -34,14 +39,33 @@ class StatusBar(Static):
     waiting_for: reactive[float] = reactive(0.0)
 
     def render(self) -> Text:
+        """Build right to left, because the state is what must never be cut.
+
+        Laid out left to right, a narrow terminal truncates whatever is last,
+        and what is last is the one field that says whether anything is
+        happening. So the state and the waiting counter are budgeted first and
+        the device name gives up its characters to them.
+        """
+        state = Text(f" {self.state}", style=_STATE_STYLES.get(self.state, "dim"))
+        if self.state == "starting" and self.waiting_for >= 3.0:
+            state.append(f" +{self.waiting_for:.0f}s", style="dim")
+
+        width = self.size.width or 80
         line = Text()
         line.append(" ios-agent ", style="bold reverse")
-        line.append(f" {self.device} ")
+        remaining = width - line.cell_len - state.cell_len - 2
+
+        identity = Text()
+        if self.device:
+            identity.append(f" {self.device}")
         if self.model:
-            line.append(f"· {self.model} ", style="dim")
-        line.append(f"· {self.state}", style=_STATE_STYLES.get(self.state, "dim"))
-        if self.state == "starting" and self.waiting_for >= 3.0:
-            line.append(f" +{self.waiting_for:.0f}s", style="dim")
+            identity.append(f" · {self.model}", style="dim")
+        if identity.cell_len > remaining > 1:
+            identity.truncate(remaining, overflow="ellipsis")
+
+        line.append_text(identity)
+        line.append(" ·")
+        line.append_text(state)
         return line
 
 
@@ -104,16 +128,37 @@ class Transcript(RichLog):
 
     def acted(self, event: ActionFinished) -> None:
         line = Text("  ")
-        style = "cyan" if event.verb in _ACTING else "dim"
+        # A refusal never reached the device, so it is the verb that is
+        # remarkable rather than the timing. Marking it in the first column
+        # means it survives any width; a note tacked on the end does not, and
+        # at 64 columns it vanished entirely while the counter still said nine.
+        style = "yellow" if event.refused else ("cyan" if event.verb in _ACTING else "dim")
         line.append(f"{event.verb:<12}", style=style)
-        line.append(f"{_target_of(event.args)[:38]:<38}")
-        line.append(f"{event.elapsed_ms:>6}ms", style="dim")
+        line.append(_pad(_target_of(event.args), self._target_width()))
         if event.refused:
-            line.append("  refused, never reached the device", style="yellow")
+            line.append(f"{'refused':>{_RIGHT}}", style="yellow")
+        else:
+            line.append(f"{event.elapsed_ms:>{_RIGHT - 2}}ms", style="dim")
         self.write(line)
 
     def observed(self, event: Observed) -> None:
-        self.write(Text(f"  {'observe':<12}{'':<38}{event.stats.device_tokens:>6} tok", "dim"))
+        target = _pad("", self._target_width())
+        tokens = f"{event.stats.device_tokens:>{_RIGHT - 4}} tok"
+        self.write(Text(f"  {'observe':<12}{target}{tokens}", "dim"))
+
+    def _target_width(self) -> int:
+        """How much room the middle column actually has.
+
+        Fixed at 38 it was wider than the whole pane on a narrow terminal, so
+        every action wrapped and the tail of a refusal appeared on its own line
+        as an orange fragment reading "reached the device".
+
+        The two extra columns are the vertical scrollbar, which appears once
+        the transcript overflows and is not deducted from `size.width`. Without
+        them the right-hand column loses its last characters exactly when there
+        is enough history to be worth reading.
+        """
+        return max(6, (self.size.width or 80) - 2 - 12 - _RIGHT - 2)
 
     def note(self, text: str, style: str = "dim") -> None:
         self.write(Text(f"  {text}", style=style))
@@ -168,6 +213,17 @@ class ScreenPane(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield Static("", id="screen-text")
 
+    def on_mount(self) -> None:
+        # Drawn once on mount so the placeholder and every later update go
+        # through one path. An empty pane and a pane showing an empty screen
+        # look identical, and only one of them means "nothing has been read".
+        self._draw()
+
+    @property
+    def displayed_text(self) -> str:
+        """What is on screen, placeholder included."""
+        return self.text or "(nothing read yet)"
+
     def show(self, text: str) -> None:
         self.text = text
         self.stale_by = 0
@@ -190,13 +246,20 @@ class ScreenPane(VerticalScroll):
                     "yellow",
                 )
             )
-        parts.append((self.text or "(nothing read yet)", ""))
+        parts.append((self.displayed_text, "" if self.text else "dim"))
         self.query_one("#screen-text", Static).update(Text.assemble(*parts))
 
 
 class GoalInput(Input):
     def __init__(self) -> None:
         super().__init__(placeholder="what should it do?", id="goal-input")
+
+
+def _pad(text: str, width: int) -> str:
+    """Fit a target into a column, ellipsising rather than wrapping."""
+    if len(text) > width:
+        return text[: max(1, width - 1)] + "\u2026"
+    return f"{text:<{width}}"
 
 
 def _target_of(args: object) -> str:
