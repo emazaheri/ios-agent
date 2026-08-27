@@ -809,7 +809,18 @@ def _intersects(a: Rect, b: Rect) -> bool:
 
 
 #: How far down the screen a drawn header can sit and still be the title.
-_HEADER_BAND = 0.15
+#:
+#: Measured, not guessed, and the first value was guessed and wrong. A
+#: synthetic fixture put its header at 7% and 0.15 looked generous; a real
+#: third-party Discover screen puts a filter row above the title, so the
+#: header sits at **197 of 956 points, 21%**, and the fallback silently did
+#: nothing on the one screen it existed for. The next text down is at 24%,
+#: which is uncomfortably close, but the topmost line wins the tie and the
+#: alternative is a title-less fingerprint.
+#:
+#: This is one real screen. It is one more than the rule had before, and it is
+#: the number to revisit first if a title ever comes back wrong.
+_HEADER_BAND = 0.25
 
 
 def _screen_title(root: SnapshotNode) -> str | None:

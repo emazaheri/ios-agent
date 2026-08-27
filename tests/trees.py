@@ -318,20 +318,36 @@ def custom_header_screen() -> dict[str, Any]:
     fingerprint precisely so that navigating between two structurally similar
     screens is not read as an action that did nothing. An app that draws its
     own header gives the fingerprint nothing to tell those screens apart with.
+
+    **The geometry here is measured, and an invented version of it was wrong.**
+    The first draft of this fixture put the header at 7% down the screen, which
+    made a 15% band look generous. A real third-party screen was captured on an
+    iPhone 17 Pro Max and puts a row of filter controls *above* its title, so
+    the title sits at y=197 of 956, 21% down, with the next line of text at 24%.
+    The band tuned against the invented layout did nothing on the real one.
+
+    So the proportions below are the real screen's and the content is invented,
+    which is the same trade `third_party_card_screen` makes.
     """
     return node(
         "Application",
         label="Custom",
         name="Custom",
-        h=852,
+        w=440,
+        h=956,
         children=[
             node(
                 "Window",
-                h=852,
+                w=440,
+                h=956,
                 children=[
-                    node("StaticText", label="Inbox", x=16, y=60, w=200, h=34),
-                    node("Cell", label="First message", name="msg_1", y=120),
-                    node("Cell", label="Second message", name="msg_2", y=164),
+                    # The filter row that pushes the title down the screen.
+                    node("Button", label="Filters", name="filter_all", x=20, y=82, w=76, h=32),
+                    node("Button", label="Age", name="filter_age", x=104, y=82, w=76, h=32),
+                    node("StaticText", label="Inbox", x=20, y=197, w=112, h=35),
+                    node("StaticText", label="unread", x=20, y=234, w=90, h=20),
+                    node("Cell", label="First message", name="msg_1", y=300),
+                    node("Cell", label="Second message", name="msg_2", y=344),
                 ],
             ),
         ],
