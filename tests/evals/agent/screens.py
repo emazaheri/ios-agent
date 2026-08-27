@@ -46,6 +46,15 @@ _SEARCH_TOP = 56.0
 #: a window of it is ever reported, the way a virtualised UITableView behaves.
 CONTACTS_TOTAL = 200
 CONTACTS_WINDOW = 15
+#: Cards stack instead of tiling into rows, and the tap target that likes one
+#: sits at its trailing edge the way a heart icon does.
+_CARD_TOP = 100.0
+_CARD_HEIGHT = 160.0
+_CARD_X = 16.0
+_CARD_W = 360.0
+_LIKE_X = 306.0
+_LIKE_SIZE = 52.0
+_LIKE_DY = 80.0
 
 
 class Injection(StrEnum):
@@ -76,11 +85,44 @@ class Row:
 
 
 @dataclass(frozen=True, slots=True)
+class Card:
+    """One card, composed the way apps outside Apple's own compose one.
+
+    Every Settings screen in this file is a table of rows, which is the shape
+    Apple ships and the only shape this project's perception was ever tested
+    against. Two real bugs hid behind that. A card carries all three habits
+    that exposed them, taken from the same real screen `tests/trees.py`
+    models as `third_party_card_screen`:
+
+    * ``summary`` is the whole card hung on the wrapping ``Other``, with only
+      images beneath it;
+    * ``prompt``/``answer`` split one ``StaticText`` across ``label`` and
+      ``value``, so the label names the field and the value carries what it
+      says;
+    * the like target is a hit target with **no label at all**, identified
+      only by its accessibility id, the way a drawn icon arrives.
+    """
+
+    #: The wrapper's own label. Deliberately not a repeat of ``answer``: a task
+    #: that could be solved from here would not be testing the label/value
+    #: split at all.
+    summary: str
+    identifier: str
+    #: The field name, on the label. ``None`` for a card that is nothing but
+    #: its wrapper and some images.
+    prompt: str | None = None
+    #: The content, on the value, where `_text_of` used not to look.
+    answer: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Pane:
     title: str
     rows: tuple[Row, ...]
     #: Sub-panes carry a back button; the root does not.
     back_to: str | None = None
+    #: A pane is either a table of rows or a stack of cards, never both.
+    cards: tuple[Card, ...] = ()
 
 
 #: A cut-down Settings, deep enough that reaching Bold Text takes real
@@ -150,6 +192,29 @@ PANES: dict[str, Pane] = {
         back_to="accessibility",
         rows=(Row("VoiceOver", switch="voiceover", identifier="voiceover_switch"),),
     ),
+    # The one screen in this file that Apple did not design. It keeps a
+    # navigation bar so that the tasks built on it measure card perception and
+    # nothing else; an app with no navigation bar at all is a separate bet,
+    # tested against a fixture in `tests/trees.py` rather than here.
+    "profile_cards": Pane(
+        title="Profile",
+        rows=(),
+        cards=(
+            Card(
+                summary="Their first photo",
+                identifier="prompt_card_1",
+                prompt="Date prompt",
+                answer="Let's get together",
+            ),
+            Card(
+                summary=(
+                    "Prompt: Something my pet thinks about me. "
+                    "Answer: She is obsessed with cuddling me"
+                ),
+                identifier="prompt_card_2",
+            ),
+        ),
+    ),
 }
 
 #: Deep links iOS 26 actually honours. Anything else is accepted and ignored,
@@ -163,6 +228,14 @@ _DEEP_LINKS = {
 
 def _row_rect(index: int) -> tuple[float, float, float, float]:
     return (0.0, _ROW_TOP + index * _ROW_HEIGHT, _SCREEN_WIDTH, _ROW_HEIGHT)
+
+
+def _card_top(index: int) -> float:
+    return _CARD_TOP + index * _CARD_HEIGHT
+
+
+def _like_rect(index: int) -> tuple[float, float, float, float]:
+    return (_LIKE_X, _card_top(index) + _LIKE_DY, _LIKE_SIZE, _LIKE_SIZE)
 
 
 def _hit(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
@@ -195,6 +268,15 @@ class DeviceModel:
     #: pane's rows, so typing has a visible consequence rather than being
     #: accepted and ignored.
     search: str = ""
+    #: Which cards have been liked, by card identifier. Liking one rewrites the
+    #: wrapper's label, so the tap has a consequence the agent can see. A
+    #: target that accepts a tap and changes nothing is the dead-switch failure
+    #: wearing a different hat, and this is not the task that tests for it.
+    likes: dict[str, bool] = field(
+        default_factory=lambda: {
+            card.identifier: False for pane in PANES.values() for card in pane.cards
+        }
+    )
 
     def __post_init__(self) -> None:
         if Injection.STALE_START in self.injections and self.screen == "settings_root":
@@ -209,7 +291,10 @@ class DeviceModel:
             return self._contacts_tree()
         if self.screen == "mail_compose":
             return form_screen()
-        return self._pane_tree(PANES[self.screen])
+        pane = PANES[self.screen]
+        if pane.cards:
+            return self._cards_tree(pane)
+        return self._pane_tree(pane)
 
     def _contacts_tree(self) -> dict[str, Any]:
         """Only the rows currently on screen exist.
@@ -265,6 +350,84 @@ class DeviceModel:
             ],
         )
 
+    def _cards_tree(self, pane: Pane) -> dict[str, Any]:
+        """A stack of cards in an app Apple did not write.
+
+        Note what is absent compared with `_pane_tree`: no `Table`, no `Cell`,
+        and no `StaticText` echoing its row. Those are UIKit table-view habits,
+        and every perception rule tuned against them is a bet that the next app
+        has them too.
+        """
+        return node(
+            "Application",
+            label="Cards",
+            name="Cards",
+            h=852,
+            children=[
+                node(
+                    "Window",
+                    h=852,
+                    children=[
+                        node(
+                            "NavigationBar",
+                            name=pane.title,
+                            y=44,
+                            h=52,
+                            children=[
+                                node("StaticText", label=pane.title, x=16, y=56, w=160, h=28)
+                            ],
+                        ),
+                        node(
+                            "ScrollView",
+                            y=96,
+                            h=700,
+                            children=[
+                                self._card_node(card, index)
+                                for index, card in enumerate(pane.cards)
+                            ],
+                        ),
+                    ],
+                )
+            ],
+        )
+
+    def _card_node(self, card: Card, index: int) -> dict[str, Any]:
+        top = _card_top(index)
+        children = []
+        if card.prompt is not None:
+            children.append(
+                node(
+                    "StaticText",
+                    label=f"{card.prompt}:",
+                    name=f"{card.identifier}_prompt",
+                    value=card.answer,
+                    x=_CARD_X + 8,
+                    y=top + 8,
+                    w=_CARD_W - 16,
+                    h=40,
+                )
+            )
+        # A decoration, and then the hit target. Neither carries a label; only
+        # the second carries an identifier, which is the whole difference
+        # between something worth showing the agent and something worth
+        # dropping. A rule that keys off the role alone cannot tell them apart.
+        children.append(node("Image", x=_CARD_X + 8, y=top + _LIKE_DY, w=48, h=48))
+        lx, ly, lw, lh = _like_rect(index)
+        children.append(node("Image", name=f"like_{card.identifier}", x=lx, y=ly, w=lw, h=lh))
+        label = card.summary
+        if self.likes[card.identifier]:
+            label = f"{label}. Liked"
+        return node(
+            "Other",
+            label=label,
+            name=card.identifier,
+            x=_CARD_X,
+            y=top,
+            w=_CARD_W,
+            h=_CARD_HEIGHT - 20,
+            children=children,
+        )
+
     def _pane_tree(self, pane: Pane) -> dict[str, Any]:
         nav_children = [node("StaticText", label=pane.title, x=120, y=56, w=160, h=28)]
         if pane.back_to is not None:
@@ -273,7 +436,7 @@ class DeviceModel:
                 0, node("Button", label="Back", name="back_button", x=bx, y=by, w=bw, h=bh)
             )
         if pane.back_to is None:
-            # Only the root pane has search, the way real Settings does.
+            # Only the Settings root pane has search, the way the real one does.
             nav_children.append(
                 node(
                     "SearchField",
@@ -352,6 +515,10 @@ class DeviceModel:
             return  # those screens are read-only fixtures
         pane = PANES[self.screen]
 
+        if pane.cards:
+            self._tap_card(pane, x, y)
+            return
+
         if pane.back_to is not None and _hit(_BACK_RECT, x, y):
             self._go(pane.back_to)
             return
@@ -364,6 +531,18 @@ class DeviceModel:
             elif row.switch is not None:
                 self._toggle(row, x, y)
             return
+
+    def _tap_card(self, pane: Pane, x: float, y: float) -> None:
+        """Only the like target responds, and only where it is actually drawn.
+
+        The card wrapping it is the width of the screen, so a tap anywhere on
+        the card would pass whether or not the agent found the icon. That is
+        the same leniency the switch rows refuse.
+        """
+        for index, card in enumerate(pane.cards):
+            if _hit(_like_rect(index), x, y):
+                self.likes[card.identifier] = not self.likes[card.identifier]
+                return
 
     def _toggle(self, row: Row, x: float, y: float) -> None:
         assert row.switch is not None

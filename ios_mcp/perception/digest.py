@@ -22,6 +22,7 @@ from ios_mcp.perception.roles import (
     COLLAPSE_WHEN_EMPTY,
     CONTAINER_ROLES,
     DECORATIVE_LABELS,
+    DRAWN_CONTROL_ROLES,
     INTERACTIVE_ROLES,
     ROLE_PRECEDENCE,
     SCROLLABLE_ROLES,
@@ -117,6 +118,11 @@ class Digest:
     title: str | None = None
     total_nodes: int = 0
     truncated: bool = False
+    #: Things the agent cannot learn from the elements themselves, chiefly that
+    #: this screen's content is somewhere the accessibility tree does not go.
+    #: Rendered rather than kept in `meta`, because the point is to reach the
+    #: model, and the rendered text is what the model reads.
+    notes: list[str] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
 
     def by_ref(self, ref: str) -> DigestNode | None:
@@ -138,6 +144,7 @@ class Digest:
                 f"... {self.total_nodes - len(self.nodes)} more elements omitted "
                 f"(narrow with ios_observe(query=...) or region=...)"
             )
+        lines.extend(f"note: {note}" for note in self.notes)
         return "\n".join(lines)
 
     def to_dict(self, *, include_elements: bool = False) -> dict[str, Any]:
@@ -158,6 +165,7 @@ class Digest:
             "total_elements": self.total_nodes,
             "truncated": self.truncated,
             "text": self.render(),
+            "notes": list(self.notes),
             **self.meta,
         }
         if include_elements:
@@ -203,8 +211,15 @@ def build_digest(
     candidates = _collapse_repeats(candidates, settings)
 
     if query:
+        # Match everything the rendered line shows, not just the label. The
+        # digest prints `id=` and a content value; narrowing by a string the
+        # digest itself printed has to find it.
         needle = query.lower()
-        candidates = [c for c in candidates if needle in (_text_of(c.node) or "").lower()]
+        candidates = [
+            c
+            for c in candidates
+            if any(needle in text.lower() for text in _searchable_text(c.node))
+        ]
     if region:
         candidates = [c for c in candidates if _intersects(c.node.rect, region)]
 
@@ -240,7 +255,57 @@ def build_digest(
         title=title,
         total_nodes=total,
         truncated=truncated,
+        notes=_unreachable_content_notes(nodes, screen),
     )
+
+
+#: A screen this empty is either genuinely bare or unreadable, and the
+#: detectors below are what tell those apart.
+_SPARSE = 3
+
+
+def _unreachable_content_notes(nodes: list[DigestNode], screen: Rect) -> list[str]:
+    """Say when the content is somewhere the accessibility tree does not go.
+
+    Neither case is fixable here. Web content is a second tree behind a context
+    switch this stack has no concept of, and a canvas has no tree at all. What
+    is fixable is the silence: a WebView screen returns a navigation bar and a
+    scroll container, which is indistinguishable from a screen that genuinely
+    has two things on it. An agent that cannot tell those apart taps at nothing
+    and reports the app is broken.
+
+    Both detectors are deliberately narrow, and are asserted silent on every
+    screen this project already reads. A warning that cries wolf is worse than
+    no warning, because the agent learns to ignore it.
+    """
+    notes: list[str] = []
+    readable = [n for n in nodes if n.label or n.value]
+
+    webviews = [n for n in nodes if n.role == "webview"]
+    if webviews and not any(_encloses(w.rect, n.rect) for w in webviews for n in readable):
+        notes.append(
+            "This screen's content is inside a WebView, which the accessibility "
+            "tree does not reach. Use ios_screenshot to see it."
+        )
+
+    # Only when the first detector found nothing: web content is not drawn
+    # content, and saying both says neither.
+    if not notes and len(nodes) <= _SPARSE and not readable and _covers(nodes, screen):
+        notes.append(
+            "This screen exposes no accessibility data; it is drawn rather than "
+            "composed. Use ios_screenshot with annotate_refs=true."
+        )
+    return notes
+
+
+def _encloses(outer: Rect, inner: Rect) -> bool:
+    """Whether ``inner`` sits inside ``outer`` and is not ``outer`` itself."""
+    return outer.area > inner.area and _overlap_ratio(inner, outer) >= 0.8
+
+
+def _covers(nodes: list[DigestNode], screen: Rect) -> bool:
+    """Whether one element takes up most of the screen on its own."""
+    return any(n.rect.area >= screen.area * 0.5 for n in nodes)
 
 
 def fingerprint_of(
@@ -326,7 +391,16 @@ def _is_wrapper(node: SnapshotNode, role: str) -> bool:
         return False  # the agent needs these as scroll targets
     if role in ALWAYS_COLLAPSE:
         return True
-    if role in COLLAPSE_WHEN_EMPTY or role in CONTAINER_ROLES:
+    if role in COLLAPSE_WHEN_EMPTY:
+        # An `other` or a `group` is where an app hangs its own meaning, so it
+        # survives on anything that names it. `_text_of` was too narrow: it
+        # reads label, value and placeholder and never the accessibility id,
+        # so a container named only by a `testID` collapsed to nothing and
+        # took its contents with it.
+        return not _identity_text(node)
+    if role in CONTAINER_ROLES:
+        # The rest is chrome. A navigation bar's label is the screen title and
+        # the digest header already reports it.
         return not _text_of(node)
     return False
 
@@ -346,11 +420,25 @@ def _is_noise(
     if not _intersects(rect, screen):
         return True
     text = _text_of(node)
-    # An unlabelled decoration the agent can neither read nor act on.
-    if role in ("image", "text") and not text:
+    # An unlabelled decoration the agent can neither read nor act on. An
+    # accessibility id is not a label, but it is a handle, and outside Apple's
+    # own apps it is frequently the only one a drawn control has: a heart icon
+    # rendered into an image arrives with a name and nothing else. Dropping
+    # both the icon and the spacer beside it leaves the agent unable to see the
+    # one it needs, and keeping both floods the budget, so the id is the line.
+    #
+    # Cost of drawing it here, measured across the eleven golden flows: 8,348
+    # tokens to 8,610, +3.1%, worst step 433 to 445 against a ceiling of 900,
+    # and no movement at all in the resolution-tier distribution. Most of that
+    # was paid back by the decorative-glyph rule below, which this change is
+    # what exposed as too narrow.
+    if role in ("image", "text") and not text and not node.identifier:
         return True
-    # A disclosure arrow drawn at the end of a row: disabled, and meaningless.
-    if not node.enabled and (text or "").strip().lower() in DECORATIVE_LABELS:
+    # A disclosure arrow drawn at the end of a row. Matched on identity rather
+    # than label, and without asking whether it is enabled: on iOS 26 these
+    # arrive as enabled images whose only name is `chevron.forward` on the id,
+    # so both halves of the older check missed them.
+    if (_identity_text(node) or "").strip().lower() in DECORATIVE_LABELS:
         return True
     # A label already reported by the ancestor that owns it.
     return role == "text" and text is not None and text == inherited_text
@@ -387,6 +475,12 @@ def _merge(incumbent: _Candidate, candidate: _Candidate) -> _Candidate:
     which is not a hit target at all, so the control keeps its own.
     """
     winner = candidate if _beats(candidate, incumbent) else incumbent
+    # A bet, stated as one: that two nodes of *different* roles describing the
+    # same thing are a control and its label, never a control and a tighter
+    # rect for the same control. True of every UIKit pairing seen so far. It
+    # would be falsified by an app that draws a control as an `image` inside a
+    # `Cell` of the same extent, where the image is the hit target and this
+    # would hand the tap to the cell instead.
     if incumbent.role != candidate.role:
         return winner
 
@@ -440,6 +534,8 @@ def _wraps_bare_control(outer: _Candidate, inner: _Candidate) -> bool:
     while its own toggle reports x=305 w=63, so the toggle overhangs the row it
     lives in by two points and any containment test fails on it.
     """
+    # Same bet as `_merge`, same falsifier: it only fuses a bare control into
+    # its wrapper when both report the same role.
     if outer.role != inner.role or outer.role in SCROLLABLE_ROLES:
         return False
     if _identity_text(inner.node) or not _identity_text(outer.node):
@@ -596,7 +692,43 @@ def _estimated_cost(c: _Candidate) -> int:
 
 
 def _is_actionable(c: _Candidate) -> bool:
-    return c.role in INTERACTIVE_ROLES and c.node.enabled
+    """Can a tap meaningfully land here?
+
+    `role in INTERACTIVE_ROLES` is the Apple answer and it is the last of the
+    role-shaped bets. A control that was drawn rather than composed is an
+    `image` or an `other`, so on a third-party screen the thing the agent most
+    needs to tap is the one thing marked inert, and resolution filters to
+    actionable elements first: the control sits in the digest, visible and
+    unreachable.
+
+    The widening is deliberately narrow. A node qualifies only when it is
+    **unlabelled and carries an accessibility id**, because a developer who
+    named something nobody can read named it so that something could find it.
+    Anything with a label is content until proven otherwise, which keeps a
+    progress view and a card that merely wraps a control out of it.
+    """
+    if not c.node.enabled:
+        return False
+    if c.role in INTERACTIVE_ROLES:
+        return True
+    if c.role not in DRAWN_CONTROL_ROLES or c.node.label or not c.node.identifier:
+        return False
+    # The wrapper around a control is not itself the control. Marking both
+    # makes every card an ambiguous target and puts the tap at the card's
+    # centre, which is the switch-row failure wearing different clothes.
+    return not _contains_a_control(c.node)
+
+
+def _contains_a_control(node: SnapshotNode) -> bool:
+    for descendant in node.walk()[1:]:
+        if not descendant.enabled:
+            continue
+        role = role_of(descendant.type)
+        if role in INTERACTIVE_ROLES:
+            return True
+        if role in DRAWN_CONTROL_ROLES and descendant.identifier and not descendant.label:
+            return True
+    return False
 
 
 def _is_selected(node: SnapshotNode) -> bool:
@@ -625,6 +757,13 @@ def _value_of(c: _Candidate) -> str | None:
 
 def _text_of(node: SnapshotNode) -> str | None:
     return node.label or node.value or node.placeholder
+
+
+def _searchable_text(node: SnapshotNode) -> tuple[str, ...]:
+    """Every string a reader of the digest could reasonably narrow by."""
+    return tuple(
+        text for text in (node.label, node.value, node.identifier, node.placeholder) if text
+    )
 
 
 #: Values that are state rather than content. A switch says "0", a progress
@@ -669,8 +808,23 @@ def _intersects(a: Rect, b: Rect) -> bool:
     )
 
 
+#: How far down the screen a drawn header can sit and still be the title.
+_HEADER_BAND = 0.15
+
+
 def _screen_title(root: SnapshotNode) -> str | None:
-    """The navigation bar title, which is how a person would name the screen."""
+    """How a person would name this screen.
+
+    The navigation bar first, because where there is one it is authoritative.
+    Where there is not, the topmost line of text stands in for it.
+
+    The fallback is not cosmetic. The title is part of the fingerprint, which
+    is what tells a real navigation apart from an action that did nothing, and
+    an app that draws its own header instead of using a `UINavigationBar`
+    leaves two structurally similar screens hashing to the same value. That is
+    the split-view failure already recorded in CLAUDE.md, reached by a
+    different route.
+    """
     for node in root.walk():
         if role_of(node.type) == "nav":
             if node.label:
@@ -678,7 +832,20 @@ def _screen_title(root: SnapshotNode) -> str | None:
             for child in node.walk()[1:]:
                 if role_of(child.type) == "text" and child.label:
                     return child.label
-    return None
+    return _drawn_header(root)
+
+
+def _drawn_header(root: SnapshotNode) -> str | None:
+    """The topmost visible line of text in the band a header would occupy."""
+    cutoff = root.rect.y + root.rect.height * _HEADER_BAND
+    headers = [
+        node
+        for node in root.walk()
+        if role_of(node.type) == "text" and node.label and node.visible and node.rect.y < cutoff
+    ]
+    if not headers:
+        return None
+    return min(headers, key=lambda n: (n.rect.y, n.rect.x)).label
 
 
 def _truncate(text: str, limit: int = 60) -> str:

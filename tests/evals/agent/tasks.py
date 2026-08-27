@@ -8,8 +8,11 @@ Every task carries a `floor`: the number of explicit observations a
 hand-written oracle needs (`oracle.py`). Without it a measured number is just a
 number — 4 observations means nothing until you know the floor is 1.
 
-Three of the seven inject a failure this project hit on real hardware. Those
-are the replan tests, and they are the reason the set is not a happy path.
+Three of them inject a failure this project hit on real hardware. Those are the
+replan tests, and they are the reason the set is not a happy path. Two more
+live in an app Apple did not write, which is the other way this set refuses to
+be a happy path: every perception rule tuned against Settings is a bet that the
+next app is built the same way, and two of those bets have already lost.
 """
 
 from __future__ import annotations
@@ -197,6 +200,43 @@ TASKS: tuple[Task, ...] = (
             "the model can call has never been used end to end. Searching also "
             "has to be followed through: filtering to the row proves nothing "
             "until the switch behind it moves."
+        ),
+    ),
+    # -- an app Apple did not write ---------------------------------------
+    #
+    # Every task above lives in Settings, an app this project's own fake
+    # models. Two perception bugs survived 326 unit tests and eleven golden
+    # flows for exactly that reason, and surfaced the first time the agent was
+    # pointed at a third-party screen. These two are the guard: the shapes are
+    # real, the content is invented.
+    Task(
+        name="read_a_card_answer",
+        goal="What did they answer to the date prompt?",
+        done=_shows("Let's get together"),
+        floor=1,
+        action_floor=0,
+        start="profile_cards",
+        why=(
+            "The answer lives in the element's `value` while its `label` names "
+            "the field. Reading only the label hands the agent the question and "
+            "hides the answer, which is what made a real profile unreadable. No "
+            "action is needed: if the screen can be read at all, one observation "
+            "answers it, and if it cannot, no number of actions will help."
+        ),
+    ),
+    Task(
+        name="like_a_card",
+        goal="Like the answer to the pet prompt.",
+        done=lambda m, _s: m.likes["prompt_card_2"],
+        floor=1,
+        action_floor=1,
+        start="profile_cards",
+        why=(
+            "The target is drawn, not composed: no label, only an accessibility "
+            "id. Two rules have to stop assuming Apple built the app before this "
+            "is even reachable, one to keep an unlabelled node that carries an "
+            "id and one to admit that something outside INTERACTIVE_ROLES can be "
+            "tapped. Failing here is the measurement that justifies both."
         ),
     ),
     Task(

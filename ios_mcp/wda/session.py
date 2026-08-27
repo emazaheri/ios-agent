@@ -93,7 +93,6 @@ class WdaSession:
         """
         snap = self.settings.snapshot
         payload = {key: getattr(snap, attr) for key, attr in _SETTINGS_KEYS.items()}
-        payload["pageSourceExcludedAttributes"] = ",".join(snap.excluded_attributes)
         try:
             return await self._call(
                 lambda sid: self.client.post(
@@ -191,7 +190,13 @@ class WdaSession:
     # -- observation -------------------------------------------------------
 
     async def source(self) -> SnapshotNode:
-        """Fetch the raw accessibility tree. The perception layer compacts it."""
+        """Fetch the raw accessibility tree. The perception layer compacts it.
+
+        `format=json` on purpose. `format=description` is 30% faster and 4x
+        smaller and was rejected in `SnapshotSettings`, which also records why
+        `pageSourceExcludedAttributes` is no longer sent: on this endpoint it
+        does nothing, measured at 750 ms against 743 ms.
+        """
         value = await self._call(
             lambda sid: self.client.get(f"/session/{sid}/source", params={"format": "json"})
         )

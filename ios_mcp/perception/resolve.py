@@ -160,11 +160,22 @@ def _resolve_text(
             details={"candidates": [n.ref for n in exact]},
         )
 
+    # A value is text the digest showed, so it has to be reachable, but it
+    # ranks below a label rather than beside it. Typing "Bluetooth" into a
+    # search field makes that field's value an exact match for the row the
+    # agent is looking for, and treating the two as peers turns the next tap
+    # into an ambiguity error. Found by the eval floors, not by reasoning.
+    by_value = _prefer([n for n in pool if _normalise(n.value) == needle], prefer_roles)
+    if len(by_value) == 1:
+        return _target(by_value[0], "value-exact")
+
     by_id = [n for n in pool if _normalise(n.identifier) == needle]
     if len(by_id) == 1:
         return _target(by_id[0], "id-exact")
 
-    partial = _prefer([n for n in pool if needle and needle in _normalise(n.label)], prefer_roles)
+    partial = _prefer(
+        [n for n in pool if needle and any(needle in text for text in _prose(n))], prefer_roles
+    )
     if len(partial) == 1:
         return _target(partial[0], "text-partial")
     if len(partial) > 1:
@@ -177,9 +188,9 @@ def _resolve_text(
         )
 
     scored = [
-        (difflib.SequenceMatcher(None, needle, _normalise(n.label)).ratio(), n)
+        (max(difflib.SequenceMatcher(None, needle, text).ratio() for text in _prose(n)), n)
         for n in pool
-        if n.label
+        if _prose(n)
     ]
     scored.sort(key=lambda pair: pair[0], reverse=True)
     if scored and scored[0][0] >= _FUZZY_THRESHOLD:
@@ -241,6 +252,22 @@ def _same_element(a: DigestNode, b: DigestNode) -> bool:
 
 def _normalise(text: str | None) -> str:
     return " ".join((text or "").split()).strip().lower()
+
+
+def _prose(node: DigestNode) -> tuple[str, ...]:
+    """Every string the digest actually showed this node as, except its id.
+
+    Not `DigestNode.text`, which returns the *first* of label, value and
+    identifier. That is right for display and wrong for matching. A field split
+    across label and value renders both, so a digest showing "Date prompt:" and
+    "Let's get together" would answer `target="Let's get together"` with
+    "nothing on screen matches" — text the agent is looking straight at.
+
+    The identifier stays out of this and keeps its own tier below, because an
+    id match is a stronger claim than a prose match and the tier distribution
+    is how a flow is watched for drift.
+    """
+    return tuple(_normalise(text) for text in (node.label, node.value) if text)
 
 
 def _summary(nodes: list[DigestNode], limit: int = 12) -> list[str]:

@@ -245,3 +245,149 @@ def third_party_card_screen() -> dict[str, Any]:
             )
         ],
     )
+
+
+def drawn_controls_screen() -> dict[str, Any]:
+    """A screen whose controls are drawn rather than composed.
+
+    The third habit outside Apple's own apps, after the label/value split and
+    the labelled wrapper that `third_party_card_screen` models. Here the
+    accessibility data is thinner still:
+
+    * a hit target with **no label at all**, identified only by its
+      accessibility id, the way a heart or a bookmark icon arrives when it is
+      rendered instead of built out of a `UIButton`;
+    * a decoration that is genuinely noise: no label, no id, nothing to act on.
+      Telling these two apart is the whole job, and a rule that looks only at
+      the role cannot do it;
+    * an `Other` carrying only an id, which React Native produces whenever a
+      developer sets `testID` and no `accessibilityLabel`. That is reported as
+      the most common third-party case there is.
+    """
+    return node(
+        "Application",
+        label="Drawn",
+        name="Drawn",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[
+                    node(
+                        "NavigationBar",
+                        name="Feed",
+                        y=44,
+                        h=52,
+                        children=[node("StaticText", label="Feed", x=16, y=56, w=140, h=28)],
+                    ),
+                    node(
+                        "Other",
+                        label="A post worth reacting to",
+                        name="post_1",
+                        x=16,
+                        y=120,
+                        w=360,
+                        h=120,
+                        children=[
+                            # Noise: nothing names it and nothing acts on it.
+                            node("Image", x=20, y=170, w=44, h=44),
+                            # A control. Only the id says so.
+                            node("Image", name="like_post_1", x=300, y=170, w=44, h=44),
+                        ],
+                    ),
+                    # React Native's everyday shape: a testID and no label.
+                    node(
+                        "Other",
+                        name="compose_button",
+                        x=16,
+                        y=260,
+                        w=360,
+                        h=48,
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def custom_header_screen() -> dict[str, Any]:
+    """A screen titled by a drawn header rather than a `NavigationBar`.
+
+    `_screen_title` walks for the `nav` role, and the title is part of the
+    fingerprint precisely so that navigating between two structurally similar
+    screens is not read as an action that did nothing. An app that draws its
+    own header gives the fingerprint nothing to tell those screens apart with.
+    """
+    return node(
+        "Application",
+        label="Custom",
+        name="Custom",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[
+                    node("StaticText", label="Inbox", x=16, y=60, w=200, h=34),
+                    node("Cell", label="First message", name="msg_1", y=120),
+                    node("Cell", label="Second message", name="msg_2", y=164),
+                ],
+            ),
+        ],
+    )
+
+
+def webview_screen() -> dict[str, Any]:
+    """Login, payment, and settings behind a `WKWebView`.
+
+    The web content is a second tree that XCUITest does not descend into, so
+    the accessibility tree stops at the boundary. Reaching it needs an explicit
+    context switch this project has no concept of; what it can do is notice the
+    boundary and say so, which beats returning a screen that merely looks
+    empty.
+    """
+    return node(
+        "Application",
+        label="Hybrid",
+        name="Hybrid",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[
+                    node(
+                        "NavigationBar",
+                        name="Sign in",
+                        y=44,
+                        h=52,
+                        children=[node("StaticText", label="Sign in", x=16, y=56, w=140, h=28)],
+                    ),
+                    node("WebView", name="login_web_view", y=96, h=700),
+                ],
+            ),
+        ],
+    )
+
+
+def opaque_canvas_screen() -> dict[str, Any]:
+    """One canvas covering the screen, with nothing beneath it.
+
+    A Flutter app presents as a single `FlutterView`; a game or a custom-drawn
+    view presents much the same way. There is no tree to capture and no amount
+    of tuning produces one.
+    """
+    return node(
+        "Application",
+        label="Canvas",
+        name="Canvas",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[node("Other", name="FlutterView", y=0, w=393, h=852)],
+            ),
+        ],
+    )

@@ -70,9 +70,20 @@ INTERACTIVE_ROLES: frozenset[str] = frozenset(
         "checkbox",
         "radio",
         "key",
-        "tab",
     }
 )
+
+#: Roles an app can *draw* a control as instead of composing one out of a
+#: control class. A heart icon rendered into an image, a card built out of a
+#: tappable `Other`: neither is a Button, and neither is decoration either.
+#:
+#: This is a bet, stated as one. It says these three roles are the ones worth
+#: a second look, and it would be falsified by an app that draws a control as
+#: something else entirely. What keeps it narrow is the second half of the
+#: rule in `_is_actionable`: only an *unlabelled* node with an accessibility
+#: id qualifies, because a developer who named something nobody can read named
+#: it so that something could find it.
+DRAWN_CONTROL_ROLES: frozenset[str] = frozenset({"image", "other", "group"})
 
 #: Roles that can be scrolled to reveal more content.
 SCROLLABLE_ROLES: frozenset[str] = frozenset({"scroll", "table", "collection", "webview", "picker"})
@@ -102,7 +113,13 @@ CONTAINER_ROLES: frozenset[str] = frozenset(
 ALWAYS_COLLAPSE: frozenset[str] = frozenset({"application", "window"})
 
 #: Containers that are usually pure wrappers but sometimes carry the screen's
-#: whole meaning on themselves, so they collapse only when they hold no text.
+#: whole meaning on themselves. They survive on anything that names them, an
+#: accessibility id included, which the rest of `CONTAINER_ROLES` does not get:
+#: a `nav` or a `tabbar` named "Profile" is chrome whose label the digest
+#: header already reports, while an `other` named `compose_button` is the
+#: control itself. React Native produces the second shape whenever a developer
+#: sets `testID` and no `accessibilityLabel`, which is reported to be the most
+#: common third-party case there is.
 #:
 #: Apple's own apps never reveal this: Settings puts its text in `StaticText`
 #: and `Cell`, so collapsing `other` unconditionally lost nothing. Third-party
@@ -130,10 +147,17 @@ SETTABLE_ROLES: frozenset[str] = frozenset(
 )
 
 
-#: Labels iOS attaches to purely decorative disclosure glyphs. These arrive as
-#: disabled buttons whose only job is to draw an arrow at the end of a row, so
-#: they carry nothing an agent can act on or learn from. A stock Settings
+#: Names iOS attaches to purely decorative disclosure glyphs, whether as a
+#: label or as an accessibility id. Their only job is to draw an arrow at the
+#: end of a row; the row is the thing to tap, never the arrow. A stock Settings
 #: screen emits fifteen or more of them.
+#:
+#: They arrive in two shapes and the second was invisible until unlabelled
+#: nodes with ids started being kept. Some are *disabled buttons carrying the
+#: glyph name as a label*. On iOS 26 the Settings root instead emits *enabled
+#: images with no label at all* and `chevron.forward` as the id, one per row,
+#: which is why matching has to look at the identifier and must not require the
+#: node to be disabled.
 DECORATIVE_LABELS: frozenset[str] = frozenset(
     {
         "chevron",
@@ -141,6 +165,8 @@ DECORATIVE_LABELS: frozenset[str] = frozenset(
         "chevron.left",
         "chevron.up",
         "chevron.down",
+        "chevron.forward",
+        "chevron.backward",
         "disclosure",
         "disclosureindicator",
     }
@@ -148,6 +174,11 @@ DECORATIVE_LABELS: frozenset[str] = frozenset(
 
 #: Which element wins when two nodes describe the same thing. The inner
 #: control is more precise than the row that wraps it.
+#:
+#: A bet, stated as one: this ordering is Apple's vocabulary in Apple's order.
+#: A role that is not on the list sorts last, which is the safe direction, but
+#: it means a framework that reports its controls as something else entirely
+#: loses every merge to whatever wraps it.
 ROLE_PRECEDENCE: tuple[str, ...] = (
     "switch",
     "slider",

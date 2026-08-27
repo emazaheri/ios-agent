@@ -39,6 +39,22 @@ class SnapshotSettings(BaseModel):
     within 3.5-3.9s at every depth because the round trip dominates, not the
     traversal. The default therefore sits well above what stock apps need, to
     leave headroom for deeper hierarchies without costing anything.
+
+    Two levers that look like they belong here and do not, both measured on
+    real Settings and recorded so they are not re-litigated:
+
+    * `pageSourceExcludedAttributes`, which Appium documents as *the* fix for
+      expensive attribute computation, is a no-op on `format=json`: 750 ms with
+      it, 743 ms without, and `isVisible` present either way. It used to be
+      sent from `wda/session.py` and is not any more. Note the near miss, since
+      it argues against reinstating it on the XML endpoint: had it worked it
+      would have stripped `isVisible`, which the digest depends on and which is
+      the one signal on a virtualised list that can be trusted.
+    * `format=description` is genuinely cheaper, 531 ms and 16 KB against
+      757 ms and 66 KB for JSON. Rejected: it is unstructured text by Appium's
+      own description, so it costs a parser and every typed attribute the
+      digest is built on, to save 226 ms on a simulator where a device's round
+      trip dominates anyway.
     """
 
     max_depth: int = Field(default=50, ge=1, le=100)
@@ -46,7 +62,6 @@ class SnapshotSettings(BaseModel):
     custom_snapshot_timeout_s: float = Field(default=5.0, ge=0.0)
     wait_for_idle_timeout_s: float = Field(default=2.0, ge=0.0)
     use_first_match: bool = True
-    excluded_attributes: tuple[str, ...] = ("visible", "accessible", "frame")
 
 
 class DigestSettings(BaseModel):
@@ -106,7 +121,10 @@ class PolicySettings(BaseModel):
     )
     max_consecutive_failures: int = Field(default=5, ge=1)
     loop_detection_window: int = Field(default=6, ge=2)
-    redact_screenshots: bool = False
+    #: Note there is no `redact_screenshots`. It was declared here and read by
+    #: nothing, which is the same defect as the excluded attributes above.
+    #: Redacting an image needs a region model this project does not have; the
+    #: redactor works on text.
     redact_patterns: tuple[str, ...] = (
         r"\b\d{13,19}\b",  # card-like numbers
         r"\b[\w.+-]+@[\w-]+\.[\w.]+\b",  # emails

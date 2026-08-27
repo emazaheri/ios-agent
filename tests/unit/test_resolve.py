@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from trees import form_screen, list_screen, node, settings_screen
+from trees import (
+    drawn_controls_screen,
+    form_screen,
+    list_screen,
+    node,
+    settings_screen,
+    third_party_card_screen,
+)
 
 from ios_mcp.config import Settings
 from ios_mcp.errors import ElementAmbiguous, ElementNotFound, InvalidArgument, NoSnapshot
@@ -199,3 +206,36 @@ def test_target_exposes_a_tap_point_at_the_element_centre() -> None:
     target = resolve(digest, refs, target="Wi-Fi")
     x, y = target.point
     assert target.rect.contains(x, y)
+
+
+def test_text_shown_only_as_a_value_can_be_targeted() -> None:
+    """The digest must not display text the agent cannot then act on.
+
+    `_value_of` was fixed so a field split across label and value surrenders
+    both, which is what made a real profile card readable. The text tiers were
+    not: they match `label` only, so the answer the agent can plainly see is
+    the one string on screen it cannot name. Showing text and refusing to
+    resolve it is worse than not showing it.
+    """
+    digest, refs = make(third_party_card_screen())
+
+    target = resolve(digest, refs, target="Let's get together", actionable_only=False)
+
+    assert target.label == "Date prompt:", "matched something other than the field it belongs to"
+    assert target.resolved_via == "value-exact", "a value ranks below a label, not beside it"
+
+
+def test_an_identifier_is_searchable_the_way_it_is_rendered() -> None:
+    """`ios_observe(query=...)` filters on `_text_of`, which skips identifiers.
+
+    The rendered line shows `id=like_post_1`, so an agent narrowing a crowded
+    screen by that id gets an empty result for a string the digest itself
+    printed.
+    """
+    d = build_digest(
+        SnapshotNode.from_wda(drawn_controls_screen()),
+        Settings().digest,
+        query="like_post_1",
+    )
+
+    assert [n.identifier for n in d.nodes] == ["like_post_1"]

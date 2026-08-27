@@ -19,7 +19,11 @@ async def test_open_creates_a_session_and_applies_snapshot_settings(
     # These are what keep observation affordable; a session without them is a bug.
     assert fake_wda.settings_applied["snapshotMaxDepth"] == 50
     assert fake_wda.settings_applied["snapshotMaxChildren"] == 64
-    assert "visible" in fake_wda.settings_applied["pageSourceExcludedAttributes"]
+    # And `pageSourceExcludedAttributes` is deliberately not among them. It is
+    # the documented fix for expensive attribute computation and it is a no-op
+    # on `format=json`: 750 ms with it, 743 ms without. Asserting it was *sent*
+    # is what let it look like an optimisation for the whole project's life.
+    assert "pageSourceExcludedAttributes" not in fake_wda.settings_applied
 
 
 async def test_open_does_not_terminate_the_foreground_app_on_teardown(
