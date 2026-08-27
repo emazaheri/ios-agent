@@ -832,8 +832,22 @@ def _intersects(a: Rect, b: Rect) -> bool:
 #: which is uncomfortably close, but the topmost line wins the tie and the
 #: alternative is a title-less fingerprint.
 #:
-#: This is one real screen. It is one more than the rule had before, and it is
-#: the number to revisit first if a title ever comes back wrong.
+#: A second real screen then set the upper limit from the other side. Settings
+#: search results carry `No Results for "Airplane"` at 212 of 852, **24.9%**,
+#: with no navigation bar above it. So the usable window is 21% to 24.9% and
+#: the band sits at the top of it, on two data points with a 4-point margin.
+#: That margin is the fragility here, and `test_a_drawn_header_stays_in_the_
+#: elements_it_titles` pins the tight end of it.
+#:
+#: Note what promoting that string makes the title: body text, not chrome. That
+#: is accepted rather than overlooked. It reads the way a person would name the
+#: screen, and it makes the fingerprint tell "no results for Airplane" apart
+#: from "no results for Bluetooth", which are genuinely different screens.
+#:
+#: Two screens is not enough to derive a better rule, and inventing one against
+#: fixtures is exactly what produced the wrong 15%. This is the number to
+#: revisit first if a title ever comes back wrong, and the thing to replace
+#: with a real signal once there are more real screens to derive one from.
 _HEADER_BAND = 0.25
 
 

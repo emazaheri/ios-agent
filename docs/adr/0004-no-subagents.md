@@ -76,3 +76,32 @@ added on that evidence, and the context question can be asked again then.
   comes from a scripted in-process fake, and this project's own testing
   convention says no fake has ever caught a perception-geometry or
   device-lifecycle bug. That is what the next slice addresses.
+
+## Addendum, 2026-08-26: half of the reopening condition is now met
+
+This record says vision gets added "if a task ever fails for want of it", and
+that the decision is reopened by "a task set where the agent needs vision".
+
+A real screen that the tree cannot describe has now been captured, which is
+*not* the same thing, and the difference is worth keeping straight.
+
+On a real Hinge Discover screen on an iPhone 17 Pro Max, a filter chip renders
+the word **"Signals"**. Its accessibility label is
+`discover_circleMembersFilter_accessibilityLabel` — the raw localisation key.
+The word a person reads appears nowhere in the accessibility tree, so
+`target="Signals"` cannot match at any of the six tiers, and no perception rule
+can fix that: the string is not there to be found. `ios_screenshot` would show
+it immediately.
+
+What that establishes: the premise behind "the expensive thing the subagent was
+meant to contain does not happen" is now contingent rather than settled. There
+exists a real control reachable only by eye.
+
+What it does not establish: no eval task has failed for it. No task in
+`tests/evals/agent/tasks.py` asks the agent to tap that chip, so the agent has
+still never taken a screenshot and the token arithmetic above is unchanged.
+Writing a task that requires a control nameable only by sight, and watching it
+fail, is the step that would finish the case. Until then this is an observation
+with a date on it, not a decision.
+
+The decision stands. The evidence file for reversing it is open.
