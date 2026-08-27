@@ -13,8 +13,9 @@ grouped.
 | [0005](0005-langgraph-core-not-deepagents.md) | LangGraph core, not the deepagents harness | three of its four pillars were later rejected on their own numbers |
 | [0006](0006-the-agent-calls-iossession-directly.md) | The agent calls `IosSession` directly | +1.6 ms and 0 tokens per call over MCP, so the reason is architectural rather than performance |
 | [0007](0007-report-unreachable-content-rather-than-reaching-it.md) | Report unreachable content rather than reaching it | snapshot cost is XCTest's floor and observations are already at the oracle's, so the constraint is completeness |
+| [0008](0008-the-front-end-is-a-third-distribution.md) | The terminal front end is a third distribution | the agent's seven-module public surface excludes the two modules a front end needs |
 
-Four of the six are refusals. That is the point rather than an accident: the
+Four of the seven are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 

@@ -1,0 +1,125 @@
+/* Two shapes, one widget tree.
+ *
+ * Inline mode is a set of rules here rather than a second compose(), so a bug
+ * fixed in one shape is fixed in both. What it drops is the screen pane and
+ * the log: in twenty rows under a prompt there is nowhere to put them, and
+ * the loop a person actually watches is the transcript plus the numbers.
+ */
+
+Screen {
+    layout: vertical;
+}
+
+#status-bar {
+    height: 1;
+    dock: top;
+}
+
+#panes {
+    height: 1fr;
+}
+
+#left {
+    width: 2fr;
+    border-right: solid $panel;
+}
+
+#transcript {
+    height: 1fr;
+    padding: 0 1;
+}
+
+/* The live model fragment. Hidden until there is something in it, so an idle
+ * app does not show an empty band. */
+#thinking {
+    height: auto;
+    max-height: 6;
+    padding: 0 1;
+}
+
+#screen-pane {
+    width: 1fr;
+    padding: 0 1;
+}
+
+#log-pane {
+    height: 8;
+    border-top: solid $panel;
+    padding: 0 1;
+}
+
+#stats-bar {
+    height: 1;
+    background: $panel;
+}
+
+#goal-input {
+    dock: bottom;
+    border: none;
+    padding: 0 1;
+}
+
+/* -- the approval modal --------------------------------------------------- */
+
+ApprovalModal {
+    align: center middle;
+}
+
+#approval {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    grid-rows: auto auto auto auto 3;
+    padding: 1 2;
+    width: 70;
+    height: auto;
+    border: thick $error;
+    background: $surface;
+}
+
+#approval-title {
+    column-span: 2;
+    text-style: bold;
+}
+
+#approval-reason,
+#approval-signature,
+#approval-goal {
+    column-span: 2;
+}
+
+#approval-signature,
+#approval-goal {
+    color: $text-muted;
+}
+
+/* -- inline ---------------------------------------------------------------
+ *
+ * A fixed height under the prompt rather than the whole terminal. Note that
+ * this is a live region redrawn in place, not output streaming into
+ * scrollback: `inline_no_clear` keeps the final frame, and everything before
+ * it is overwritten as it goes. Anyone wanting a full scrollback transcript
+ * wants `--no-tui`, which is what it is for.
+ */
+
+Screen.inline {
+    height: 20;
+    border: none;
+}
+
+Screen.inline #panes {
+    height: 1fr;
+}
+
+Screen.inline #screen-pane,
+Screen.inline #log-pane {
+    display: none;
+}
+
+Screen.inline #left {
+    width: 1fr;
+    border-right: none;
+}
+
+Screen.inline Footer {
+    display: none;
+}

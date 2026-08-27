@@ -5,10 +5,17 @@ agent framework can import `IosSession` directly and skip the protocol
 round-trip on latency-critical steps. The MCP server is one consumer of that
 library, not the thing itself, and `ios_agent` is a second one: a peer of the
 server rather than a layer above it, since the policy gate lives inside
-`IosSession` and both pass through it identically. `tests/unit/test_layering.py`
-enforces the no-MCP-imports rule and the agent's public surface statically.
+`IosSession` and both pass through it identically. `ios_tui` is a third
+distribution on top of the agent, and it is separate for a concrete reason
+rather than a tidy one: the agent is held to a seven-module public surface, and
+a front end needs device discovery and the doctor, which are outside it. See
+`docs/adr/0008-the-front-end-is-a-third-distribution.md`.
+`tests/unit/test_layering.py` enforces the no-MCP-imports rule, the agent's
+public surface, and the front end's Textual-free event path statically.
 
 ```
+                                                            ios_tui  <- terminal front end
+                                                                |
    MCP clients (Claude Code, Claude Desktop, an iOS app)       ios_agent
                         |                                          |
                         v                                          |

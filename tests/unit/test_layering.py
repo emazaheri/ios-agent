@@ -11,8 +11,17 @@ only by review until now:
   separate distribution precisely so this is checkable, and checking it is the
   difference between a boundary and a naming convention.
 
-Both are read statically from the source rather than by importing anything, so
-the test costs nothing and does not need the agent's dependencies installed.
+The front end added two more of the same kind: nothing beneath it may import
+it, and the half of it that carries the event path may not import Textual.
+
+`ios_tui` is deliberately not held to `_PUBLIC_SURFACE`. It is a third
+distribution rather than a subpackage of the agent *because* it needs device
+discovery and the doctor, which are outside that surface, and the surface is
+scoped to the agent so that staying outside it is a real choice rather than an
+exemption. See `docs/adr/0008-the-front-end-is-a-third-distribution.md`.
+
+All of it is read statically from the source rather than by importing anything,
+so the test costs nothing and does not need the agent's dependencies installed.
 """
 
 from __future__ import annotations
@@ -23,6 +32,16 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[2]
 _IOS_MCP = _REPO / "ios_mcp"
 _IOS_AGENT = _REPO / "agent" / "ios_agent"
+_IOS_TUI = _REPO / "tui" / "ios_tui"
+
+#: The half of the front end that must stay usable without a terminal.
+#:
+#: The event path is where the interesting decisions live: what an action cost,
+#: when the screen changed, when a human was asked. Keeping Textual out of it
+#: is what lets every one of those be tested with a list and no canvas, and it
+#: is the reason `--no-tui` can exist at all rather than being a second
+#: implementation of the same thing.
+_HEADLESS = ("events.py", "bus.py", "stream.py", "progress.py", "runner.py", "printer.py")
 
 #: The only package allowed to know MCP exists.
 _MCP_LAYER = _IOS_MCP / "server"
@@ -136,3 +155,37 @@ def test_the_agent_never_imports_the_mcp_server() -> None:
         _IOS_AGENT, lambda m: m == "ios_mcp.server" or m.startswith("ios_mcp.server.")
     )
     assert offenders == [], "the agent must not import the server package:\n" + "\n".join(offenders)
+
+
+def test_nothing_beneath_the_front_end_imports_it() -> None:
+    """The dependency still points one way, with a third package in the graph.
+
+    `ios-mcp` must work for any agent and `ios-agent` must work for any front
+    end. A single import pointing back turns the terminal app from one consumer
+    among several into a required part of the stack.
+    """
+    offenders = _offenders(
+        _IOS_MCP, lambda m: m == "ios_tui" or m.startswith("ios_tui.")
+    ) + _offenders(_IOS_AGENT, lambda m: m == "ios_tui" or m.startswith("ios_tui."))
+    assert offenders == [], "nothing may depend on the front end:\n" + "\n".join(offenders)
+
+
+def test_the_front_ends_event_path_never_imports_textual() -> None:
+    """Half of the front end has to work with no terminal attached.
+
+    The event seam is where cost, screen changes and approval questions are
+    decided, and all of it is asserted against a plain list in `tests/tui`.
+    One `textual` import inside it and those tests start needing a canvas,
+    which is the point at which they stop being run.
+    """
+    headless = [_IOS_TUI / name for name in _HEADLESS if (_IOS_TUI / name).exists()]
+    assert headless, "no headless modules found; this test would pass vacuously"
+    offenders = [
+        f"{path.relative_to(_REPO)} imports {module}"
+        for path in headless
+        for module in sorted(_modules_imported_by(path))
+        if module == "textual" or module.startswith("textual.")
+    ]
+    assert offenders == [], "the front end's event path must not import textual:\n" + "\n".join(
+        offenders
+    )

@@ -1,0 +1,33 @@
+[project]
+name = "ios-tui"
+version = "0.1.0"
+description = "A terminal front end for the ios-agent goal-directed iPhone agent"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+# A third consumer, not a third layer. `ios-mcp` is the library, `ios-agent`
+# is one consumer of it, and this is another: it drives the agent and reads
+# the library's device discovery directly. Nothing points back the other way.
+#
+# `ios-mcp` is named explicitly rather than relied on transitively, because
+# this package imports it directly (Settings, DevicePool, IosSession) and a
+# dependency you import is one you declare.
+dependencies = [
+    "ios-mcp",
+    "ios-agent",
+    "textual>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ios_tui"]
+
+# The command is `ios-agent` while the distribution is `ios-tui`. The
+# distribution name `ios-agent` is already taken by the library this drives,
+# and the name a person types should say what it does rather than which
+# package shipped it. `ios-mcp` serves the server; `ios-agent` drives a phone.
+[project.scripts]
+ios-agent = "ios_tui.cli:main"

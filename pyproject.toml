@@ -16,15 +16,22 @@ dependencies = [
 [project.optional-dependencies]
 vision = ["pillow>=11.0"]
 
-# One repository, two distributions. `ios-agent` depends on `ios-mcp`; nothing
-# points the other way, which is what keeps this package usable by any agent
-# rather than only by the one shipped beside it.
+# One repository, three distributions, and the dependencies only ever point
+# one way: `ios-tui` -> `ios-agent` -> `ios-mcp`. That is what keeps `ios-mcp`
+# usable by any agent rather than only by the one shipped beside it, and what
+# keeps `ios-agent` usable by any front end rather than only by this one.
+#
+# The front end is a separate distribution rather than a subpackage of the
+# agent because the agent is held to a seven-module public surface of `ios-mcp`
+# (tests/unit/test_layering.py) and a front end needs device discovery and the
+# doctor, which are outside it. See docs/adr/0008.
 [tool.uv.workspace]
-members = ["agent"]
+members = ["agent", "tui"]
 
 [tool.uv.sources]
 ios-agent = { workspace = true }
 ios-mcp = { workspace = true }
+ios-tui = { workspace = true }
 
 [project.scripts]
 ios-mcp = "ios_mcp.__main__:main"
@@ -43,6 +50,10 @@ dev = [
     # against either without a resync; the agent itself commits to none, and
     # `IOS_AGENT_PROVIDER` picks one at runtime.
     "ios-agent[anthropic,openai]",
+    # Installed so `tests/tui` can import `ios_tui` without a `pythonpath`
+    # entry. The front end is a real distribution, so it is installed like one
+    # rather than reached through a path hack.
+    "ios-tui",
 ]
 
 [build-system]
@@ -62,7 +73,7 @@ asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 # Test helper modules (fake_wda, trees, harness, flows) live beside the tests
 # that use them rather than in the package.
-pythonpath = ["tests", "tests/evals", "tests/evals/agent"]
+pythonpath = ["tests", "tests/evals", "tests/evals/agent", "tests/tui"]
 markers = [
     "simulator: requires a booted iOS Simulator (skipped when unavailable)",
     "device: requires an attached physical iPhone (skipped when unavailable)",

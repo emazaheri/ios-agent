@@ -165,15 +165,30 @@ because hardware being present is not consent to change settings on it.
 
 ### Giving it a task
 
+`ios-agent` is a terminal front end over the same library, in its own
+distribution (`tui/`, [ADR 0008](docs/adr/0008-the-front-end-is-a-third-distribution.md)).
+
 ```bash
-uv run python scripts/ask.py --list                      # what is reachable
-uv run python scripts/ask.py "turn on bold text"         # a simulator
-uv run python scripts/ask.py --device "iPhone" \
+uv run ios-agent doctor                        # is this machine set up
+uv run ios-agent devices                       # what is reachable
+uv run ios-agent "turn on bold text"           # a simulator
+uv run ios-agent --device "iPhone" \
     --app com.apple.Preferences "turn wi-fi off"         # your phone
+uv run ios-agent manual                        # drive it by hand, no model
 ```
 
-It prints what the agent did, what it cost, what it claims, and the screen it
-ended on. In code the whole API is one call:
+It streams the model's text as it arrives, shows the digest the model is
+reading beside it, and keeps the numbers on screen while they climb: actions,
+observations, device tokens, cost. Escape halts the run at the next step and
+still reports what it did; a second Escape aborts and says the screen on
+display can no longer be trusted. `--no-tui` prints the same events as plain
+lines for a pipe, and `--inline` runs in a short region under the prompt.
+
+The front end is held to one rule, asserted rather than argued: **watching a
+run may not change what it costs.** `tests/tui/test_cost.py` runs the same task
+wrapped and unwrapped and compares every counter by equality.
+
+In code the whole API is still one call:
 
 ```python
 outcome = await run_goal(session, "turn on bold text")
@@ -204,7 +219,8 @@ See [agent/README.md](agent/README.md) for configuration.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 326 tests, no device needed
+uv run pytest tests/unit          # 368 tests, no device needed
+uv run pytest tests/tui           # the terminal front end, no device, no model
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # 11 golden flows, with cost per flow
 uv run pytest tests/evals/agent   # agent evals, scripted device, no model
