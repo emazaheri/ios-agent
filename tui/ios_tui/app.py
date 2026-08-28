@@ -120,6 +120,11 @@ class IosAgentApp(App[int]):
 
         self.runner: GoalRunner | None = None
         self._run_worker: Any = None
+        #: Whether a goal or command is in flight. Separate from
+        #: `_run_worker`, which is the handle used to cancel one: the flag is
+        #: raised before the worker starts so a fast worker cannot finish
+        #: between the two.
+        self._busy = False
         self._stopping = False
         #: Set after a hard cancel. The device may have moved under an action
         #: that was torn off, so the screen on display is not to be trusted.
@@ -148,7 +153,7 @@ class IosAgentApp(App[int]):
         yield LogPane()
         yield SlashMenu()
         yield StatsBar(id="stats-bar")
-        yield GoalInput()
+        yield GoalInput(manual=self.manual_mode)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -348,7 +353,7 @@ class IosAgentApp(App[int]):
         mid-action and then taking the device away leaves the phone in a state
         nothing recorded, and `esc` already exists for stopping deliberately.
         """
-        if self.runner is None or self._run_worker is not None:
+        if self.runner is None or self._busy:
             self.transcript.note("finish or stop the current run first (esc)", "yellow")
             return
 
@@ -439,9 +444,19 @@ class IosAgentApp(App[int]):
         self.submit(typed)
 
     def submit(self, goal: str) -> None:
-        if self.runner is None or self._run_worker is not None:
+        """Start one goal, or one typed command.
+
+        The busy flag is raised *before* the worker starts, not from its
+        return value. A worker that finishes quickly, which `help` and any
+        parse error do, clears the flag in its own `finally` before the
+        assignment here runs, and the stale handle then sits there forever
+        refusing every later submission. The app looked frozen: it accepted
+        one line and silently ignored the rest.
+        """
+        if self.runner is None or self._busy:
             return
         self._stopping = False
+        self._busy = True
         self._run_worker = self.run_manual(goal) if self.manual_mode else self.run_one(goal)
 
     @work(group="run")
@@ -460,25 +475,25 @@ class IosAgentApp(App[int]):
         try:
             await self._one_command(line)
         finally:
-            # Without this the app accepts one command and then silently
-            # ignores every one after it, because `submit` refuses to start
-            # while a run is in flight.
             self._run_worker = None
+            self._busy = False
 
     async def _one_command(self, line: str) -> None:
         from ios_mcp.errors import ActionRequiresApproval, IosAutomationError
-        from ios_tui.manual import Unknown, parse
+        from ios_tui.manual import USAGE, Help, Unknown, parse
 
         assert self.runner is not None and self.runner.session is not None
         transcript = self.transcript
         try:
             command = parse(line)
-        except Unknown as usage:
-            # Say why the grammar appeared. Printing it alone reads as though
-            # the command worked and produced a list.
-            transcript.note(f"I do not understand {line.split(' ')[0]!r}. What I know:", "yellow")
-            for row in str(usage).splitlines():
+        except Help:
+            for row in USAGE.splitlines():
                 transcript.note(row)
+            return
+        except Unknown as unknown:
+            # One line. The full grammar is what `help` is for, and dumping ten
+            # rows for a typo buries the one thing that was wrong.
+            transcript.note(str(unknown), "yellow")
             return
 
         backend = self._backend_for_manual()
@@ -529,6 +544,7 @@ class IosAgentApp(App[int]):
             pass  # already reported as a `Failed` event
         finally:
             self._run_worker = None
+            self._busy = False
             self._stopping = False
 
     def _backend_for_manual(self) -> Any:
@@ -575,7 +591,7 @@ class IosAgentApp(App[int]):
     @work(group="run")
     async def action_reread(self) -> None:
         """One observation, to find out where the phone actually is."""
-        if self.runner is None or self.runner.session is None or self._run_worker is not None:
+        if self.runner is None or self.runner.session is None or self._busy:
             return
 
         backend = self._backend_for_manual()

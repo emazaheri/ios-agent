@@ -300,7 +300,7 @@ async def test_switching_is_refused_while_a_goal_is_running(
     app = _switchable()
     async with app.run_test(size=(100, 30)) as pilot:
         await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
-        app._run_worker = object()  # a run is in flight
+        app._busy = True  # a run is in flight
 
         await pilot.press("ctrl+o")
         await pilot.pause()

@@ -28,8 +28,28 @@ from ios_agent.backend import Backend
 
 
 class Unknown(ValueError):
-    """The line was not a command. Carries the help text, since that is the
-    only useful thing to say back."""
+    """The line was not a verb this understands.
+
+    Carries a suggestion when one is close enough to be worth offering. A
+    grammar dump for a typo is a wall of text where one line would do, and it
+    buries the thing that was actually wrong.
+    """
+
+    def __init__(self, typed: str, suggestion: str | None = None) -> None:
+        self.typed = typed
+        self.suggestion = suggestion
+        if suggestion:
+            super().__init__(f"{typed!r} is not a verb here. Did you mean {suggestion!r}?")
+        else:
+            super().__init__(f"{typed!r} is not a verb here. Type `help` to see them.")
+
+
+class Help(Exception):
+    """`help` was asked for. Not an error, and it used to be reported as one.
+
+    It is in `USAGE` as a command, and typing it answered "I do not understand
+    'help'", which is the tool disagreeing with its own documentation.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +80,7 @@ def parse(line: str) -> Command:
     them the same would silently drop the second."""
     text = line.strip()
     if not text:
-        raise Unknown(USAGE)
+        raise Unknown("")
     verb, _, rest = text.partition(" ")
     verb, rest = verb.lower(), rest.strip()
 
@@ -87,8 +107,27 @@ def parse(line: str) -> Command:
             return Command("press_button", lambda b: b.press_button(rest, idem_key=key()))
         case "open" if rest:
             return Command("open_url", lambda b: b.open_url(rest))
+        case "help" | "?":
+            raise Help
         case _:
-            raise Unknown(USAGE)
+            raise Unknown(verb, _nearest(verb))
+
+
+#: What a bare verb can be, for suggesting a near miss.
+_VERBS = ("observe", "tap", "type", "set", "scroll", "press", "open", "help")
+
+
+def _nearest(verb: str) -> str | None:
+    """The closest verb, when one is close enough to be worth offering.
+
+    A cutoff rather than a best-effort match: suggesting `press` for `hello`
+    is worse than suggesting nothing, because it reads as though the tool
+    thinks it understood.
+    """
+    from difflib import get_close_matches
+
+    matches = get_close_matches(verb, _VERBS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
 
 
 def _split(rest: str) -> tuple[str, str | None]:

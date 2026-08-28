@@ -160,7 +160,7 @@ async def _type_a_few(app: IosAgentApp, pilot: Any) -> None:
     for line in ("observe", "tap Accessibility"):
         app.submit(line)
         async with asyncio.timeout(30):
-            while app._run_worker is not None:
+            while app._busy:
                 await asyncio.sleep(0.02)
     await pilot.pause()
 

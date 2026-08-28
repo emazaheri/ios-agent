@@ -397,9 +397,19 @@ def _command_row(command: Command) -> Text:
     return line
 
 
+#: What the input asks for, which is not the same question in both modes.
+#: "what should it do?" invites a sentence, and in manual mode a sentence is
+#: the one thing that does not work: it takes device verbs. Asking the wrong
+#: question is how someone ends up typing "hi" and being told off for it.
+GOAL_PROMPT = "what should it do?"
+MANUAL_PROMPT = "a device verb, or `help` to list them"
+
+
 class GoalInput(Input):
-    def __init__(self) -> None:
-        super().__init__(placeholder="what should it do?", id="goal-input")
+    def __init__(self, *, manual: bool = False) -> None:
+        super().__init__(
+            placeholder=MANUAL_PROMPT if manual else GOAL_PROMPT, id="goal-input"
+        )
 
 
 def _joined_width(segments: list[tuple[str, str]]) -> int:
