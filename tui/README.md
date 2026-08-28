@@ -15,7 +15,10 @@ Inside the app, `/device` (or `ctrl+o`) opens the same list at any point and
 switches to whatever you choose, releasing the current device first. `--pick`
 asks the same question before the first device is acquired.
 
-Typed commands all take a leading slash: `/device`, `/log`, `/save`, `/quit`.
+Typing `/` opens a menu of everything the front end can be told to do, filtered
+as you type: `/s` narrows to `screen`, `save`, `stop`. Up and down move, tab
+completes the name, enter runs the highlighted one. `ctrl+p` offers the same
+list, from the same registry, so the two cannot disagree.
 A goal is a sentence about a phone and a command is an instruction to the front
 end, so the slash tells them apart without reserving English words; someone
 whose goal genuinely is "device settings" can still ask for it.

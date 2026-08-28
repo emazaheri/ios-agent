@@ -27,12 +27,14 @@ from typing import Any, ClassVar
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
+from textual.command import Provider
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer
 
 from ios_mcp.errors import DeviceUnavailable
 from ios_tui.approval import ApprovalModal
 from ios_tui.bus import EventSink, QueueSink, drain
+from ios_tui.commands import AppCommands, Command, matching
 from ios_tui.devices import DevicePicker
 from ios_tui.events import (
     ActionFinished,
@@ -55,6 +57,7 @@ from ios_tui.widgets import (
     GoalInput,
     LogPane,
     ScreenPane,
+    SlashMenu,
     StatsBar,
     StatusBar,
     Thinking,
@@ -67,6 +70,8 @@ class IosAgentApp(App[int]):
 
     CSS_PATH = "theme.tcss"
     TITLE = "ios-agent"
+    #: `ctrl+p` offers the same list `/` does, from the same registry.
+    COMMANDS: ClassVar[set[type[Provider] | Callable[[], type[Provider]]]] = {AppCommands}
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("escape", "stop", "Stop", show=True),
@@ -79,6 +84,14 @@ class IosAgentApp(App[int]):
         Binding("ctrl+o", "device", "Device", show=True),
         Binding("ctrl+r", "reread", "Re-read screen", show=False),
         Binding("ctrl+s", "save", "Save trail", show=False),
+        # Only while the slash menu is open; `check_action` disables them
+        # otherwise so the arrow keys stay free for the input.
+        Binding("down", "menu_down", "Next command", show=False),
+        Binding("up", "menu_up", "Previous command", show=False),
+        # Priority, because tab is Textual's focus-next and would otherwise
+        # move focus out of the input before this is ever consulted.
+        # `check_action` still hands it back when the menu is closed.
+        Binding("tab", "menu_complete", "Complete", show=False, priority=True),
     ]
 
     def __init__(
@@ -133,6 +146,7 @@ class IosAgentApp(App[int]):
                 yield Thinking()
             yield ScreenPane(id="screen-pane")
         yield LogPane()
+        yield SlashMenu()
         yield StatsBar(id="stats-bar")
         yield GoalInput()
         yield Footer()
@@ -326,37 +340,61 @@ class IosAgentApp(App[int]):
 
     # -- running a goal ----------------------------------------------------
 
+    # -- commands ----------------------------------------------------------
+
+    def commands(self) -> list[Command]:
+        """Everything the front end can be told to do.
+
+        Built here rather than declared as a constant because each one closes
+        over the app. One list feeds both the `/` menu and the command palette,
+        so neither can offer something the other does not.
+        """
+        return [
+            Command("device", "switch to another phone or simulator", self.action_device, "ctrl+o"),
+            Command("screen", "read the screen again", self.action_reread, "ctrl+r"),
+            Command("log", "show or hide the device startup log", self.action_toggle_log, "ctrl+l"),
+            Command("save", "write the audit trail to .artifacts", self.action_save, "ctrl+s"),
+            Command("stop", "stop the running goal", self.action_stop, "esc"),
+            Command("quit", "release the device and exit", self._quit_later, "ctrl+q"),
+        ]
+
+    def _quit_later(self) -> None:
+        """Quitting is async, because it releases the device before exiting."""
+        self.run_worker(self.action_quit(), group="lifecycle")
+
+    def on_input_changed(self, event: GoalInput.Changed) -> None:
+        """A leading slash turns the box into a command line."""
+        menu = self.query_one(SlashMenu)
+        typed = event.value
+        if not typed.startswith("/"):
+            menu.hide()
+            return
+        menu.offer(matching(self.commands(), typed[1:]))
+
     def on_input_submitted(self, event: GoalInput.Submitted) -> None:
         typed = event.value.strip()
         if not typed:
             return
-        event.input.value = ""
+        menu = self.query_one(SlashMenu)
+
         if typed.startswith("/"):
-            self._command(typed[1:].strip().lower())
+            # The highlighted row, not the typed text: the menu is filtered by
+            # what was typed, so its selection is the more specific answer and
+            # is what the person is looking at.
+            chosen = menu.chosen
+            event.input.value = ""
+            menu.hide()
+            if chosen is None:
+                self.transcript.note(
+                    f"no command matching {typed!r}. Type / to see them.", "yellow"
+                )
+                return
+            chosen.run()
             return
+
+        event.input.value = ""
+        menu.hide()
         self.submit(typed)
-
-    def _command(self, name: str) -> None:
-        """Anything typed with a leading slash is addressed to the app.
-
-        A goal is a sentence about a phone and a command is an instruction to
-        the front end, so the two need to be told apart. The slash is the
-        cheapest way to do that without reserving English words: someone whose
-        goal genuinely is "device settings" can still type it.
-        """
-        if name in {"device", "devices"}:
-            self.action_device()
-        elif name in {"log", "logs"}:
-            self.action_toggle_log()
-        elif name == "save":
-            self.action_save()
-        elif name in {"quit", "exit"}:
-            # Async, unlike the others, because quitting releases the device.
-            self.run_worker(self.action_quit(), group="lifecycle")
-        else:
-            self.transcript.note(
-                f"no command {name!r}. Try /device, /log, /save, /quit.", "yellow"
-            )
 
     def submit(self, goal: str) -> None:
         if self.runner is None or self._run_worker is not None:
@@ -522,6 +560,37 @@ class IosAgentApp(App[int]):
             self.transcript.note(f"could not save: {exc}", "red")
             return
         self.transcript.note(f"saved {len(session.audit.entries)} steps to {written}")
+
+    # -- the slash menu ----------------------------------------------------
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Arrow keys and tab belong to the menu only while it is showing.
+
+        Left always bound, they would swallow keys the input needs and Textual
+        would show them in the footer as though they always did something.
+        """
+        if action in {"menu_down", "menu_up", "menu_complete"}:
+            return self.query_one(SlashMenu).display
+        return True
+
+    def action_menu_down(self) -> None:
+        self.query_one(SlashMenu).action_cursor_down()
+
+    def action_menu_up(self) -> None:
+        self.query_one(SlashMenu).action_cursor_up()
+
+    def action_menu_complete(self) -> None:
+        """Fill the typed name in, rather than running it.
+
+        Completing and running are different intentions, and a tab that runs
+        something is a tab that cannot be used to look before leaping.
+        """
+        chosen = self.query_one(SlashMenu).chosen
+        if chosen is None:
+            return
+        box = self.query_one(GoalInput)
+        box.value = f"/{chosen.name}"
+        box.cursor_position = len(box.value)
 
     def action_toggle_log(self) -> None:
         pane = self.query_one("#log-pane", LogPane)

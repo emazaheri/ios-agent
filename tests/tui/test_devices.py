@@ -348,7 +348,8 @@ async def test_a_slash_command_is_never_mistaken_for_a_goal(
         assert not isinstance(app.screen, DevicePicker), "a goal was read as a command"
 
 
-async def test_an_unknown_command_lists_the_real_ones(devices: list[DeviceInfo]) -> None:
+async def test_an_unknown_command_points_at_the_menu(devices: list[DeviceInfo]) -> None:
+    """The menu is the listing, so the message names it rather than repeating it."""
     app = _switchable()
     async with app.run_test(size=(100, 30)) as pilot:
         await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
@@ -358,4 +359,5 @@ async def test_an_unknown_command_lists_the_real_ones(devices: list[DeviceInfo])
         await pilot.pause()
 
         written = "\n".join(line.text for line in app.transcript.lines)
-        assert "/device" in written
+        assert "no command matching" in written
+        assert "Type /" in written

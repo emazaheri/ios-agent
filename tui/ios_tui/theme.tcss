@@ -125,6 +125,18 @@ Screen {
     padding: 0 1;
 }
 
+/* The command menu, above the input because the input is docked to the bottom
+ * and a menu below it would have nowhere to go. Grows upward, so the row being
+ * typed in never moves. */
+#slash-menu {
+    height: auto;
+    max-height: 8;
+    background: $surface;
+    border: none;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
+
 #stats-bar {
     height: 1;
     background: $panel;
@@ -235,6 +247,10 @@ Screen.inline #panes {
 Screen.inline #screen-pane,
 Screen.inline #log-pane {
     display: none;
+}
+
+Screen.inline #slash-menu {
+    max-height: 5;
 }
 
 Screen.inline #left {

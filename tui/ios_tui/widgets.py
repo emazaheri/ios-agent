@@ -13,8 +13,10 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import Input, OptionList, RichLog, Static
+from textual.widgets.option_list import Option
 
+from ios_tui.commands import Command
 from ios_tui.events import ActionFinished, GoalFinished, Observed, StatsSnapshot
 
 #: Verbs that changed the device get one colour, reads another. A transcript
@@ -341,9 +343,63 @@ class ScreenPane(Vertical):
         )
 
 
+class SlashMenu(OptionList):
+    """The commands matching what has been typed after a slash.
+
+    Sits above the input rather than below it. The input is docked to the
+    bottom of the screen, so a menu underneath would have nowhere to go, and
+    one that grows upward keeps the row you are typing in the same place.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(id="slash-menu")
+        self.display = False
+        self.commands: list[Command] = []
+
+    def offer(self, commands: list[Command]) -> None:
+        """Show these, or nothing if there are none."""
+        self.commands = commands
+        self.clear_options()
+        if not commands:
+            self.display = False
+            return
+        self.add_options([Option(_command_row(c), id=c.name) for c in commands])
+        self.display = True
+        self.highlighted = 0
+
+    def hide(self) -> None:
+        self.display = False
+        self.commands = []
+        self.clear_options()
+
+    @property
+    def chosen(self) -> Command | None:
+        if not self.display or self.highlighted is None:
+            return None
+        if self.highlighted >= len(self.commands):
+            return None
+        return self.commands[self.highlighted]
+
+
+#: Width of the help column in the command menu. A fixed column is safe here,
+#: unlike in the transcript: these strings are written in this repository and
+#: the longest is known, where a transcript row carries whatever an app chose
+#: to call a button.
+_HELP = 38
+
+
+def _command_row(command: Command) -> Text:
+    line = Text()
+    line.append(f"/{command.name:<10}", style="bold")
+    line.append(f"{command.help:<{_HELP}}", style="dim")
+    if command.key:
+        line.append(command.key, style="dim")
+    return line
+
+
 class GoalInput(Input):
     def __init__(self) -> None:
-        super().__init__(placeholder="what should it do?  (/device to switch)", id="goal-input")
+        super().__init__(placeholder="what should it do?", id="goal-input")
 
 
 def _joined_width(segments: list[tuple[str, str]]) -> int:

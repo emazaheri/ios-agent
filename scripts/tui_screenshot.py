@@ -203,6 +203,20 @@ async def _pick_a_device(app: IosAgentApp, pilot: Any) -> None:
     await pilot.pause()
 
 
+async def _slash(app: IosAgentApp, pilot: Any) -> None:
+    from textual.widgets import Input
+
+    app.query_one("#goal-input", Input).value = "/"
+    await pilot.pause()
+
+
+async def _slash_filtered(app: IosAgentApp, pilot: Any) -> None:
+    from textual.widgets import Input
+
+    app.query_one("#goal-input", Input).value = "/s"
+    await pilot.pause()
+
+
 async def _fail(app: IosAgentApp, pilot: Any) -> None:
     app._apply(
         Failed(
@@ -223,6 +237,10 @@ SHAPES = {
     "log": lambda: capture("log", goal="Turn on Bold Text.", after=_open_the_log),
     "approval": lambda: capture("approval", after=_ask_for_approval),
     "failure": lambda: capture("failure", after=_fail),
+    "commands": lambda: capture("commands", goal="Turn on Bold Text.", after=_slash),
+    "commands-filtered": lambda: capture(
+        "commands-filtered", goal="Turn on Bold Text.", after=_slash_filtered
+    ),
     # Reads the real device list, so this one needs a machine with devices.
     "picker": lambda: capture("picker", after=_pick_a_device),
     # The two that found the layout bugs: a long history in a small terminal.
