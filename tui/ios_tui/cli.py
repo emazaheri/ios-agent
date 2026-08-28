@@ -146,18 +146,42 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_doctor(settings: Settings, *, json_out: bool) -> int:
+    """The device toolchain, plus the model.
+
+    The model check lives here rather than in `ios_mcp.devices.doctor` because
+    `ios_mcp` must not import `ios_agent`, and because the server genuinely
+    does not need a model: `ios-mcp doctor` reporting on one would be
+    diagnosing something it never uses. This command drives an agent, so it
+    asks both questions.
+    """
     import json
+
+    from ios_agent import probe_provider
 
     from ios_mcp.devices.doctor import run_doctor
 
     report = asyncio.run(run_doctor(settings))
+    model = probe_provider()
+
     if json_out:
-        print(json.dumps(report.to_dict(), indent=2))
+        payload = report.to_dict()
+        payload["model"] = {
+            "status": model.status,
+            "detail": model.detail,
+            "remedy": model.remedy,
+        }
+        print(json.dumps(payload, indent=2))
     else:
         # `render()` already leads with `summary`; printing it again is a
         # duplicate, not a footer.
         print(report.render())
-    return 0 if not any(c.status == "fail" for c in report.checks) else 1
+        marks = {"ok": "PASS", "warn": "WARN", "fail": "FAIL"}
+        print(f"  [{marks[model.status]}] model: {model.detail}")
+        if model.remedy and model.status != "ok":
+            print(f"          -> {model.remedy}")
+
+    device_failed = any(c.status == "fail" for c in report.checks)
+    return 0 if not device_failed and model.usable else 1
 
 
 def _cmd_devices(settings: Settings, *, json_out: bool) -> int:

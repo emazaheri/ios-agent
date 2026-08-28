@@ -76,6 +76,10 @@ async def test_a_transcript_row_is_never_padded_past_the_pane(size: tuple[int, i
     app = _app()
     async with app.run_test(size=size) as pilot:
         await _ready(app)
+        # Only the rows added below. Free-text notes above them (a startup
+        # warning, say) wrap because they are prose, which the docstring says
+        # is fine; what must not wrap is a row this widget formats itself.
+        before = len(app.transcript.lines)
         for i in range(12):
             app._apply(
                 ActionFinished(
@@ -89,14 +93,15 @@ async def test_a_transcript_row_is_never_padded_past_the_pane(size: tuple[int, i
         await pilot.pause()
 
         transcript = app.transcript
+        rows = transcript.lines[before:]
         budget = transcript.size.width - 2
-        too_wide = [line.text for line in transcript.lines if len(line.text.rstrip()) > budget]
+        too_wide = [line.text for line in rows if len(line.text.rstrip()) > budget]
         assert too_wide == [], (
             f"rows of ordinary length wrapped in {budget} columns:\n" + "\n".join(too_wide)
         )
         # One rendered line per row, at both widths, is what "never padded"
         # buys: the same transcript reads the same way in any terminal.
-        assert len(transcript.lines) == 13
+        assert len(rows) == 13
 
 
 async def test_a_refusal_stays_visible_when_the_columns_are_squeezed() -> None:

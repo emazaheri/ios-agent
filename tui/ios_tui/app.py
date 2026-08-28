@@ -262,6 +262,9 @@ class IosAgentApp(App[int]):
         self.runner = self._runner_factory(QueueSink(self._queue, loop))
         assert self.runner is not None
 
+        if not self._preflight():
+            return
+
         if self.pick and not await self._choose_device():
             self.exit(0)
             return
@@ -287,6 +290,45 @@ class IosAgentApp(App[int]):
             self.submit(self._first_goal)
         else:
             self.query_one(GoalInput).focus()
+
+    def _preflight(self) -> bool:
+        """Check the model before spending a minute acquiring a device.
+
+        Left until the first model turn, a missing key surfaces after a cold
+        simulator has booted and WebDriverAgent has started: the cheapest check
+        in the system running last, behind the most expensive setup.
+
+        A warning does not stop anything. It means this project could not find
+        a credential it knows the name of, which is the ordinary case for
+        Bedrock, Vertex and an Anthropic CLI profile, and refusing to start on
+        that would lock out every one of them.
+
+        Skipped entirely in manual mode, which drives the device by hand and is
+        meant to work with no provider configured at all.
+        """
+        if self.manual_mode:
+            return True
+
+        from ios_agent import probe_provider
+
+        assert self.runner is not None
+        probe = probe_provider(self.runner.agent)
+        status = self.query_one(StatusBar)
+        status.model = self.runner.agent.describe()
+
+        if probe.status == "warn":
+            # One line, not two. This fires on every start for anyone using
+            # Bedrock, Vertex or a CLI profile, and a warning seen constantly
+            # is a warning nobody reads.
+            self.transcript.note(f"{probe.detail}; {probe.remedy}", "yellow")
+        elif probe.status == "fail":
+            status.state = "failed"
+            self.transcript.note(f"no model: {probe.detail}", "red")
+            if probe.remedy:
+                self.transcript.note(probe.remedy)
+            self.transcript.note("no device was acquired, so nothing was started.")
+            return False
+        return True
 
     async def _choose_device(self) -> bool:
         """Ask which device. False means the person declined to pick one."""

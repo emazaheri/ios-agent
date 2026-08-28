@@ -46,6 +46,28 @@ So the front end sits beside the agent rather than inside it, and the
 dependencies point one way: `ios-tui` -> `ios-agent` -> `ios-mcp`. See
 `docs/adr/0008-the-front-end-is-a-third-distribution.md`.
 
+## Choosing a model
+
+`IOS_AGENT_PROVIDER` and `IOS_AGENT_MODEL`, in the environment or in `.env`,
+same as `ios-agent` the library. A real environment variable beats the file.
+
+Provider credentials go in `.env` beside them. They reach the vendor SDK
+through `export_provider_credentials`, because pydantic-settings reads `.env`
+into a settings object rather than into the process environment, and the SDK
+looks in the environment.
+
+`ios-agent doctor` reports the model alongside the device toolchain, and the
+app checks it **before acquiring a device**: a missing key otherwise surfaced
+on the first model turn, which is after a cold simulator has booted and
+WebDriverAgent has started. The status bar names the model from startup, so
+you can see what you are about to spend money on before spending it.
+
+A provider whose credential this project cannot see is a warning, not a
+refusal: Bedrock and Vertex use their cloud's credential chain and the
+Anthropic SDK accepts an `ant auth login` profile, so a missing environment
+variable is not proof of a missing credential. `manual` mode skips the check
+entirely, since it drives the device by hand and needs no provider at all.
+
 ## The split inside the package
 
 Half of this package never imports Textual:

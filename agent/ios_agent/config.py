@@ -19,8 +19,9 @@ heard of.
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import dotenv_values
 from pydantic import Field
@@ -43,6 +44,26 @@ KNOWN_EXTRAS: dict[str, str] = {
 
 #: Parameters only Anthropic understands, skipped for every other provider.
 _ANTHROPIC_ONLY = ("effort",)
+
+#: Where each provider's credential is usually found. Deliberately incomplete,
+#: and treated as a hint rather than a requirement.
+#:
+#: A missing variable is not proof of a missing credential. The Anthropic SDK
+#: also accepts an auth token or an `ant auth login` profile, Bedrock and Vertex
+#: use their cloud's own credential chain, and Ollama runs locally and needs
+#: nothing at all. An empty tuple means "this project has no way to look", which
+#: is different from "there is nothing there".
+_CREDENTIAL_VARS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+    "openai": ("OPENAI_API_KEY",),
+    "azure_openai": ("AZURE_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    "google_genai": ("GOOGLE_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+    "mistralai": ("MISTRAL_API_KEY",),
+    "ollama": (),
+    "bedrock_converse": (),
+    "google_vertexai": (),
+}
 
 
 class AgentSettings(BaseSettings):
@@ -166,3 +187,78 @@ def export_provider_credentials(dotenv_path: str | Path = ".env") -> list[str]:
         os.environ[name] = value
         exported.append(name)
     return exported
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderProbe:
+    """Whether the configured model can be reached, as far as can be told
+    without spending a request.
+
+    The status vocabulary matches `ios_mcp.devices.doctor.Check` so a caller
+    can render both side by side, but the type is separate: `ios_mcp` must not
+    import this package, and the model is not part of the device toolchain.
+    """
+
+    #: "ok" the model can be built and a credential appears to be in place.
+    #: "warn" it builds, but nothing this project knows how to look for is set.
+    #: "fail" it cannot be built at all.
+    status: Literal["ok", "warn", "fail"]
+    detail: str
+    remedy: str | None = None
+
+    @property
+    def usable(self) -> bool:
+        """Warnings are not refusals.
+
+        A provider whose credential this project cannot see is the normal case
+        for Bedrock, Vertex and an Anthropic CLI profile. Refusing to start on
+        a heuristic would lock out every one of them.
+        """
+        return bool(self.status != "fail")
+
+
+def probe_provider(settings: AgentSettings | None = None) -> ProviderProbe:
+    """Ask whether a model turn could happen, without making one.
+
+    Two questions, because the providers answer them differently. Building the
+    model catches a missing integration package everywhere, and catches a
+    missing credential on OpenAI, which raises at construction. Anthropic does
+    not: it builds happily and raises on the first call, which is minutes later
+    and after a device has been acquired. So the environment is checked too,
+    and reported as a warning because it cannot be conclusive.
+
+    No network. `init_chat_model` constructs a client; it does not use it.
+    """
+    cfg = settings or AgentSettings()
+    export_provider_credentials()
+
+    try:
+        from langchain.chat_models import init_chat_model
+
+        init_chat_model(model=cfg.model, model_provider=cfg.provider, **cfg.chat_kwargs())
+    except ImportError as exc:
+        return ProviderProbe("fail", f"{cfg.describe()}: {exc}", cfg.missing_package_hint())
+    except Exception as exc:
+        # Most often a missing credential the provider checks eagerly, but it
+        # can also be a model name the provider does not know. The message is
+        # the provider's own, which says which.
+        return ProviderProbe("fail", f"{cfg.describe()}: {exc}", _credential_hint(cfg.provider))
+
+    known = _CREDENTIAL_VARS.get(cfg.provider)
+    if known and not any(os.environ.get(name) for name in known):
+        return ProviderProbe(
+            "warn",
+            f"{cfg.describe()} builds, but none of {', '.join(known)} is set",
+            _credential_hint(cfg.provider),
+        )
+    return ProviderProbe("ok", cfg.describe())
+
+
+def _credential_hint(provider: str) -> str:
+    known = _CREDENTIAL_VARS.get(provider)
+    if not known:
+        return (
+            f"{provider} resolves its own credentials; check that provider's "
+            "sign-in and try again"
+        )
+    return f"set {known[0]} in the environment or in .env"

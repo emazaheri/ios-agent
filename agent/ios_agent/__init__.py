@@ -32,7 +32,13 @@ measured on; each integration package is a separate extra.
 from __future__ import annotations
 
 from ios_agent.backend import Backend, BackendStats, SessionBackend
-from ios_agent.config import KNOWN_EXTRAS, AgentSettings, export_provider_credentials
+from ios_agent.config import (
+    KNOWN_EXTRAS,
+    AgentSettings,
+    ProviderProbe,
+    export_provider_credentials,
+    probe_provider,
+)
 from ios_agent.loop import Approver, chat_model, operator_prompt, refuse_everything, run_goal
 from ios_agent.mcp_backend import McpBackend, McpClient
 from ios_agent.state import AgentState, Outcome
@@ -49,12 +55,14 @@ __all__ = [
     "McpBackend",
     "McpClient",
     "Outcome",
+    "ProviderProbe",
     "SessionBackend",
     "Verdict",
     "Verifier",
     "chat_model",
     "export_provider_credentials",
     "operator_prompt",
+    "probe_provider",
     "refuse_everything",
     "run_goal",
 ]
