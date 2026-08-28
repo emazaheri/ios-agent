@@ -13,10 +13,13 @@ import asyncio
 
 import pytest
 from ios_agent import SessionBackend
+from ios_tui.app import IosAgentApp
 from ios_tui.bus import ListSink
 from ios_tui.events import ActionFinished, Observed
 from ios_tui.manual import Help, Unknown, parse
+from ios_tui.runner import GoalRunner
 from ios_tui.stream import EventBackend
+from ios_tui.widgets import StatusBar
 from screens import DeviceModel, build_session
 from tui_harness import settings
 
@@ -258,3 +261,103 @@ async def test_a_fast_command_does_not_wedge_the_input() -> None:
         assert app.query_one(StatsBar).stats.observations == 1, (
             "the input wedged: a fast command left the app looking busy forever"
         )
+
+
+# -- when there is no device -----------------------------------------------
+
+
+class _Broken(GoalRunner):
+    """A runner whose device never arrives, which is an ordinary Tuesday.
+
+    A leftover WebDriverAgent, an unbuilt runner bundle, a phone that went to
+    sleep: the app stays up and keeps accepting input, so everything below has
+    to work with `session` still None.
+    """
+
+    def __init__(self, sink: object) -> None:
+        super().__init__(sink, settings())  # type: ignore[arg-type]
+
+    async def start(self) -> object:
+        from ios_tui.events import Failed
+
+        from ios_mcp.errors import RunnerCrashed
+
+        # The real runner reports before it raises, so the stub does too.
+        failure = RunnerCrashed("no WebDriverAgent available for the simulator")
+        self.sink.emit(Failed(where="acquire", message=str(failure)))
+        raise failure
+
+    async def close(self) -> None:
+        return None
+
+
+async def _broken_app() -> IosAgentApp:
+    return IosAgentApp(_Broken, manual=True)
+
+
+async def test_typing_with_no_device_says_so_instead_of_crashing() -> None:
+    """It used to `assert`, which took the whole app down with a traceback
+    printed over the transcript that explained what had gone wrong.
+
+    An assert is for an invariant a programmer controls. A failed acquire is
+    not one: it is reachable by anyone whose simulator is busy.
+    """
+    app = await _broken_app()
+    async with app.run_test(size=(110, 30)) as pilot:
+        async with asyncio.timeout(10):
+            while app.query_one(StatusBar).state != "failed":
+                await asyncio.sleep(0.02)
+
+        app.submit("tap Wi-Fi")
+        async with asyncio.timeout(10):
+            while app._busy:
+                await asyncio.sleep(0.02)
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "no device is attached" in written
+        assert "/device" in written, "an error with no way forward is a dead end"
+
+
+async def test_help_still_answers_with_no_device() -> None:
+    """`help` and a typo are what someone types when they are stuck, and a
+    failed acquire is exactly that state. Both used to hit the assert first,
+    because it ran before the line was even parsed."""
+    app = await _broken_app()
+    async with app.run_test(size=(110, 30)) as pilot:
+        async with asyncio.timeout(10):
+            while app.query_one(StatusBar).state != "failed":
+                await asyncio.sleep(0.02)
+
+        for line in ("help", "hi"):
+            app.submit(line)
+            async with asyncio.timeout(10):
+                while app._busy:
+                    await asyncio.sleep(0.02)
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "tap <target>" in written, "help did not answer"
+        assert "'hi' is not a verb here" in written
+
+
+async def test_the_input_is_not_wedged_by_a_missing_device() -> None:
+    """The refusal takes an early return out of `_one_command`, which is the
+    shape that wedged the app once already."""
+    app = await _broken_app()
+    async with app.run_test(size=(110, 30)) as pilot:
+        async with asyncio.timeout(10):
+            while app.query_one(StatusBar).state != "failed":
+                await asyncio.sleep(0.02)
+
+        for _ in range(3):
+            app.submit("tap Wi-Fi")
+            async with asyncio.timeout(10):
+                while app._busy:
+                    await asyncio.sleep(0.02)
+        await pilot.pause()
+
+        refusals = "\n".join(line.text for line in app.transcript.lines).count(
+            "no device is attached"
+        )
+        assert refusals == 3, "the input stopped accepting lines after the first refusal"

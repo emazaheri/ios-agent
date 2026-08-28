@@ -287,9 +287,13 @@ class IosAgentApp(App[int]):
             try:
                 await self.runner.start()
             except Exception:
-                return  # already reported as a `Failed` event
+                self._no_device()
+                return
         except Exception:
-            # Already reported as a `Failed` event by the runner itself.
+            # The failure itself is already a `Failed` event from the runner.
+            # What it does not say is what to do next, and the app stays up
+            # with a live input, so it has to.
+            self._no_device()
             return
         if self._first_goal:
             self.submit(self._first_goal)
@@ -470,11 +474,14 @@ class IosAgentApp(App[int]):
         and the call retried once consent is recorded. Same modal, same
         signature-scoped consent, different route to it.
         """
-        assert self.runner is not None
+        if self.runner is None:
+            return
         self.transcript.goal(line)
         try:
             await self._one_command(line)
         finally:
+            # Every path out lowers the flag, including the early returns in
+            # `_one_command` for `help`, a typo and a missing device.
             self._run_worker = None
             self._busy = False
 
@@ -482,8 +489,12 @@ class IosAgentApp(App[int]):
         from ios_mcp.errors import ActionRequiresApproval, IosAutomationError
         from ios_tui.manual import USAGE, Help, Unknown, parse
 
-        assert self.runner is not None and self.runner.session is not None
         transcript = self.transcript
+
+        # Parsed before the device is looked for, so `help` and a typo still
+        # answer when there is no device. Those are the two things a person
+        # types when they are stuck, which is exactly the state a failed
+        # acquire leaves them in.
         try:
             command = parse(line)
         except Help:
@@ -494,6 +505,9 @@ class IosAgentApp(App[int]):
             # One line. The full grammar is what `help` is for, and dumping ten
             # rows for a typo buries the one thing that was wrong.
             transcript.note(str(unknown), "yellow")
+            return
+
+        if not self._has_device():
             return
 
         backend = self._backend_for_manual()
@@ -526,6 +540,11 @@ class IosAgentApp(App[int]):
     async def run_one(self, goal: str) -> None:
         assert self.runner is not None
         try:
+            # Inside the `try`, so the `finally` below still lowers the busy
+            # flag. Returning above it would leave the app looking busy
+            # forever, which is the bug this flag exists to prevent.
+            if not self._has_device():
+                return
             await self.runner.run(
                 goal,
                 approve=self._ask if self._approve else None,
@@ -546,6 +565,33 @@ class IosAgentApp(App[int]):
             self._run_worker = None
             self._busy = False
             self._stopping = False
+
+    def _no_device(self) -> None:
+        """Say what to do next. The app is still running and still accepts
+        input, so an error with no way forward is a dead end on a live app.
+
+        The status is set here rather than left to the `Failed` event, so the
+        header is honest about there being no device whether or not the
+        failure happened to be reported as one.
+        """
+        self.query_one(StatusBar).state = "failed"
+        self.transcript.note("Type /device or press ctrl+o to choose another.")
+        self.query_one(GoalInput).focus()
+
+    def _has_device(self) -> bool:
+        """Whether there is something to act on, said rather than asserted.
+
+        This was an `assert`, which is for invariants a programmer controls.
+        A failed acquire is not that: it leaves the app running with a live
+        input and no session, and the first thing typed took the whole app down
+        with a traceback over the transcript that explained what had gone wrong.
+        """
+        if self.runner is not None and self.runner.session is not None:
+            return True
+        self.transcript.note(
+            "no device is attached. Type /device or press ctrl+o to choose one.", "yellow"
+        )
+        return False
 
     def _backend_for_manual(self) -> Any:
         """The one backend a manual session accumulates its cost in."""
