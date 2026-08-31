@@ -144,6 +144,19 @@ class ActionFinished(Event):
     #: failure because nothing was touched, and apart from a success because
     #: the agent spent a turn.
     refused: bool = False
+    #: Why the action raised, if it did.
+    #:
+    #: Almost always recoverable, and recovered from: an ambiguous target or a
+    #: ref that has gone stale is handed to the model as a message, which
+    #: usually fixes it on the next turn. It is a fact about this action, not
+    #: about the run, and whether the run survives is decided upstream.
+    error: str = ""
+    #: What the error says to do instead, when it says anything.
+    #:
+    #: Carried here rather than written straight to the screen so it lands
+    #: after the row it explains: an event goes through the queue and a direct
+    #: write does not, so the advice arrived before the problem.
+    hint: str = ""
     #: Whether this action produced a **full** screen to display.
     #:
     #: It often does not, and that is by design rather than a gap: an action

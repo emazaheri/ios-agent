@@ -229,7 +229,12 @@ class Transcript(RichLog):
                 return [Text(f"  {note}", style=str(note_style))]
             case "acted":
                 assert isinstance(data, ActionFinished)
-                return [self._action_row(data)]
+                rows = [self._action_row(data)]
+                if data.hint:
+                    # Under the row it explains, and only when there is one:
+                    # the hint is a sentence and the row has one line.
+                    rows.append(Text(f"    {data.hint}", style="dim"))
+                return rows
             case "observed":
                 assert isinstance(data, Observed)
                 return [Text(f"  {'observe':<12}{data.stats.device_tokens} tok", "dim")]
@@ -310,16 +315,23 @@ class Transcript(RichLog):
         wrapped at 80 columns regardless, which is far worse than ragged.
         """
         line = Text("  ")
-        # A refusal never reached the device, so the verb is what is
-        # remarkable rather than the timing. Colouring the first column means
-        # it survives any width; a note at the end of the row does not.
-        style = "yellow" if event.refused else ("cyan" if event.verb in _ACTING else "dim")
+        # A refusal never reached the device and an error did not finish, so in
+        # both cases the verb is what is remarkable rather than the timing.
+        # Colouring the first column means it survives any width; a note at the
+        # end of the row does not.
+        unusual = event.refused or bool(event.error)
+        style = "yellow" if unusual else ("cyan" if event.verb in _ACTING else "dim")
         line.append(f"{event.verb:<12}", style=style)
         target = _target_of(event.args)
         if target:
             line.append(f"{target}  ")
         if event.refused:
             line.append("refused", style="yellow")
+        elif event.error:
+            # Yellow, not red. The agent hands these to the model and the next
+            # turn usually fixes them, so a run full of red on its way to
+            # succeeding reads as a disaster that did not happen.
+            line.append(event.error, style="yellow")
         else:
             line.append(f"{event.elapsed_ms}ms", style="dim")
         return line

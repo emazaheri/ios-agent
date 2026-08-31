@@ -16,7 +16,7 @@ from dataclasses import asdict
 from ios_agent import SessionBackend, run_goal
 from ios_agent.verify import Verifier
 from ios_tui.bus import ListSink
-from ios_tui.events import ActionFinished, ActionStarted, Observed, ScreenUpdated
+from ios_tui.events import ActionFinished, ActionStarted, Failed, Observed, ScreenUpdated
 from ios_tui.stream import EventBackend
 from screens import DeviceModel, build_session
 from tui_harness import ScriptedModel, settings
@@ -96,3 +96,53 @@ async def test_the_stats_on_an_event_are_a_snapshot_not_a_live_alias() -> None:
         "each row should carry the count as of that action"
     )
     assert backend.stats.actions == 3
+
+
+async def test_an_action_that_raises_is_reported_as_an_action_not_a_dead_run() -> None:
+    """A run that recovered three times looked like a run that died three times.
+
+    `ElementAmbiguous` and a stale ref are handed to the model by
+    `ios_agent.tools.guarded`, which says so plainly: raising would end the
+    graph on a mistake fixable in one turn. The run they came from went on to
+    succeed. Reporting them as failed runs told someone their session had
+    collapsed while it was working.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, settings())
+    sink = ListSink()
+    backend = EventBackend(SessionBackend(session, Verifier()), sink)
+
+    # Nothing on this screen is called that, so resolution raises.
+    await run_goal(
+        session,
+        "Tap something that is not there.",
+        model=ScriptedModel([[("tap", {"target": "Nonexistent Control"})], []]),
+        backend=backend,
+    )
+
+    assert not sink.of_type(Failed), "a recoverable error was reported as a failed run"
+
+    errored = [e for e in sink.of_type(ActionFinished) if e.error]
+    assert len(errored) == 1
+    assert errored[0].verb == "tap"
+    assert "Nonexistent Control" in errored[0].error
+
+
+async def test_an_action_that_raises_is_not_counted_as_an_action() -> None:
+    """It never reached the device, so the numbers must not say it did.
+
+    This is the same rule the refusal counter follows, and it is why the run
+    in the screenshot reported four actions for seven attempts.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, settings())
+    backend = EventBackend(SessionBackend(session, Verifier()), ListSink())
+
+    await run_goal(
+        session,
+        "Tap something that is not there.",
+        model=ScriptedModel([[("tap", {"target": "Nonexistent Control"})], []]),
+        backend=backend,
+    )
+
+    assert backend.stats.actions == 0

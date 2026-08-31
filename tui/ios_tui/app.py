@@ -779,10 +779,12 @@ class IosAgentApp(App[int]):
                 return
             backend.approve(signature)
             await command.run(backend)
-        except IosAutomationError as exc:
-            transcript.note(f"{command.verb} failed ({exc.code}): {exc}", "red")
-            if exc.hint:
-                transcript.note(f"hint: {exc.hint}")
+        except IosAutomationError:
+            # Nothing to say here. The action's own row names the verb, the
+            # target and what went wrong, and carries the hint underneath;
+            # saying it again put the advice above the problem, because a
+            # direct write beats an event through the queue.
+            return
 
     @work(group="run")
     async def run_one(self, goal: str) -> None:

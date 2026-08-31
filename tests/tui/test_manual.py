@@ -361,3 +361,60 @@ async def test_the_input_is_not_wedged_by_a_missing_device() -> None:
             "no device is attached"
         )
         assert refusals == 3, "the input stopped accepting lines after the first refusal"
+
+
+async def test_an_error_and_its_hint_arrive_in_that_order() -> None:
+    """The advice used to land above the problem it was advice about.
+
+    The row travels through the event queue and a direct `note` does not, so
+    manual mode's own handler always won the race. The hint rides on the event
+    instead, which makes the ordering a property of the data rather than of
+    two code paths finishing in the right sequence.
+    """
+    from ios_tui.app import IosAgentApp
+    from ios_tui.events import DeviceReady
+    from ios_tui.runner import GoalRunner
+    from ios_tui.widgets import StatusBar
+
+    class _Runner(GoalRunner):
+        def __init__(self, sink: object) -> None:
+            super().__init__(sink, settings())  # type: ignore[arg-type]
+
+        async def start(self) -> object:
+            session, _, _ = build_session(DeviceModel(), settings())
+            self.session = session
+            self.sink.emit(
+                DeviceReady(
+                    lease={
+                        "device": {
+                            "name": "iPhone 17",
+                            "os_version": "26.5",
+                            "kind": "simulator",
+                        }
+                    }
+                )
+            )
+            return session
+
+        async def close(self) -> None:
+            return None
+
+    app = IosAgentApp(_Runner, manual=True)
+    async with app.run_test(size=(110, 30)) as pilot:
+        async with asyncio.timeout(10):
+            while app.query_one(StatusBar).state != "ready":
+                await asyncio.sleep(0.02)
+
+        app.submit("tap Nonexistent Control")
+        async with asyncio.timeout(10):
+            while app._busy:
+                await asyncio.sleep(0.02)
+        await pilot.pause()
+
+        rows = [line.text for line in app.transcript.lines]
+        failed = next(i for i, r in enumerate(rows) if "tap" in r and "Nonexistent" in r)
+        hint = next(i for i, r in enumerate(rows) if "ios_observe" in r or "annotate_refs" in r)
+        assert hint > failed, "the hint arrived before the problem it explains"
+
+        # And it is said once, not once by the row and once by the handler.
+        assert sum("Nothing on screen matches" in r for r in rows) == 1

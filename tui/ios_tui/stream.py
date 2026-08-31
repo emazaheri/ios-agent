@@ -32,13 +32,24 @@ from ios_tui.events import (
     ActionFinished,
     ActionStarted,
     ApprovalAnswered,
-    Failed,
     ModelDelta,
     ModelTurn,
     Observed,
     ScreenUpdated,
     StatsSnapshot,
 )
+
+
+def _describe(exc: BaseException) -> str:
+    """The error, as short as it can be said.
+
+    `IosAutomationError.message` rather than `str(exc)`, which prefixes the
+    code and appends the hint: a row has one line, and the hint is a sentence
+    telling you what to do instead. Whoever shows the row can show the hint
+    beside it if there is room.
+    """
+    message = getattr(exc, "message", None)
+    return str(message or exc) or type(exc).__name__
 
 
 class EventBackend:
@@ -139,10 +150,25 @@ class EventBackend:
         try:
             rendered = await call()
         except Exception as exc:
-            # Report it, then let it travel. Swallowing here would leave the
-            # agent's own error handling (which turns a typed failure into a
-            # message the model can recover from) with nothing to catch.
-            self._sink.emit(Failed(where="run", message=f"{verb} raised {exc!r}"))
+            # Reported as an action that errored, not as a failed run. The
+            # agent catches these and hands them to the model, which usually
+            # fixes an ambiguous target or a stale ref on the next turn; the
+            # run in the screenshot that prompted this went on to succeed.
+            # Calling that a failure told someone their run had died three
+            # times while it was working.
+            #
+            # Re-raised so the agent's own handling still gets it. If the run
+            # really does die, `GoalRunner.run` reports that.
+            self._sink.emit(
+                ActionFinished(
+                    verb=verb,
+                    args=dict(args),
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    error=_describe(exc),
+                    hint=str(getattr(exc, "hint", "") or ""),
+                    stats=StatsSnapshot.of(self.stats),
+                )
+            )
             raise
         elapsed_ms = int((time.monotonic() - started) * 1000)
 
