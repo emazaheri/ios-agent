@@ -186,10 +186,29 @@ class IosAgentApp(App[int]):
     def on_mount(self) -> None:
         if self.inline_mode:
             self.screen.add_class("inline")
+
         self.query_one(Thinking).display = False
         self.query_one("#log-pane").display = False
         self.set_interval(1.0, self._tick)
         self.consume_events()
+        # Startup waits one refresh, for two reasons that happen to agree.
+        #
+        # The banner is the only thing here with a fixed width, so it has to be
+        # measured against a pane that has been laid out; written during mount
+        # it measures `RichLog`'s 80-column default and draws a phone wider
+        # than the pane it is in. And it is the greeting, so it belongs above
+        # the first thing the app has to say about the machine rather than
+        # racing the preflight for the top of the transcript.
+        self.call_after_refresh(self._start)
+
+    def _start(self) -> None:
+        if not self.inline_mode:
+            # Twenty rows is the whole of the inline shape, and nine spent on a
+            # drawing is a third of the transcript gone before anything has
+            # happened.
+            self.transcript.banner(
+                "manual" if self.manual_mode else "an agent that drives an iPhone"
+            )
         self.begin()
 
     @property

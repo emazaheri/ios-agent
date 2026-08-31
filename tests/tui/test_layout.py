@@ -46,15 +46,24 @@ class _Stub(GoalRunner):
         return None
 
 
-def _app() -> IosAgentApp:
+def _app(*, inline: bool = False) -> IosAgentApp:
     model = DeviceModel()
-    return IosAgentApp(lambda sink: _Stub(sink, model))
+    return IosAgentApp(lambda sink: _Stub(sink, model), inline=inline)
 
 
 async def _ready(app: IosAgentApp) -> None:
+    """Wait for the device *and* for startup to finish drawing.
+
+    The banner is deferred past the first refresh, so it lands after the state
+    goes ready. A test that measures the transcript before it arrives measures
+    a transcript the app has not finished writing.
+    """
     async with asyncio.timeout(10):
         while app.query_one(StatusBar).state == "starting":
             await asyncio.sleep(0.02)
+        if not app.inline_mode:
+            while not app.transcript.has_banner:
+                await asyncio.sleep(0.02)
 
 
 @pytest.mark.parametrize("size", [NARROW, WIDE])
@@ -271,3 +280,72 @@ async def test_no_status_row_ends_in_a_dangling_separator(size: tuple[int, int])
 
         # The count survives at any width; only the hint after it is dropped.
         assert "3 actions behind" in str(pane.query_one("#screen-currency", Static).content)
+
+
+# -- the wordmark ----------------------------------------------------------
+
+
+async def test_the_banner_is_drawn_at_a_width_that_fits_it() -> None:
+    """A phone drawn wider than its pane wraps, and half a phone reads as a
+    rendering fault rather than as a picture."""
+    app = _app()
+    async with app.run_test(size=WIDE) as pilot:
+        await _ready(app)
+        await pilot.pause()
+
+        transcript = app.transcript
+        drawn = [line.text for line in transcript.lines if line.text.strip()]
+        assert drawn[0].startswith("╭"), "the drawing was not shown on a wide pane"
+        assert all(len(line.rstrip()) <= transcript.size.width for line in drawn)
+
+
+async def test_a_narrow_pane_gets_the_name_and_not_a_broken_drawing() -> None:
+    """The mark has a fixed width, so below it there is nothing to shrink.
+
+    A line of text reads as a line of text; a truncated phone does not.
+    """
+    app = _app()
+    async with app.run_test(size=(50, 24)) as pilot:
+        await _ready(app)
+        await pilot.pause()
+
+        transcript = app.transcript
+        drawn = [line.text for line in transcript.lines if line.text.strip()]
+        assert drawn[0].startswith("ios-agent")
+        assert not any("╭" in line for line in drawn), "half a phone was drawn"
+
+        # Asserted on the rows the banner produces rather than on the whole
+        # transcript, which by now also holds whatever startup had to say.
+        rows = transcript._banner_rows("an agent that drives an iPhone")
+        assert len(rows) == 1
+        assert rows[0].cell_len <= transcript.size.width
+
+
+async def test_the_banner_is_measured_after_the_pane_has_been_laid_out() -> None:
+    """Written during mount it measures `RichLog`'s 80-column default.
+
+    The pane in a 50-column terminal is 31, so the drawing was chosen and then
+    wrapped. This is the same timing trap that made the transcript's columns
+    unreliable, and it bites anything with a fixed width.
+    """
+    app = _app()
+    async with app.run_test(size=(50, 24)) as pilot:
+        await _ready(app)
+        await pilot.pause()
+
+        transcript = app.transcript
+        assert transcript.size.width < 34, "this test no longer exercises a narrow pane"
+        # The drawing is all-or-nothing, so this is the assertion that matters:
+        # a pane too narrow for it must not contain any of it.
+        assert not any("─" * 10 in line.text for line in transcript.lines)
+
+
+async def test_inline_mode_spends_its_rows_on_the_run() -> None:
+    """Twenty rows is the whole of that shape. Nine on a drawing is a third of
+    the transcript gone before anything has happened."""
+    app = _app(inline=True)
+    async with app.run_test(size=(120, 20)) as pilot:
+        await _ready(app)
+        await pilot.pause()
+
+        assert not any("╭" in line.text for line in app.transcript.lines)

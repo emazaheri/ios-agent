@@ -19,6 +19,24 @@ from textual.widgets.option_list import Option
 from ios_tui.commands import Command
 from ios_tui.events import ActionFinished, GoalFinished, Observed, StatsSnapshot
 
+#: The wordmark, on a phone screen, because that is what this tool is: text a
+#: model can read where a screen used to be. 32 columns, which fits the
+#: transcript on a 64-column terminal with room to spare.
+BANNER = """\
+╭──────────────────────────────╮
+│           ▔▔▔▔▔▔▔▔           │
+│                              │
+│   ┬┌─┐┌─┐  ┌─┐┌─┐┌─┐┌┐┌┌┬┐   │
+│   ││ │└─┐──├─┤│ ┬├┤ │││ │    │
+│   ┴└─┘└─┘  ┴ ┴└─┘└─┘┘└┘ ┴    │
+│                              │
+│         ▁▁▁▁▁▁▁▁▁▁▁▁         │
+╰──────────────────────────────╯"""
+
+#: When there is no room for the drawing. Not a truncated banner: half a phone
+#: reads as a rendering fault, where a line of text reads as a line of text.
+BANNER_NARROW = "ios-agent"
+
 #: Verbs that changed the device get one colour, reads another. A transcript
 #: where everything looks the same is a log, not a view.
 _ACTING = {"tap", "type_text", "set_value", "scroll", "press_button", "open_url"}
@@ -157,6 +175,21 @@ class Transcript(RichLog):
 
     # -- what happened -----------------------------------------------------
 
+    def banner(self, subtitle: str) -> None:
+        """The mark, once, at the top of the session."""
+        self._add(("banner", subtitle))
+
+    @property
+    def has_banner(self) -> bool:
+        """Whether the mark has been written.
+
+        Reads the entries rather than the rendered lines, because `RichLog`
+        fills `lines` incrementally: a test waiting for "any line at all" wakes
+        up three rows into a nine-row drawing and measures a transcript the app
+        is still writing.
+        """
+        return any(kind == "banner" for kind, _ in self._entries)
+
     def goal(self, text: str) -> None:
         self._add(("goal", text))
 
@@ -184,6 +217,8 @@ class Transcript(RichLog):
     def _rows(self, entry: Entry) -> list[Text]:
         kind, data = entry
         match kind:
+            case "banner":
+                return self._banner_rows(str(data))
             case "goal":
                 return [Text(f"\n> {data}", style="bold")]
             case "said":
@@ -205,6 +240,26 @@ class Transcript(RichLog):
                 if data.stopped_because:
                     rows.append(Text(f"  stopped: {data.stopped_because}", style="yellow"))
                 return rows
+
+    def _banner_rows(self, subtitle: str) -> list[Text]:
+        """The drawing if it fits, the name if it does not.
+
+        Measured against the pane rather than the terminal: this sits in the
+        left half of a split, so a 64-column terminal gives it about 40.
+        """
+        width = self.size.width or 80
+        if width >= len(BANNER.splitlines()[0]) + 2:
+            rows = [Text(line, style="dim cyan") for line in BANNER.splitlines()]
+            rows.append(Text(f"  {subtitle}", style="dim"))
+            return rows
+
+        # No room for the drawing. The name always fits; the subtitle is
+        # dropped rather than wrapped, because a two-line greeting in a pane
+        # this narrow costs more than it says.
+        name = Text(BANNER_NARROW, style="bold")
+        if len(BANNER_NARROW) + len(subtitle) + 2 <= width:
+            name.append(f"  {subtitle}", style="dim")
+        return [name]
 
     def _action_row(self, event: ActionFinished) -> Text:
         """Verb, then what it was aimed at, then what it cost.
