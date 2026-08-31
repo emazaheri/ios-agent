@@ -16,7 +16,16 @@ import asyncio
 
 import pytest
 from ios_tui.app import IosAgentApp
-from ios_tui.events import ActionFinished, DeviceReady, Observed, Progress, StatsSnapshot
+from ios_tui.events import (
+    ActionFinished,
+    DeviceReady,
+    GoalFinished,
+    GoalStarted,
+    ModelTurn,
+    Observed,
+    Progress,
+    StatsSnapshot,
+)
 from ios_tui.runner import GoalRunner
 from ios_tui.widgets import ScreenPane, StatsBar, StatusBar
 from screens import DeviceModel, build_session
@@ -349,3 +358,84 @@ async def test_inline_mode_spends_its_rows_on_the_run() -> None:
         await pilot.pause()
 
         assert not any("╭" in line.text for line in app.transcript.lines)
+
+
+# -- what a run says at the end --------------------------------------------
+
+
+async def test_a_chatty_reply_is_not_printed_three_times() -> None:
+    """Typing "hello" printed "Hello! How can I help?" three times.
+
+    All three are correct in the agent: it is the turn's text, it is the
+    summary, and it is why the loop ended without calling `done`. None of the
+    fields is wrong; showing all of them is.
+    """
+    app = _app()
+    async with app.run_test(size=WIDE) as pilot:
+        await _ready(app)
+        reply = "Hello! How can I help?"
+        app._apply(GoalStarted(goal="hello", model="openai:gpt-5.6-sol"))
+        app._apply(ModelTurn(text=reply))
+        app._apply(GoalFinished(goal="hello", summary=reply, stopped_because=reply))
+        await pilot.pause()
+
+        shown = [line.text for line in app.transcript.lines if reply in line.text]
+        assert len(shown) == 1, "the same sentence was printed more than once:\n" + "\n".join(shown)
+
+
+async def test_a_summary_that_says_something_new_is_still_shown() -> None:
+    """The deduplication is against repetition, not against summaries."""
+    app = _app()
+    async with app.run_test(size=WIDE) as pilot:
+        await _ready(app)
+        app._apply(GoalStarted(goal="turn on bold text", model="m"))
+        app._apply(ModelTurn(text="I'll open Accessibility."))
+        app._apply(
+            GoalFinished(goal="turn on bold text", succeeded=True, summary="Bold Text is on.")
+        )
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "I'll open Accessibility." in written
+        assert "Bold Text is on." in written
+
+
+async def test_a_real_stop_reason_survives() -> None:
+    """`stopped:` earns its place when it says something the summary does not."""
+    app = _app()
+    async with app.run_test(size=WIDE) as pilot:
+        await _ready(app)
+        app._apply(GoalStarted(goal="scroll forever", model="m"))
+        app._apply(
+            GoalFinished(
+                goal="scroll forever",
+                summary="I could not find it.",
+                stopped_because="gave up after 24 turns",
+            )
+        )
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "I could not find it." in written
+        assert "stopped: gave up after 24 turns" in written
+
+
+async def test_a_reply_from_an_earlier_goal_does_not_silence_a_later_summary() -> None:
+    """The lookback stops at the goal that started this run.
+
+    Two goals answered the same way would otherwise have the second summary
+    suppressed by the first goal's reply.
+    """
+    app = _app()
+    async with app.run_test(size=WIDE) as pilot:
+        await _ready(app)
+        reply = "Done."
+        app._apply(GoalStarted(goal="first", model="m"))
+        app._apply(ModelTurn(text=reply))
+        app._apply(GoalFinished(goal="first", succeeded=True, summary=reply))
+        app._apply(GoalStarted(goal="second", model="m"))
+        app._apply(GoalFinished(goal="second", succeeded=True, summary=reply))
+        await pilot.pause()
+
+        shown = [line.text for line in app.transcript.lines if reply in line.text]
+        assert len(shown) == 2, "the second goal's summary was suppressed by the first goal's"

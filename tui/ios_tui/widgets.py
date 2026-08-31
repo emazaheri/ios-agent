@@ -235,11 +235,46 @@ class Transcript(RichLog):
                 return [Text(f"  {'observe':<12}{data.stats.device_tokens} tok", "dim")]
             case _:
                 assert isinstance(data, GoalFinished)
-                style = "green" if data.succeeded else "yellow"
-                rows = [Text(f"  {data.summary or '(no summary)'}", style=style)]
-                if data.stopped_because:
-                    rows.append(Text(f"  stopped: {data.stopped_because}", style="yellow"))
-                return rows
+                return self._finished_rows(data)
+
+    def _finished_rows(self, event: GoalFinished) -> list[Text]:
+        """What the run says at the end, minus what it has already said.
+
+        A model that answers without calling a tool puts one sentence in three
+        places, and all three are correct in the library: it is the turn's
+        text, it is the agent's summary, and it is why the loop ended without
+        `done`. Typing "hello" therefore printed "Hello! How can I help?" three
+        times, once in italics and twice in orange.
+
+        Deduplicated here rather than in the agent, because none of those three
+        fields is wrong. Only showing all of them is.
+        """
+        summary = event.summary.strip()
+        stopped = (event.stopped_because or "").strip()
+
+        rows: list[Text] = []
+        if summary and summary != self._last_said:
+            rows.append(Text(f"  {summary}", style="green" if event.succeeded else "yellow"))
+        elif not summary:
+            rows.append(Text("  (no summary)", style="yellow"))
+
+        # "stopped: X" under a line that already says X is a label with nothing
+        # to label. It earns its place only when it says something new.
+        if stopped and stopped != summary and stopped != self._last_said:
+            rows.append(Text(f"  stopped: {stopped}", style="yellow"))
+        return rows
+
+    @property
+    def _last_said(self) -> str:
+        """The most recent thing the model was shown to have said."""
+        for kind, data in reversed(self._entries):
+            if kind == "said":
+                return str(data).strip()
+            if kind == "goal":
+                # A new goal starts a new conversation; anything before it was
+                # said about something else.
+                return ""
+        return ""
 
     def _banner_rows(self, subtitle: str) -> list[Text]:
         """The drawing if it fits, the name if it does not.
