@@ -137,12 +137,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "manual":
         return _cmd_manual(settings, args)
     if args.command == "run":
-        if not args.goal:
-            print("Give me something to do, in quotes. See --help.", file=sys.stderr)
-            return 2
         return _cmd_run(settings, args)
-    build_parser().print_help()
-    return 2
+    # No subcommand at all means `run` with nothing to do yet, which is a
+    # perfectly good way to start: the app opens with the input focused. It
+    # used to print help and exit, so getting to the terminal front end
+    # required already knowing what you wanted from it.
+    return _cmd_run(settings, build_parser().parse_args(["run"]))
 
 
 def _cmd_doctor(settings: Settings, *, json_out: bool) -> int:
@@ -213,6 +213,12 @@ async def _confirm(request: dict[str, object]) -> bool:
 
 
 def _cmd_run(settings: Settings, args: argparse.Namespace) -> int:
+    if args.no_tui and not args.goal:
+        # The plain front end has nothing to type into, so it is the one shape
+        # that genuinely needs a goal up front.
+        print("`--no-tui` needs a goal, in quotes. See --help.", file=sys.stderr)
+        return 2
+
     # Imported here rather than at module scope so `devices` and `doctor` do
     # not pay for LangGraph. They are the two commands that have to work on a
     # machine where nothing else does.

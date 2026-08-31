@@ -45,3 +45,30 @@ def test_run_defaults_to_the_full_screen_front_end() -> None:
     args = build_parser().parse_args(_normalise(["turn on bold text"]))
     assert args.no_tui is False
     assert args.approve is False, "approval is opt-in; unattended runs refuse"
+
+
+def test_a_bare_invocation_means_run_with_nothing_to_do_yet() -> None:
+    """Opening the front end should not require knowing what you want from it.
+
+    `ios-agent` alone printed help and exited, so the only way into the TUI in
+    agent mode was to have already decided on a goal and typed it as an
+    argument. The app has an input box; it can be asked later.
+    """
+    args = build_parser().parse_args(_normalise([]) or ["run"])
+    assert args.command == "run"
+    assert args.goal is None
+
+
+def test_run_without_a_goal_is_allowed() -> None:
+    args = build_parser().parse_args(["run"])
+    assert args.command == "run"
+    assert args.goal is None
+    assert args.no_tui is False
+
+
+def test_the_plain_front_end_still_needs_a_goal() -> None:
+    """`--no-tui` has nothing to type into, so it is the one shape that
+    genuinely cannot be asked later."""
+    from ios_tui.cli import main
+
+    assert main(["--no-tui"]) == 2

@@ -3,6 +3,7 @@
 A terminal front end for `ios-agent`. Installs the `ios-agent` command.
 
 ```bash
+ios-agent                               # open it, decide later
 ios-agent doctor                        # is this machine set up
 ios-agent devices                       # what is reachable
 ios-agent "turn on bold text"           # a simulator

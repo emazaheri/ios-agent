@@ -237,6 +237,17 @@ class IosAgentApp(App[int]):
                 except Exception as exc:
                     self._complain(f"display error: {exc!r}")
 
+    @property
+    def _on_screen(self) -> bool:
+        """Whether there is still a screen to write to.
+
+        Startup runs in a worker, and a worker outlives the app whenever it
+        exits early: someone quitting while a simulator boots, or a test that
+        finishes during acquisition. Everything in that path writes to widgets,
+        so each entry point has to ask rather than assume.
+        """
+        return bool(self.is_running)
+
     def _complain(self, message: str) -> None:
         """Report a drawing failure without assuming anything can be drawn.
 
@@ -386,6 +397,8 @@ class IosAgentApp(App[int]):
         from ios_mcp.devices.doctor import run_doctor
 
         assert self.runner is not None
+        if not self._on_screen:
+            return False
         status = self.query_one(StatusBar)
         status.state = "starting"
         self._last_progress_at = monotonic()
@@ -427,7 +440,7 @@ class IosAgentApp(App[int]):
         shows on every start and never applies is one nobody reads.
         """
         report, self._report = self._report, None
-        if report is None:
+        if report is None or not self._on_screen:
             return
         for check in report.warnings_for(kind):
             self.transcript.note(f"{check.name}: {check.detail}", "yellow")
@@ -507,6 +520,8 @@ class IosAgentApp(App[int]):
         from ios_agent import probe_provider
 
         assert self.runner is not None
+        if not self._on_screen:
+            return False
         probe = probe_provider(self.runner.agent)
         status = self.query_one(StatusBar)
         status.model = self.runner.agent.describe()
@@ -760,6 +775,8 @@ class IosAgentApp(App[int]):
         header is honest about there being no device whether or not the
         failure happened to be reported as one.
         """
+        if not self._on_screen:
+            return
         self.query_one(StatusBar).state = "failed"
         self.transcript.note("Type /device or press ctrl+o to choose another.")
         self.query_one(GoalInput).focus()

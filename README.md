@@ -169,6 +169,7 @@ because hardware being present is not consent to change settings on it.
 distribution (`tui/`, [ADR 0008](docs/adr/0008-the-front-end-is-a-third-distribution.md)).
 
 ```bash
+uv run ios-agent                               # open it, decide later
 uv run ios-agent doctor                        # is this machine set up
 uv run ios-agent devices                       # what is reachable
 uv run ios-agent "turn on bold text"           # a simulator
