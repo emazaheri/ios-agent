@@ -180,6 +180,34 @@ class Transcript(RichLog):
         """The mark, once, at the top of the session."""
         self._add(("banner", subtitle))
 
+    def clear(self) -> Transcript:
+        """Empty it, entries and all.
+
+        `RichLog.clear` drops the rendered lines and knows nothing about the
+        entries this class keeps beside them, which left the widget with two
+        notions of what it contained: a cleared transcript still had a full
+        history to rebuild from. Anything reading the entries, `as_text` most
+        of all, then disagreed with the screen.
+        """
+        self._entries = []
+        super().clear()
+        return self
+
+    def as_text(self) -> str:
+        """The transcript as something worth pasting.
+
+        Rebuilt from the entries rather than scraped off the rendered lines,
+        which lets the wordmark be left out. Nine lines of ASCII phone is not
+        what someone copying a log into a bug report is after, and it is the
+        one thing on screen that carries no information.
+        """
+        rows: list[str] = []
+        for entry in self._entries:
+            if entry[0] == "banner":
+                continue
+            rows.extend(row.plain.rstrip() for row in self._rows(entry))
+        return "\n".join(rows).strip()
+
     @property
     def has_banner(self) -> bool:
         """Whether the mark has been written.

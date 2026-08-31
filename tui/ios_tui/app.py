@@ -73,6 +73,22 @@ from ios_tui.widgets import (
 _SIMULATOR_FIRST = ("xcode", "simctl", "wda-bundle")
 
 
+def _to_clipboard(text: str) -> bool:
+    """Hand the text to `pbcopy`, and say whether it took it.
+
+    Preferred over the escape sequence because it is a pipe to a program that
+    is on every Mac, where OSC 52 depends on the terminal implementing it and
+    on the user having allowed it.
+    """
+    import subprocess
+
+    try:
+        subprocess.run(["pbcopy"], input=text.encode(), check=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
 def _worst_first(checks: list[Any]) -> list[Any]:
     """Blocking failures first, then whatever the simulator path needs."""
 
@@ -107,6 +123,7 @@ class IosAgentApp(App[int]):
         Binding("ctrl+o", "device", "Device", show=True),
         Binding("ctrl+r", "reread", "Re-read screen", show=False),
         Binding("ctrl+s", "save", "Save trail", show=False),
+        Binding("ctrl+y", "copy", "Copy", show=False),
         # Only while the slash menu is open; `check_action` disables them
         # otherwise so the arrow keys stay free for the input.
         Binding("down", "menu_down", "Next command", show=False),
@@ -653,6 +670,12 @@ class IosAgentApp(App[int]):
             Command("screen", "read the screen again", self.action_reread, "ctrl+r"),
             Command("log", "show or hide the device startup log", self.action_toggle_log, "ctrl+l"),
             Command("save", "write the audit trail to .artifacts", self.action_save, "ctrl+s"),
+            Command(
+                "copy",
+                "copy the selection, or the whole transcript",
+                self.action_copy,
+                "ctrl+y",
+            ),
             Command("stop", "stop the running goal", self.action_stop, "esc"),
             Command("quit", "release the device and exit", self._quit_later, "ctrl+q"),
         ]
@@ -947,6 +970,35 @@ class IosAgentApp(App[int]):
         box = self.query_one(GoalInput)
         box.value = f"/{chosen.name}"
         box.cursor_position = len(box.value)
+
+    def action_copy(self) -> None:
+        """Put the transcript on the clipboard.
+
+        The terminal's own drag-select does not reach it: a Textual app turns
+        on mouse reporting, so the terminal hands the drag to the app instead of
+        selecting text. Textual has its own selection and a `copy_text` action,
+        and binds no key to it, which leaves a log that can be highlighted and
+        not copied.
+
+        The selection if there is one, the whole transcript if there is not.
+        Someone who says the logs are not copiable usually wants the log, not a
+        rectangle of it.
+        """
+        selected = self.screen.get_selected_text()
+        text = selected or self.transcript.as_text()
+        if not text.strip():
+            self.transcript.note("nothing to copy yet")
+            return
+
+        what = "selection" if selected else f"{len(text.splitlines())} lines"
+        if _to_clipboard(text):
+            self.transcript.note(f"copied the {what}")
+            return
+        # OSC 52 is the fallback, and Textual's own docstring says it does not
+        # work on macOS Terminal, so it cannot be the only route on a
+        # macOS-only tool.
+        self.copy_to_clipboard(text)
+        self.transcript.note(f"copied the {what} (via the terminal)")
 
     def action_toggle_log(self) -> None:
         pane = self.query_one("#log-pane", LogPane)

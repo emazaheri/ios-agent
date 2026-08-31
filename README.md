@@ -96,6 +96,7 @@ observations, device tokens, cost.
 | `/device` · `ctrl+o` | switch phone or simulator mid-session |
 | `esc` | stop at the next step, with a complete report; again to abort |
 | `ctrl+r` · `ctrl+s` | re-read the screen · save the audit trail |
+| `/copy` · `ctrl+y` | copy the transcript, or a selection, to the clipboard |
 | `--inline` | run in a short region under the prompt |
 | `--no-tui` | plain lines, for a pipe |
 

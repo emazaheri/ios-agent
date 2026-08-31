@@ -231,3 +231,107 @@ async def test_the_palette_offers_the_same_commands() -> None:
         offered = [hit.display async for hit in provider.discover()]
 
         assert offered == [f"/{c.name}" for c in app.commands()]
+
+
+# -- copying -----------------------------------------------------------------
+
+
+async def test_copy_puts_the_whole_transcript_on_the_clipboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Textual app turns on mouse reporting, so the terminal hands a drag to
+    the app rather than selecting text. Textual has its own selection and a
+    `copy_text` action and binds no key to it, which leaves a log that can be
+    highlighted and not copied.
+
+    With no selection the whole transcript is taken, because someone saying the
+    logs are not copiable wants the log rather than a rectangle of it.
+    """
+    copied: list[str] = []
+    monkeypatch.setattr(
+        "ios_tui.app._to_clipboard", lambda text: copied.append(text) or True
+    )
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        app.transcript.goal("turn on bold text")
+        await pilot.pause()
+
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+
+        assert copied, "nothing reached the clipboard"
+        assert "turn on bold text" in copied[0]
+
+
+async def test_copy_falls_back_when_pbcopy_is_not_there(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OSC 52 cannot be the only route on a macOS-only tool: Textual's own
+    docstring says it does not work on macOS Terminal. It is the fallback."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: False)
+    sent: list[str] = []
+    monkeypatch.setattr(IosAgentApp, "copy_to_clipboard", lambda self, text: sent.append(text))
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        app.transcript.goal("turn on bold text")
+        await pilot.pause()
+
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+
+        assert sent and "turn on bold text" in sent[0]
+
+
+async def test_copying_an_empty_transcript_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Silence would read as a copy that worked."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner, inline=True)  # inline draws no banner
+    async with app.run_test(size=(100, 20)) as pilot:
+        await _ready(app)
+        # Emptied rather than assumed empty: startup legitimately writes to it,
+        # a warning about the model most often, so a fresh app is not a blank
+        # one.
+        app.transcript.clear()
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "nothing to copy" in written
+
+
+def test_copy_is_offered_in_the_command_menu() -> None:
+    """Discoverable, since the key is not one anyone would guess."""
+    app = IosAgentApp(_Runner)
+    assert any(c.name == "copy" for c in app.commands())
+
+
+async def test_the_wordmark_is_not_copied_with_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nine lines of ASCII phone is not what someone pasting a log wants.
+
+    It is also the one thing on screen carrying no information, which is why
+    the copy is rebuilt from the entries rather than scraped off the rendered
+    lines.
+    """
+    copied: list[str] = []
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: copied.append(text) or True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        assert app.transcript.has_banner, "this test needs the banner to be there"
+        app.transcript.goal("turn on bold text")
+        await pilot.pause()
+
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+
+        assert copied
+        assert "╭─" not in copied[0]
+        assert "turn on bold text" in copied[0]
