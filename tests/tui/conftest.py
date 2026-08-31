@@ -19,6 +19,7 @@ HEALTHY = [
     Check("xcode", "ok", "Xcode 26.6"),
     Check("simctl", "ok", "xcrun simctl available"),
     Check("wda-bundle", "ok", "simulator bundle ready", data={"xctestrun": "/fake.xctestrun"}),
+    Check("simulators", "ok", "11 simulator(s) on iOS 26.5"),
     Check("devices", "ok", "1 device(s)"),
 ]
 

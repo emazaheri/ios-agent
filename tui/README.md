@@ -63,6 +63,13 @@ tool happened to be reached first. It reuses `run_doctor`, costs about a
 second, and blocks only when nothing can be driven: a stopped tunnel and an
 expiring provisioning profile are both mentioned and neither stops a run.
 
+Two kinds of "no simulator" are told apart, because they cost very different
+things to fix. With a runtime installed but no device created, the app offers
+to create one: `simctl create` takes about 0.2 seconds, needs no network, and
+`simctl delete` undoes it. With no runtime at all, it names
+`xcodebuild -downloadPlatform iOS` and stops: 8 GB is not a thing to start on
+someone's behalf from a screen with no progress bar.
+
 `ios-agent doctor` reports the model alongside the device toolchain, and the
 app checks it **before acquiring a device**: a missing key otherwise surfaced
 on the first model turn, which is after a cold simulator has booted and

@@ -32,7 +32,7 @@ def _report(**statuses: str) -> DoctorReport:
 
 def test_simulator_readiness_needs_xcode_simctl_and_a_wda_build() -> None:
     """Xcode alone is not enough: WebDriverAgent has to exist to drive anything."""
-    ready = {"xcode": "ok", "simctl": "ok", "wda-bundle": "ok"}
+    ready = {"xcode": "ok", "simctl": "ok", "simulators": "ok", "wda-bundle": "ok"}
     assert _report(**ready).can_use_simulator
     assert not _report(**{**ready, "xcode": "fail"}).can_use_simulator
     assert not _report(**{**ready, "simctl": "fail"}).can_use_simulator
@@ -67,11 +67,12 @@ def test_summary_counts_and_capability() -> None:
         xcode="ok",
         simctl="ok",
         python="ok",
+        simulators="ok",
         **{"wda-bundle": "ok"},
         tunnel="warn",
         devices="fail",
     )
-    assert "4 ok" in report.summary
+    assert "5 ok" in report.summary
     assert "1 warning" in report.summary
     assert "1 blocking" in report.summary
     assert "simulator" in report.summary

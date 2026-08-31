@@ -61,6 +61,7 @@ class DoctorReport:
         return (
             self._status("xcode") == "ok"
             and self._status("simctl") == "ok"
+            and self._status("simulators") == "ok"
             and self._has_simulator_bundle
         )
 
@@ -144,6 +145,7 @@ async def run_doctor(settings: Settings | None = None) -> DoctorReport:
     xcode = await _check_xcode()
     checks.append(xcode)
     checks.append(await _check_simctl())
+    checks.append(await _check_simulators())
     checks.append(await _check_devicectl())
     goios = await _check_goios(cfg)
     checks.append(goios)
@@ -227,6 +229,76 @@ async def _check_simctl() -> Check:
             ),
         )
     return Check("simctl", "ok", "xcrun simctl available")
+
+
+async def _check_simulators() -> Check:
+    """Is there a simulator to drive, and if not, what kind of nothing is it?
+
+    Two failures wear the same words and cost wildly different things to fix.
+
+    **No runtime.** Xcode ships without one, so this is the state of every
+    fresh install. The fix is `xcodebuild -downloadPlatform iOS`: roughly 8 GB
+    and many minutes.
+
+    **A runtime but no devices.** The runtime is the expensive part and it is
+    already there; `simctl create` makes a device in about 0.2 seconds, offline,
+    and `simctl delete` undoes it. Someone who has run `simctl erase all` too
+    enthusiastically lands here.
+
+    The distinction is carried in `data` so a caller can offer to fix the cheap
+    one and knows not to offer for the other.
+    """
+    if platform.system() != "Darwin":
+        return Check("simulators", "skip", "not macOS")
+
+    runtimes = await probe("xcrun", "simctl", "list", "runtimes", "--json", timeout=30.0)
+    if runtimes is None or not runtimes.ok:
+        return Check("simulators", "skip", "could not list simulator runtimes")
+
+    available = [
+        r
+        for r in runtimes.json().get("runtimes", [])
+        if r.get("isAvailable") and "iOS" in str(r.get("name", ""))
+    ]
+    if not available:
+        return Check(
+            "simulators",
+            "fail",
+            "no iOS simulator runtime is installed",
+            remedy=(
+                "Run `xcodebuild -downloadPlatform iOS` (around 8 GB, several minutes). "
+                "Xcode ships without a runtime."
+            ),
+        )
+
+    newest = available[-1]
+    devices = await probe("xcrun", "simctl", "list", "devices", "--json", timeout=30.0)
+    if devices is None or not devices.ok:
+        return Check("simulators", "skip", "could not list simulators")
+
+    usable = [
+        d
+        for entries in devices.json().get("devices", {}).values()
+        for d in entries
+        if d.get("isAvailable")
+    ]
+    if not usable:
+        return Check(
+            "simulators",
+            "fail",
+            f"{newest.get('name')} is installed, but no simulator has been created",
+            remedy="Create one with `xcrun simctl create`, or let ios-agent do it.",
+            # The runtime is the expensive half and it is already here, so this
+            # is repairable in a fraction of a second without a network.
+            data={"can_create": True, "runtime": newest.get("identifier", "")},
+        )
+
+    return Check(
+        "simulators",
+        "ok",
+        f"{len(usable)} simulator(s) on {newest.get('name')}",
+        data={"runtime": newest.get("identifier", "")},
+    )
 
 
 async def _check_devicectl() -> Check:

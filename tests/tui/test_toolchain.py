@@ -15,6 +15,7 @@ import asyncio
 
 import pytest
 from ios_tui.app import IosAgentApp
+from ios_tui.approval import ApprovalModal
 from ios_tui.events import DeviceReady
 from ios_tui.runner import GoalRunner
 from ios_tui.widgets import StatusBar
@@ -52,6 +53,7 @@ NO_WDA = [
 HEALTHY_WITH_WARNINGS = [
     Check("xcode", "ok", "Xcode 26.6"),
     Check("simctl", "ok", "xcrun simctl available"),
+    Check("simulators", "ok", "11 simulator(s) on iOS 26.5"),
     Check(
         "wda-bundle",
         "warn",
@@ -220,6 +222,7 @@ def test_a_device_signing_warning_does_not_make_the_simulator_unusable() -> None
         checks=[
             Check("xcode", "ok", "Xcode 26.6"),
             Check("simctl", "ok", "available"),
+            Check("simulators", "ok", "11 simulator(s)"),
             Check(
                 "wda-bundle",
                 "warn",
@@ -239,6 +242,7 @@ def test_no_simulator_bundle_means_no_simulator() -> None:
         checks=[
             Check("xcode", "ok", "Xcode 26.6"),
             Check("simctl", "ok", "available"),
+            Check("simulators", "ok", "11 simulator(s)"),
             Check("wda-bundle", "ok", "device runner ready", data={"runner_app": "/f.app"}),
         ]
     )
@@ -296,3 +300,149 @@ async def test_a_hard_failure_outranks_everything(machine: object) -> None:
 
         written = "\n".join(line.text for line in app.transcript.lines)
         assert "Xcode is not installed" in written
+
+
+# -- the one repair worth offering -----------------------------------------
+
+NO_SIMULATOR_DEVICE = [
+    Check("xcode", "ok", "Xcode 26.6"),
+    Check("simctl", "ok", "xcrun simctl available"),
+    Check("wda-bundle", "ok", "simulator bundle ready", data={"xctestrun": "/f.xctestrun"}),
+    Check(
+        "simulators",
+        "fail",
+        "iOS 26.5 is installed, but no simulator has been created",
+        remedy="Create one with `xcrun simctl create`, or let ios-agent do it.",
+        data={"can_create": True, "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-5"},
+    ),
+]
+
+NO_RUNTIME = [
+    Check("xcode", "ok", "Xcode 26.6"),
+    Check("simctl", "ok", "xcrun simctl available"),
+    Check("wda-bundle", "ok", "simulator bundle ready", data={"xctestrun": "/f.xctestrun"}),
+    Check(
+        "simulators",
+        "fail",
+        "no iOS simulator runtime is installed",
+        remedy="Run `xcodebuild -downloadPlatform iOS` (around 8 GB, several minutes).",
+    ),
+]
+
+
+@pytest.fixture
+def created(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    """Record what would have been created, without creating it."""
+    from ios_mcp.devices.base import DeviceInfo
+
+    runtimes: list[str | None] = []
+
+    async def fake_create(
+        name: str = "iPhone 17", runtime: str | None = None, settings: object = None
+    ) -> DeviceInfo:
+        runtimes.append(runtime)
+        return DeviceInfo(
+            udid="NEW-UDID", name=name, os_version="26.5", kind="simulator", ready=True
+        )
+
+    monkeypatch.setattr("ios_mcp.devices.discovery.create_simulator", fake_create)
+    return runtimes
+
+
+async def test_a_missing_device_is_offered_and_created_on_yes(
+    machine: object, created: list[str | None]
+) -> None:
+    """The runtime is the 8 GB half and it is already installed. Making the
+    device takes about a second, needs no network, and `simctl delete` undoes
+    it, so naming a command for it would be asking someone to paste something
+    to save two tenths of a second."""
+    assert callable(machine)
+    machine(NO_SIMULATOR_DEVICE)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: isinstance(app.screen, ApprovalModal))
+        await pilot.press("y")
+
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+        runner = app.runner
+        assert isinstance(runner, _Runner)
+        assert runner.started == 1, "the run did not continue after the repair"
+        assert created == ["com.apple.CoreSimulator.SimRuntime.iOS-26-5"]
+        assert runner.device == "NEW-UDID", "the run did not use the device it just made"
+
+
+async def test_declining_leaves_the_machine_alone(
+    machine: object, created: list[str | None]
+) -> None:
+    """Cheap to do is not the same as ours to decide."""
+    assert callable(machine)
+    machine(NO_SIMULATOR_DEVICE)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: isinstance(app.screen, ApprovalModal))
+        await pilot.press("n")
+
+        await _settle(app, lambda: app.query_one(StatusBar).state == "failed")
+        await pilot.pause()
+
+        assert created == [], "a simulator was created after being refused"
+        runner = app.runner
+        assert isinstance(runner, _Runner)
+        assert runner.started == 0
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "simctl create" in written, "the manual command was not offered"
+
+
+async def test_a_missing_runtime_is_named_and_never_downloaded(
+    machine: object, created: list[str | None]
+) -> None:
+    """Eight gigabytes is not something to start on someone's behalf.
+
+    A download that size belongs to a command they run deliberately, where they
+    can watch it and stop it, not to a TUI with no progress bar. So this one is
+    named and not offered, and no modal appears at all.
+    """
+    assert callable(machine)
+    machine(NO_RUNTIME)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "failed")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ApprovalModal), "it offered to download 8 GB"
+        assert created == []
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "downloadPlatform" in written
+        assert "8 GB" in written
+
+
+async def test_a_repair_that_fails_says_so_rather_than_pretending(
+    machine: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert callable(machine)
+    machine(NO_SIMULATOR_DEVICE)
+
+    async def broken(**_kwargs: object) -> None:
+        raise OSError("simctl create said no")
+
+    monkeypatch.setattr("ios_mcp.devices.discovery.create_simulator", broken)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: isinstance(app.screen, ApprovalModal))
+        await pilot.press("y")
+
+        await _settle(app, lambda: app.query_one(StatusBar).state == "failed")
+        await pilot.pause()
+
+        runner = app.runner
+        assert isinstance(runner, _Runner)
+        assert runner.started == 0
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "could not create one" in written

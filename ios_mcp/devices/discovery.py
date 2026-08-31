@@ -13,7 +13,8 @@ from typing import Any
 from ios_mcp.config import Settings, get_settings
 from ios_mcp.devices import devicectl
 from ios_mcp.devices.base import DeviceInfo
-from ios_mcp.devices.shell import probe, which
+from ios_mcp.devices.shell import probe, run, which
+from ios_mcp.errors import DeviceNotReady
 
 _RUNTIME_RE = re.compile(r"iOS[-\s](\d+)[-.](\d+)(?:[-.](\d+))?", re.IGNORECASE)
 
@@ -170,3 +171,83 @@ def _needs_tunnel(os_version: str) -> bool:
         return int(os_version.split(".")[0]) >= 17
     except (ValueError, IndexError):
         return False
+
+
+async def create_simulator(
+    name: str = "iPhone 17", runtime: str | None = None, settings: Settings | None = None
+) -> DeviceInfo:
+    """Create one simulator, and return it.
+
+    Only worth doing when a runtime is already installed: the runtime is the
+    8 GB half, and this is the 0.2-second half. Reversible with
+    `xcrun simctl delete`, which is what makes it reasonable to offer at all.
+
+    Raises `DeviceNotReady` if there is nothing to create it from, rather than
+    reporting success for a device that does not exist.
+    """
+    cfg = settings or get_settings()
+    del cfg  # discovery shells out directly; kept for signature symmetry
+
+    listing = await run("xcrun", "simctl", "list", "runtimes", "--json", timeout=30.0)
+    available = [
+        r
+        for r in (listing.json().get("runtimes", []) if listing.ok else [])
+        if r.get("isAvailable") and "iOS" in str(r.get("name", ""))
+    ]
+    if not available:
+        raise DeviceNotReady(
+            "no iOS simulator runtime is installed",
+            hint="Run `xcodebuild -downloadPlatform iOS` first; it is about 8 GB.",
+        )
+
+    chosen = next((r for r in available if r.get("identifier") == runtime), available[-1])
+    runtime = str(chosen.get("identifier"))
+    device_type = _device_type_for(name, chosen)
+    result = await run("xcrun", "simctl", "create", name, device_type, runtime, timeout=120.0)
+    if not result.ok:
+        raise DeviceNotReady(
+            f"could not create a simulator called {name!r}",
+            hint=result.stderr[:300] or "Check `xcrun simctl list devicetypes`.",
+        )
+
+    udid = result.stdout.strip()
+    return DeviceInfo(
+        udid=udid,
+        name=name,
+        os_version=_version_from(runtime),
+        kind="simulator",
+        state="Shutdown",
+        ready=True,
+    )
+
+
+def _device_type_for(name: str, runtime: dict[str, Any]) -> str:
+    """A device type this runtime actually supports.
+
+    Read from the runtime's own `supportedDeviceTypes` rather than the flat
+    `simctl list devicetypes`, which lists every type this Xcode knows about
+    including ones the runtime refuses. Picking from the flat list produced
+    `Incompatible device`: it is ordered newest first, so taking the last entry
+    reached an iPhone 6s that iOS 26 will not run.
+
+    A name rather than an identifier because identifiers change shape between
+    Xcode versions and a name is what a person would recognise.
+    """
+    supported = runtime.get("supportedDeviceTypes", [])
+    for entry in supported:
+        if str(entry.get("name", "")).lower() == name.lower():
+            return str(entry.get("identifier"))
+    iphones = [t for t in supported if str(t.get("name", "")).startswith("iPhone")]
+    if not iphones:
+        raise DeviceNotReady(
+            f"{runtime.get('name')} supports no iPhone device type",
+            hint="`xcrun simctl list runtimes --json` shows what it does support.",
+        )
+    # Newest first, which is the order simctl reports them in.
+    return str(iphones[0].get("identifier"))
+
+
+def _version_from(runtime: str) -> str:
+    """`...SimRuntime.iOS-26-5` -> `26.5`."""
+    tail = runtime.rsplit(".", 1)[-1]
+    return tail.removeprefix("iOS-").replace("-", ".")

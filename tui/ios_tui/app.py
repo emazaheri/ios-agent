@@ -382,6 +382,9 @@ class IosAgentApp(App[int]):
                     self.transcript.note(f"{check.name}: {check.detail}", "yellow")
             return True
 
+        if await self._offer_to_create_a_simulator(report):
+            return True
+
         status.state = "failed"
         self.transcript.note("this Mac is not set up to drive a device yet.", "red")
         for check in _worst_first(blocking or [c for c in report.checks if c.status != "ok"]):
@@ -390,6 +393,58 @@ class IosAgentApp(App[int]):
                 self.transcript.note(f"  {check.remedy}")
         self.transcript.note("`ios-agent doctor` prints this in full.")
         return False
+
+    async def _offer_to_create_a_simulator(self, report: Any) -> bool:
+        """Offer the one repair that is cheap enough to be worth offering.
+
+        A missing *runtime* is 8 GB and several minutes, so that one is named
+        and not run: a download that size belongs to a command someone starts
+        deliberately, where they can see it progress and stop it.
+
+        A missing *device* when the runtime is already installed is the other
+        half of that, and it is 0.2 seconds, offline, and undone by
+        `simctl delete`. Naming a command for that is making someone paste
+        something to save two tenths of a second.
+
+        Still asked rather than assumed. It creates state on someone's machine,
+        and the fact that it is cheap to do is not the same as it being ours to
+        decide.
+        """
+        repairable = next(
+            (c for c in report.checks if c.name == "simulators" and c.data.get("can_create")),
+            None,
+        )
+        if repairable is None or self.runner is None:
+            return False
+
+        self.transcript.note(repairable.detail, "yellow")
+        allowed = await self.push_screen_wait(
+            ApprovalModal(
+                {
+                    "action": "create a simulator",
+                    "reason": repairable.detail,
+                    "signature": "simctl create",
+                    "goal": "iOS 26 runtime is installed, so this takes about a second",
+                }
+            )
+        )
+        if not allowed:
+            self.transcript.note("not created. `xcrun simctl create` does it by hand.")
+            return False
+
+        from ios_mcp.devices.discovery import create_simulator
+
+        try:
+            device = await create_simulator(runtime=repairable.data.get("runtime"))
+        except Exception as exc:
+            self.transcript.note(f"could not create one: {exc}", "red")
+            return False
+
+        self.transcript.note(f"created {device.name} on iOS {device.os_version}.", "green")
+        # Named explicitly, so the run uses the device just made rather than
+        # whatever the pool would otherwise have ranked first.
+        self.runner.device = device.udid
+        return True
 
     def _preflight(self) -> bool:
         """Check the model before spending a minute acquiring a device.
