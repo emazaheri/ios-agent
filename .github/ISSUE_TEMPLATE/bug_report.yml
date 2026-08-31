@@ -1,0 +1,67 @@
+name: Bug report
+description: Something behaved differently from how it is documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most setup problems are already diagnosed by `uv run ios-agent doctor`,
+        which names a remedy for each failure. Please run it first and paste the
+        output below: it answers the toolchain, simulator, signing and model
+        questions in one go and saves a round of questions.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `uv run ios-agent doctor`
+      description: Redact anything you would rather not share; it prints no secrets by design.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: What you ran
+      placeholder: uv run ios-agent --app com.apple.Preferences "turn on bold text"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: What were you driving?
+      options:
+        - Simulator
+        - Physical iPhone over Wi-Fi
+        - Physical iPhone over USB
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Provider and model
+      description: The status bar shows it, or `IOS_AGENT_PROVIDER` and `IOS_AGENT_MODEL`.
+      placeholder: openai:gpt-5.6-sol
+    validations:
+      required: false
+
+  - type: textarea
+    id: transcript
+    attributes:
+      label: The transcript, or the audit trail
+      description: |
+        `ctrl+s` in the terminal app writes the trail to `.artifacts/tui/`. It
+        records what the device was actually asked to do, which is usually more
+        useful than what the agent said it did.
+      render: text
+    validations:
+      required: false

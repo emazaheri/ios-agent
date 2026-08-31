@@ -30,7 +30,7 @@ uv run ios-agent "turn on bold text"
 - [What the model sees](#what-the-model-sees)
 - [Safety](#safety)
 - [What it cost to find out which ideas were worth keeping](#what-it-cost-to-find-out-which-ideas-were-worth-keeping)
-- [Development](#development)
+- [Development](#development) · [Contributing](#contributing)
 
 ## Why it is built this way
 
@@ -281,6 +281,12 @@ blocks cross-process access, and the Accessibility API is unavailable to
 sandboxed apps even with user consent. XCUIAutomation only executes inside an
 XCTest runner started by `testmanagerd`, which is driven from a host. Any iOS
 app in this project's future is a client of this server, never the engine.
+
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+the setup, the loop, and the five conventions that are load bearing rather than
+stylistic. CI runs ruff, mypy and the 537 offline tests on Linux and macOS.
 
 ## License
 

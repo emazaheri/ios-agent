@@ -1,0 +1,39 @@
+name: Feature request
+description: Something this should do and does not
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Some things are out of scope on purpose, and the reasons are in
+        [CLAUDE.md](../blob/main/CLAUDE.md#scope): a consumer macOS app, which
+        provisioning caps at ~100 devices, automating your signing flow, a cloud
+        device farm, and Android. Decisions already taken are recorded as ADRs
+        in [docs/adr](../tree/main/docs/adr), each with what would reopen it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task, not the feature. What the tool should let you accomplish.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: What you do instead, and where it falls down.
+    validations:
+      required: true
+
+  - type: textarea
+    id: measurement
+    attributes:
+      label: How would you know it worked?
+      description: |
+        Optional, and genuinely useful here. This project rejected three of four
+        planned features on their own numbers, so a proposal that names what it
+        would improve, and by how much, is one that can be settled.
+    validations:
+      required: false

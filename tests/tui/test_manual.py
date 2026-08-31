@@ -196,7 +196,7 @@ async def test_typing_help_prints_the_grammar_rather_than_an_objection() -> None
 
 
 def test_the_manual_prompt_asks_for_a_verb_not_a_sentence() -> None:
-    """"what should it do?" invites a sentence, and a sentence is the one thing
+    """ "what should it do?" invites a sentence, and a sentence is the one thing
     manual mode does not take. Asking the wrong question is how someone ends up
     typing "hi" and being told off for it."""
     from ios_tui.widgets import GoalInput

@@ -22,20 +22,36 @@ from tui_harness import ScriptedModel, settings
 from ios_mcp.devices.base import DeviceInfo
 
 BOOTED_SIM = DeviceInfo(
-    udid="sim-booted", name="iPhone 17", os_version="26.5", kind="simulator",
-    state="Booted", ready=True,
+    udid="sim-booted",
+    name="iPhone 17",
+    os_version="26.5",
+    kind="simulator",
+    state="Booted",
+    ready=True,
 )
 COLD_SIM = DeviceInfo(
-    udid="sim-cold", name="iPhone 17 Pro", os_version="26.5", kind="simulator",
-    state="Shutdown", ready=True,
+    udid="sim-cold",
+    name="iPhone 17 Pro",
+    os_version="26.5",
+    kind="simulator",
+    state="Shutdown",
+    ready=True,
 )
 PHONE = DeviceInfo(
-    udid="phone", name="Ehsan's iPhone", os_version="26.6", kind="device",
-    state="connected", ready=True,
+    udid="phone",
+    name="Ehsan's iPhone",
+    os_version="26.6",
+    kind="device",
+    state="connected",
+    ready=True,
 )
 BLOCKED = DeviceInfo(
-    udid="blocked", name="Old iPhone", os_version="17.0", kind="device",
-    state="connected", ready=False,
+    udid="blocked",
+    name="Old iPhone",
+    os_version="17.0",
+    kind="device",
+    state="connected",
+    ready=False,
     blockers=("Developer Mode is off", "no RemoteXPC tunnel"),
 )
 

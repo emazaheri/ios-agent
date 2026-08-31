@@ -258,7 +258,6 @@ def _credential_hint(provider: str) -> str:
     known = _CREDENTIAL_VARS.get(provider)
     if not known:
         return (
-            f"{provider} resolves its own credentials; check that provider's "
-            "sign-in and try again"
+            f"{provider} resolves its own credentials; check that provider's sign-in and try again"
         )
     return f"set {known[0]} in the environment or in .env"

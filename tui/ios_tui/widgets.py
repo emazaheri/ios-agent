@@ -510,9 +510,7 @@ MANUAL_PROMPT = "a device verb, or `help` to list them"
 
 class GoalInput(Input):
     def __init__(self, *, manual: bool = False) -> None:
-        super().__init__(
-            placeholder=MANUAL_PROMPT if manual else GOAL_PROMPT, id="goal-input"
-        )
+        super().__init__(placeholder=MANUAL_PROMPT if manual else GOAL_PROMPT, id="goal-input")
 
 
 def _joined_width(segments: list[tuple[str, str]]) -> int:

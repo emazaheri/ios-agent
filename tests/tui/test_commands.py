@@ -91,8 +91,12 @@ async def _ready(app: IosAgentApp) -> None:
 def devices(monkeypatch: pytest.MonkeyPatch) -> None:
     listed = [
         DeviceInfo(
-            udid="sim", name="iPhone 17", os_version="26.5", kind="simulator",
-            state="Booted", ready=True,
+            udid="sim",
+            name="iPhone 17",
+            os_version="26.5",
+            kind="simulator",
+            state="Booted",
+            ready=True,
         )
     ]
 

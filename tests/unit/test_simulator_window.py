@@ -23,9 +23,13 @@ from ios_mcp.devices.simulator import SimulatorAdapter
 #: What `simctl list devices --json` says. `_state` parses this, so a bare
 #: string here fails in the JSON decoder rather than in the assertion.
 _LISTING = json.dumps(
-    {"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-26-5": [
-        {"udid": "SIM-UDID", "name": "iPhone 17", "state": "Shutdown"}
-    ]}}
+    {
+        "devices": {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-5": [
+                {"udid": "SIM-UDID", "name": "iPhone 17", "state": "Shutdown"}
+            ]
+        }
+    }
 )
 
 SIM = DeviceInfo(

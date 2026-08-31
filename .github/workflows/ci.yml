@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer push makes an in-flight run pointless.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Linux, because the offline suites never shell out. Verified by running them
+  # with xcrun, xcodebuild, simctl, ios and open all replaced by a script that
+  # exits 127: 537 tests pass and nothing is refused. That makes the fast, cheap
+  # runner the honest default, and `hardware` below covers the rest.
+  offline:
+    name: lint, types, offline tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The dev group already pulls ios-agent with both provider extras, which
+      # is what the eval suite needs; the root package defines no extras of its
+      # own, so naming them here fails outright.
+      - run: uv sync
+
+      - name: ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy ios_mcp agent/ios_agent tui/ios_tui
+
+      - name: unit and front-end tests
+        run: uv run pytest tests/unit tests/tui -q
+
+  # The same suites on the platform this actually runs on. Nothing here needs a
+  # device, so it is a check that the code imports and behaves on macOS, not a
+  # substitute for `tests/integration`.
+  macos:
+    name: offline tests on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The dev group already pulls ios-agent with both provider extras, which
+      # is what the eval suite needs; the root package defines no extras of its
+      # own, so naming them here fails outright.
+      - run: uv sync
+
+      - run: uv run pytest tests/unit tests/tui -q
+
+# Not run here, and deliberately:
+#
+#   tests/integration   needs a booted simulator and a built WebDriverAgent,
+#                       which is an Xcode build measured in minutes
+#   tests/evals -m model  calls a real provider and costs real money
+#   tests/evals/agent -m device   needs a physical iPhone
+#
+# The eval suite is the quality gate for this project and it is run by hand,
+# because its output is a set of numbers to read rather than a pass or a fail.
+# See the Development section of the README.

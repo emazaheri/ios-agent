@@ -79,9 +79,9 @@ def _worst_first(checks: list[Any]) -> list[Any]:
     def rank(check: Any) -> tuple[int, int]:
         blocking = 0 if check.status == "fail" else 1
         relevance = (
-            _SIMULATOR_FIRST.index(check.name) if check.name in _SIMULATOR_FIRST else len(
-                _SIMULATOR_FIRST
-            )
+            _SIMULATOR_FIRST.index(check.name)
+            if check.name in _SIMULATOR_FIRST
+            else len(_SIMULATOR_FIRST)
         )
         return (blocking, relevance)
 
