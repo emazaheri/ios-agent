@@ -129,7 +129,8 @@ class StatsBar(Static):
             segments.append((f"{s.refusals} refused", "yellow"))
         if self.prompt_tokens or self.completion_tokens:
             segments.append((f"model {self.prompt_tokens}/{self.completion_tokens}", "dim"))
-        if self.elapsed_s:
+        if self.elapsed_s >= 0.05:
+            # Below that it rounds to "0.0s", which claims a run took no time.
             segments.append((f"{self.elapsed_s:.1f}s", "dim"))
 
         width = self.size.width or 80
@@ -332,7 +333,7 @@ class Transcript(RichLog):
             # turn usually fixes them, so a run full of red on its way to
             # succeeding reads as a disaster that did not happen.
             line.append(event.error, style="yellow")
-        else:
+        elif event.elapsed_ms:
             line.append(f"{event.elapsed_ms}ms", style="dim")
         return line
 

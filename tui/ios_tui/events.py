@@ -139,6 +139,9 @@ class ActionFinished(Event):
     #: Exactly the string the model was handed, so what the transcript shows
     #: and what the model read cannot drift apart.
     rendered: str = ""
+    #: How long the action took. Zero means "not worth reporting" rather than
+    #: "instant": a consumer that has no honest number to show should leave the
+    #: column empty instead of printing one.
     elapsed_ms: int = 0
     #: Verification refused it before it reached the device. Kept apart from a
     #: failure because nothing was touched, and apart from a success because

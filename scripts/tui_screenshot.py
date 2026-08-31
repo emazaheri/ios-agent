@@ -74,6 +74,22 @@ from tui_harness import ScriptedModel, settings  # noqa: E402
 
 OUT = _REPO / ".artifacts" / "tui"
 
+#: The one image that is committed rather than thrown away. It leads the README,
+#: so it has to show the thing working rather than a state someone has to be
+#: told to ignore.
+HERO = _REPO / "docs" / "images"
+
+#: What the hero image shows: a goal, the model saying what it will do, three
+#: actions, and the numbers. The same route the tests use, so the picture and
+#: the measurements cannot disagree.
+HERO_SCRIPT = [
+    [("observe", {})],
+    [("tap", {"target": "Accessibility"})],
+    [("tap", {"target": "Display & Text Size"})],
+    [("set_value", {"value": "on", "target": "Bold Text"})],
+    [("done", {"succeeded": True, "summary": "Bold Text is on."})],
+]
+
 #: The route every other test uses, so the picture and the numbers agree.
 BOLD_TEXT = [
     [("observe", {})],
@@ -154,6 +170,8 @@ async def capture(
             print(f"  {png.relative_to(_REPO)}")
         except (OSError, subprocess.CalledProcessError):
             print(f"  {svg.relative_to(_REPO)}  (install librsvg for a PNG)")
+        if app.runner is not None:
+            await app.runner.close()
 
 
 async def _type_a_few(app: IosAgentApp, pilot: Any) -> None:
@@ -230,7 +248,71 @@ async def _fail(app: IosAgentApp, pilot: Any) -> None:
     await pilot.pause()
 
 
+async def capture_hero() -> None:
+    """The image at the top of the README.
+
+    Runs against the scripted device like every other capture, and strips the
+    timings before drawing. Against a fake a tap takes two milliseconds; on a
+    simulator it is a few seconds and on a phone a snapshot alone is 3.7. A
+    README image claiming 2ms would be advertising the fake rather than the
+    tool, and the honest fix is to show no number rather than a real number
+    from the wrong machine.
+
+    Nothing else is touched. The verbs, the targets, the screen and the token
+    counts are all exactly what the run produced.
+    """
+    model = DeviceModel()
+    app = IosAgentApp(lambda sink: _Stub(sink, model, HERO_SCRIPT), goal="turn on bold text")
+    async with app.run_test(size=(104, 26)) as pilot:
+        async with asyncio.timeout(30):
+            while not app.query_one(StatsBar).elapsed_s:
+                await asyncio.sleep(0.05)
+
+        _strip_timings(app)
+        await pilot.pause()
+
+        HERO.mkdir(parents=True, exist_ok=True)
+        OUT.mkdir(parents=True, exist_ok=True)
+        # The SVG is scaffolding for `rsvg-convert`, so it goes where the rest
+        # of the throwaway captures do. Only the PNG the README shows is
+        # committed.
+        svg = OUT / "ios-agent.svg"
+        svg.write_text(app.export_screenshot(title="ios-agent"))
+        png = HERO / "ios-agent.png"
+        try:
+            subprocess.run(
+                ["rsvg-convert", "-w", "1400", str(svg), "-o", str(png)],
+                check=True,
+                capture_output=True,
+            )
+            print(f"  {png.relative_to(_REPO)}")
+        except (OSError, subprocess.CalledProcessError):
+            print(f"  {svg.relative_to(_REPO)}  (install librsvg for a PNG)")
+
+
+def _strip_timings(app: IosAgentApp) -> None:
+    """Redraw the transcript with every duration removed.
+
+    `elapsed_ms=0` is how an event says it has no duration worth reporting, so
+    the widget leaves the column empty rather than printing a zero. The stats
+    bar drops its wall time below 0.05s for the same reason.
+    """
+    from dataclasses import replace
+
+    transcript = app.transcript
+    entries = [
+        (kind, replace(data, elapsed_ms=0) if kind == "acted" else data)  # type: ignore[type-var]
+        for kind, data in transcript._entries
+    ]
+    transcript._entries = []
+    transcript.clear()
+    for kind, data in entries:
+        transcript._add((kind, data))
+    app.query_one(StatsBar).elapsed_s = 0.0
+
+
 SHAPES = {
+    "hero": capture_hero,
     "fullscreen": lambda: capture("fullscreen", goal="Turn on Bold Text."),
     "manual": lambda: capture("manual", manual=True, after=_type_a_few),
     "inline": lambda: capture("inline", size=(120, 20), inline=True, goal="Turn on Bold Text."),
