@@ -307,7 +307,7 @@ async def test_switching_is_refused_while_a_goal_is_running(
 
         assert not isinstance(app.screen, DevicePicker), "the picker opened during a run"
         written = "\n".join(line.text for line in app.transcript.lines)
-        assert "stop the current run first" in written
+        assert "wait for the device to settle" in written
 
 
 async def test_slash_device_opens_the_picker(devices: list[DeviceInfo]) -> None:
@@ -361,3 +361,79 @@ async def test_an_unknown_command_points_at_the_menu(devices: list[DeviceInfo]) 
         written = "\n".join(line.text for line in app.transcript.lines)
         assert "no command matching" in written
         assert "Type /" in written
+
+
+async def test_nothing_can_be_started_while_a_device_is_being_switched(
+    devices: list[DeviceInfo],
+) -> None:
+    """A switch releases the old device and boots a new one, and clears the
+    session in between. That is tens of seconds during which the app looked
+    idle: anything submitted in the window ran against no session and reported
+    "no device is attached" under a header still naming a device.
+    """
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        runner = app.runner
+        assert isinstance(runner, _SwitchableRunner)
+        release = asyncio.Event()
+
+        async def slow_switch(device: str) -> object:
+            runner.switched_to.append(device)
+            runner.session = None  # what the real switch does first
+            await release.wait()
+            return await runner.start()
+
+        runner.switch = slow_switch  # type: ignore[method-assign]
+
+        await pilot.press("ctrl+o")
+        await _settle(app, lambda: isinstance(app.screen, DevicePicker))
+        picker = app.screen
+        assert isinstance(picker, DevicePicker)
+        await _settle(app, lambda: bool(picker.devices))
+        picker.query_one("#picker-list", OptionList).highlighted = next(
+            i for i, d in enumerate(devices) if d.udid == "sim-cold"
+        )
+        await pilot.press("enter")
+        await _settle(app, lambda: bool(runner.switched_to))
+
+        assert app._busy is True, "the app looked idle while it had no device"
+        app.submit("turn on bold text")
+        await pilot.pause()
+        assert app._run_worker is None, "a goal started while the device was mid-switch"
+
+        release.set()
+        await _settle(app, lambda: app._busy is False)
+
+
+async def test_choosing_the_device_already_in_hand_does_nothing(
+    devices: list[DeviceInfo],
+) -> None:
+    """`runner.device` is the request and is None whenever the pool chose.
+
+    Comparing against it treats picking the attached device as a change, and
+    spends a release and a boot arriving back where it started.
+    """
+    app = _switchable()
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+        runner = app.runner
+        assert isinstance(runner, _SwitchableRunner)
+        assert runner.device is None, "this test needs the pool to have chosen"
+
+        attached = app._current_udid()
+        assert attached is not None
+
+        await pilot.press("ctrl+o")
+        await _settle(app, lambda: isinstance(app.screen, DevicePicker))
+        picker = app.screen
+        assert isinstance(picker, DevicePicker)
+        await _settle(app, lambda: bool(picker.devices))
+
+        # Pretend the list offers the attached device, and pick it.
+        picker.dismiss(attached)
+        await pilot.pause()
+        await pilot.pause()
+
+        assert runner.switched_to == [], "it released and reacquired the same device"

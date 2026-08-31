@@ -559,14 +559,20 @@ class IosAgentApp(App[int]):
         nothing recorded, and `esc` already exists for stopping deliberately.
         """
         if self.runner is None or self._busy:
-            self.transcript.note("finish or stop the current run first (esc)", "yellow")
+            self.transcript.note("wait for the device to settle first", "yellow")
             return
 
-        current = self.runner.device
         chosen = await self.push_screen_wait(DevicePicker(self.runner.settings))
-        if chosen is None or chosen == current:
+        if chosen is None or chosen == self._current_udid():
             return
 
+        # Held for the whole switch, not just checked at the start. A switch
+        # releases the old device and boots a new one, which is tens of
+        # seconds, and `switch()` clears the session first. Without this the
+        # app looked idle throughout: anything submitted in that window ran
+        # against no session and reported "no device is attached" while the
+        # header still named a device.
+        self._busy = True
         status = self.query_one(StatusBar)
         status.state = "starting"
         self._last_progress_at = monotonic()
@@ -575,10 +581,11 @@ class IosAgentApp(App[int]):
             await self.runner.switch(chosen)
         except Exception:
             # Reported as a `Failed` event by the runner. The old device is
-            # already released at that point, so there is nothing to fall back
-            # to and saying so is all that is left.
-            self.transcript.note("no device attached. ctrl+d to choose another.", "red")
+            # already released by then, so there is nothing to fall back to.
+            self._no_device()
             return
+        finally:
+            self._busy = False
 
         # Everything on screen described the device just released.
         self._manual_backend = None
@@ -589,6 +596,18 @@ class IosAgentApp(App[int]):
         bar.prompt_tokens = bar.completion_tokens = 0
         bar.elapsed_s = 0.0
         self.query_one(GoalInput).focus()
+
+    def _current_udid(self) -> str | None:
+        """What is actually attached, not what was asked for.
+
+        `runner.device` is the request, and it is None whenever the pool chose,
+        which is the common case. Comparing against it would treat picking the
+        device already in hand as a change and spend a release and a boot
+        arriving back where it started.
+        """
+        if self.runner is None or self.runner.session is None:
+            return None
+        return self.runner.session.lease.device.udid
 
     # -- running a goal ----------------------------------------------------
 
