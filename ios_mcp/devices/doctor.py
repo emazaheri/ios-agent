@@ -48,11 +48,28 @@ class DoctorReport:
 
     @property
     def can_use_simulator(self) -> bool:
+        """Whether a simulator could be driven right now.
+
+        The bundle is read from the check's `data` rather than its status, the
+        way `_has_signed_runner` already does for the device side. One check
+        covers two artifacts, and its status is the worse of them: a device
+        provisioning profile with two days left makes it `warn`, which said the
+        simulator was unusable while the simulator was in fact working. The
+        `xctestrun` key means the simulator bundle is there, which is the only
+        part of that check a simulator needs.
+        """
         return (
             self._status("xcode") == "ok"
             and self._status("simctl") == "ok"
-            and self._status("wda-bundle") == "ok"
+            and self._has_simulator_bundle
         )
+
+    @property
+    def _has_simulator_bundle(self) -> bool:
+        for check in self.checks:
+            if check.name == "wda-bundle":
+                return "xctestrun" in check.data
+        return False
 
     @property
     def can_use_real_device(self) -> bool:

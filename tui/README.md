@@ -56,6 +56,13 @@ through `export_provider_credentials`, because pydantic-settings reads `.env`
 into a settings object rather than into the process environment, and the SDK
 looks in the environment.
 
+On startup the app checks the toolchain before acquiring a device, so a Mac
+with no Xcode or no WebDriverAgent build is told what is missing and how to fix
+it, rather than spending a minute on a boot and then failing with whichever
+tool happened to be reached first. It reuses `run_doctor`, costs about a
+second, and blocks only when nothing can be driven: a stopped tunnel and an
+expiring provisioning profile are both mentioned and neither stops a run.
+
 `ios-agent doctor` reports the model alongside the device toolchain, and the
 app checks it **before acquiring a device**: a missing key otherwise surfaced
 on the first model turn, which is after a cold simulator has booted and

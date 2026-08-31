@@ -64,6 +64,29 @@ from ios_tui.widgets import (
     Transcript,
 )
 
+#: The checks a simulator needs, in the order someone would fix them.
+#:
+#: Shown first when nothing can be driven, because the simulator is the path
+#: that needs no Apple Developer account and is what a first run will use.
+#: Without this the list led with a stopped RemoteXPC tunnel, which matters
+#: only for driving a physical phone over USB and was not what was blocking.
+_SIMULATOR_FIRST = ("xcode", "simctl", "wda-bundle")
+
+
+def _worst_first(checks: list[Any]) -> list[Any]:
+    """Blocking failures first, then whatever the simulator path needs."""
+
+    def rank(check: Any) -> tuple[int, int]:
+        blocking = 0 if check.status == "fail" else 1
+        relevance = (
+            _SIMULATOR_FIRST.index(check.name) if check.name in _SIMULATOR_FIRST else len(
+                _SIMULATOR_FIRST
+            )
+        )
+        return (blocking, relevance)
+
+    return sorted(checks, key=rank)
+
 
 class IosAgentApp(App[int]):
     """One device, a transcript, and the numbers."""
@@ -284,6 +307,8 @@ class IosAgentApp(App[int]):
         self.runner = self._runner_factory(QueueSink(self._queue, loop))
         assert self.runner is not None
 
+        if not await self._check_the_machine():
+            return
         if not self._preflight():
             return
 
@@ -316,6 +341,55 @@ class IosAgentApp(App[int]):
             self.submit(self._first_goal)
         else:
             self.query_one(GoalInput).focus()
+
+    async def _check_the_machine(self) -> bool:
+        """Is this Mac set up to drive anything at all?
+
+        Without this the first run on a machine with no Xcode, or no
+        WebDriverAgent build, spends its time acquiring a device and then fails
+        with whatever the first missing tool happened to raise: one error, from
+        one layer, describing one symptom of a setup that was never done.
+
+        `run_doctor` already knows every requirement and carries a remedy for
+        each, so this shows the ones that are not met rather than inventing a
+        second, worse set of checks. About a second, against the minute a boot
+        takes.
+
+        Blocks on `fail` and on nothing being drivable. A warning does not
+        stop anything: an expiring provisioning profile and a stopped tunnel
+        are both real and neither prevents a simulator run.
+        """
+        from ios_mcp.devices.doctor import run_doctor
+
+        assert self.runner is not None
+        status = self.query_one(StatusBar)
+        status.state = "starting"
+        self._last_progress_at = monotonic()
+
+        try:
+            report = await run_doctor(self.runner.settings)
+        except Exception as exc:
+            # The check failing is not the same as the machine being unusable,
+            # so this reports and continues rather than refusing to start on a
+            # diagnostic that could not run.
+            self.transcript.note(f"could not check the toolchain: {exc}", "yellow")
+            return True
+
+        blocking = [c for c in report.checks if c.status == "fail"]
+        if not blocking and (report.can_use_simulator or report.can_use_real_device):
+            for check in report.checks:
+                if check.status == "warn" and check.remedy:
+                    self.transcript.note(f"{check.name}: {check.detail}", "yellow")
+            return True
+
+        status.state = "failed"
+        self.transcript.note("this Mac is not set up to drive a device yet.", "red")
+        for check in _worst_first(blocking or [c for c in report.checks if c.status != "ok"]):
+            self.transcript.note(f"{check.name}: {check.detail}", "red")
+            if check.remedy:
+                self.transcript.note(f"  {check.remedy}")
+        self.transcript.note("`ios-agent doctor` prints this in full.")
+        return False
 
     def _preflight(self) -> bool:
         """Check the model before spending a minute acquiring a device.

@@ -10,7 +10,24 @@ from ios_mcp.devices.doctor import Check, DoctorReport, _provisioning_expiry
 
 
 def _report(**statuses: str) -> DoctorReport:
-    return DoctorReport(checks=[Check(name, st, "") for name, st in statuses.items()])
+    """Build a report from statuses alone, with the data a real one would carry.
+
+    `wda-bundle` is the one check whose verdict is not its status: it covers
+    two artifacts, a simulator `.xctestrun` and a signed device runner, and its
+    status is the worse of the two. `can_use_simulator` therefore reads the
+    data rather than the status, so a report built here has to carry it or it
+    describes a machine that cannot exist.
+
+    The real check sets `ok` only when the simulator bundle is present, which
+    is the invariant mirrored below.
+    """
+    checks = []
+    for name, status in statuses.items():
+        data: dict[str, object] = {}
+        if name == "wda-bundle" and status == "ok":
+            data = {"xctestrun": "/fake.xctestrun"}
+        checks.append(Check(name, status, "", data=data))  # type: ignore[arg-type]
+    return DoctorReport(checks=checks)
 
 
 def test_simulator_readiness_needs_xcode_simctl_and_a_wda_build() -> None:
