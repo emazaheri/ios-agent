@@ -118,3 +118,62 @@ def test_provisioning_expiry_detects_expired_profile(tmp_path: Path) -> None:
     parsed = _provisioning_expiry(profile)
     assert parsed is not None
     assert (parsed - datetime.now(UTC)).days < 0
+
+
+def test_a_simulator_run_is_not_warned_about_the_phone() -> None:
+    """A simulator session opened with "no RemoteXPC tunnel is running" and an
+    expiring device provisioning profile. Both true, neither applicable: the
+    tunnel check's own remedy says "Simulators do not use it"."""
+    report = DoctorReport(
+        checks=[
+            Check("tunnel", "warn", "no RemoteXPC tunnel is running"),
+            Check("go-ios", "warn", "go-ios is not installed"),
+            Check(
+                "wda-bundle",
+                "warn",
+                "the device runner's provisioning profile expires in 0 day(s)",
+                data={"xctestrun": "/f.xctestrun", "runner_app": "/f.app"},
+            ),
+        ]
+    )
+
+    assert report.warnings_for("simulator") == []
+    assert [c.name for c in report.warnings_for("device")] == ["tunnel", "go-ios", "wda-bundle"]
+
+
+def test_a_simulator_is_warned_about_its_own_missing_bundle() -> None:
+    """The other half of the same check. Suppressing by name would hide this;
+    the decision is made from the data, so it does not."""
+    report = DoctorReport(
+        checks=[
+            Check(
+                "wda-bundle",
+                "warn",
+                "device runner ready, no simulator bundle",
+                data={"runner_app": "/f.app"},
+            ),
+        ]
+    )
+
+    assert [c.name for c in report.warnings_for("simulator")] == ["wda-bundle"]
+
+
+def test_a_device_run_is_not_warned_about_simulators() -> None:
+    report = DoctorReport(checks=[Check("simulators", "warn", "no simulator has been created")])
+
+    assert report.warnings_for("device") == []
+    assert [c.name for c in report.warnings_for("simulator")] == ["simulators"]
+
+
+def test_filtering_only_ever_concerns_warnings() -> None:
+    """A failure is not a matter of relevance: nothing runs, so everything is
+    shown."""
+    report = DoctorReport(
+        checks=[
+            Check("tunnel", "ok", "running"),
+            Check("go-ios", "fail", "not installed"),
+        ]
+    )
+
+    assert report.warnings_for("simulator") == []
+    assert report.warnings_for("device") == []

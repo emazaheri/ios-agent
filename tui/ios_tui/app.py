@@ -163,6 +163,10 @@ class IosAgentApp(App[int]):
         #: is told to write, so a pane hidden by default would be empty the
         #: first time it was opened, which is the only time it matters.
         self._startup: list[str] = []
+        #: The startup toolchain report, kept until a device arrives. Its
+        #: warnings cannot be filtered before then, because which of them
+        #: apply depends on whether a simulator or a phone is being driven.
+        self._report: Any = None
 
     # -- layout ------------------------------------------------------------
 
@@ -247,6 +251,7 @@ class IosAgentApp(App[int]):
                 kind = device.get("kind", "?") if isinstance(device, dict) else "?"
                 status.device = f"{name} · iOS {version} · {kind}"
                 status.state = "ready"
+                self._mention_warnings(str(kind))
             case GoalStarted(goal=goal, model=model):
                 status.model = model
                 status.state = "working"
@@ -377,9 +382,9 @@ class IosAgentApp(App[int]):
 
         blocking = [c for c in report.checks if c.status == "fail"]
         if not blocking and (report.can_use_simulator or report.can_use_real_device):
-            for check in report.checks:
-                if check.status == "warn" and check.remedy:
-                    self.transcript.note(f"{check.name}: {check.detail}", "yellow")
+            # Held until the device is known. Which warnings matter depends on
+            # what is being driven, and at this point that has not been decided.
+            self._report = report
             return True
 
         if await self._offer_to_create_a_simulator(report):
@@ -393,6 +398,22 @@ class IosAgentApp(App[int]):
                 self.transcript.note(f"  {check.remedy}")
         self.transcript.note("`ios-agent doctor` prints this in full.")
         return False
+
+    def _mention_warnings(self, kind: str) -> None:
+        """Say what is wrong with this machine, for the device in hand.
+
+        Every warning was printed before, so a simulator run opened with a
+        stopped RemoteXPC tunnel and an expiring device provisioning profile:
+        both true, neither anything to do with a simulator. A warning that
+        shows on every start and never applies is one nobody reads.
+        """
+        report, self._report = self._report, None
+        if report is None:
+            return
+        for check in report.warnings_for(kind):
+            self.transcript.note(f"{check.name}: {check.detail}", "yellow")
+            if check.remedy:
+                self.transcript.note(f"  {check.remedy}")
 
     async def _offer_to_create_a_simulator(self, report: Any) -> bool:
         """Offer the one repair that is cheap enough to be worth offering.

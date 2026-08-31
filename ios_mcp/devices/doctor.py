@@ -24,6 +24,13 @@ from ios_mcp.devices.tunnel import list_tunnels
 
 Status = Literal["ok", "warn", "fail", "skip"]
 
+#: Checks that only ever concern a physical iPhone. The tunnel is USB-only and
+#: go-ios speaks to usbmuxd; neither is reachable from a simulator run.
+_DEVICE_ONLY = frozenset({"tunnel", "go-ios", "devicectl", "devices"})
+
+#: And the reverse.
+_SIMULATOR_ONLY = frozenset({"simulators"})
+
 
 @dataclass(slots=True)
 class Check:
@@ -116,6 +123,41 @@ class DoctorReport:
             capability.append("real device")
         cap = ", ".join(capability) if capability else "nothing yet"
         return f"{', '.join(parts)}. Ready to automate: {cap}."
+
+    def warnings_for(self, kind: str) -> list[Check]:
+        """The warnings that matter when driving this kind of device.
+
+        A run on a simulator was shown "no RemoteXPC tunnel is running" and
+        "the device runner's provisioning profile expires in 0 day(s)". Both
+        are true, neither has anything to do with a simulator, and the tunnel
+        check's own remedy says so: "Simulators do not use it." A warning that
+        appears on every start and never applies is one nobody reads, which
+        costs the warnings that do apply.
+        """
+        relevant = []
+        for check in self.checks:
+            if check.status != "warn":
+                continue
+            if check.name in _DEVICE_ONLY and kind != "device":
+                continue
+            if check.name in _SIMULATOR_ONLY and kind != "simulator":
+                continue
+            if check.name == "wda-bundle" and not self._bundle_warning_applies(check, kind):
+                continue
+            relevant.append(check)
+        return relevant
+
+    @staticmethod
+    def _bundle_warning_applies(check: Check, kind: str) -> bool:
+        """One check, two artifacts, and its status is the worse of them.
+
+        Decided from the data rather than the wording: a simulator run needs
+        `xctestrun` and cares about nothing else, so an expiring device
+        provisioning profile is not its problem.
+        """
+        if kind == "simulator":
+            return "xctestrun" not in check.data
+        return True
 
     def to_dict(self) -> dict[str, Any]:
         return {

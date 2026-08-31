@@ -159,7 +159,7 @@ async def test_a_missing_webdriveragent_stops_the_run_too(machine: object) -> No
         assert "prepare_wda.sh" in written
 
 
-async def test_warnings_are_mentioned_and_do_not_stop_the_run(machine: object) -> None:
+async def test_warnings_do_not_stop_a_machine_that_works(machine: object) -> None:
     """A stopped tunnel only matters over USB, and a profile with two days left
     still works today. Refusing to start on either would ground a working
     machine."""
@@ -175,9 +175,60 @@ async def test_warnings_are_mentioned_and_do_not_stop_the_run(machine: object) -
         assert isinstance(runner, _Runner)
         assert runner.started == 1, "a warning stopped a machine that works"
 
+
+async def test_a_simulator_run_is_not_told_about_the_phone(machine: object) -> None:
+    """Both of these opened a simulator session and neither applied to it.
+
+    The tunnel check's own remedy says "Simulators do not use it", and the
+    provisioning profile belongs to the device runner. A warning that shows on
+    every start and never applies is one nobody reads, which costs the ones
+    that do.
+    """
+    assert callable(machine)
+    machine(HEALTHY_WITH_WARNINGS)
+
+    app = IosAgentApp(_Runner)  # reports kind="simulator"
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+        await pilot.pause()
+
         written = "\n".join(line.text for line in app.transcript.lines)
-        assert "expires in 2 day(s)" in written
+        assert "tunnel" not in written
+        assert "expires in 2 day(s)" not in written
+
+
+async def test_the_same_warnings_are_shown_when_driving_a_phone(machine: object) -> None:
+    """Suppressed for a simulator, and not suppressed generally: on a phone
+    these are exactly the two things worth knowing before starting."""
+    assert callable(machine)
+    machine(HEALTHY_WITH_WARNINGS)
+
+    class _PhoneRunner(_Runner):
+        async def start(self) -> object:
+            self.started += 1
+            session, _, _ = build_session(DeviceModel(), settings())
+            self.session = session
+            self.sink.emit(
+                DeviceReady(
+                    lease={
+                        "device": {
+                            "name": "Ehsan's iPhone",
+                            "os_version": "26.6",
+                            "kind": "device",
+                        }
+                    }
+                )
+            )
+            return session
+
+    app = IosAgentApp(_PhoneRunner)
+    async with app.run_test(size=(110, 30)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
         assert "tunnel" in written
+        assert "expires in 2 day(s)" in written
 
 
 async def test_a_check_that_cannot_run_does_not_ground_the_app(
