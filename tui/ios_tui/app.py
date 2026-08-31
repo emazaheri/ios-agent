@@ -181,12 +181,29 @@ class IosAgentApp(App[int]):
     async def consume_events(self) -> None:
         while True:
             for event in await drain(self._queue):
+                if not self.is_running:
+                    # Quitting. Events keep arriving after the screen is gone,
+                    # a `Failed` from releasing the device most of all, and
+                    # drawing one then is both impossible and pointless.
+                    return
                 try:
                     self._apply(event)
                 except Exception as exc:
-                    # A pane that cannot draw must not take down a run that is
-                    # working. Say so and carry on.
-                    self.transcript.note(f"display error: {exc!r}", "red")
+                    self._complain(f"display error: {exc!r}")
+
+    def _complain(self, message: str) -> None:
+        """Report a drawing failure without assuming anything can be drawn.
+
+        The obvious handler writes to the transcript, and the transcript is a
+        widget: during teardown it is the very thing that has gone, so the
+        handler raised the same error it was catching and took the worker down
+        with a traceback. An error path that depends on the thing that failed
+        is not an error path.
+        """
+        try:
+            self.transcript.note(message, "red")
+        except Exception:
+            self.log.warning(message)
 
     def _apply(self, event: Event) -> None:
         status = self.query_one(StatusBar)

@@ -59,6 +59,7 @@ class SimulatorAdapter:
     async def ensure_booted(self) -> None:
         state = await self._state()
         if state == "Booted":
+            await self._show_window()
             return
         logger.info("Booting simulator %s (%s)", self.info.name, self.udid)
         result = await run("xcrun", "simctl", "boot", self.udid, timeout=180.0)
@@ -68,6 +69,29 @@ class SimulatorAdapter:
                 hint=result.stderr[:300] or "Try `xcrun simctl shutdown all` and retry.",
             )
         await run("xcrun", "simctl", "bootstatus", self.udid, "-b", timeout=180.0)
+        await self._show_window()
+
+    async def _show_window(self) -> None:
+        """Put Simulator.app on screen, if it is wanted.
+
+        `simctl boot` starts the runtime and nothing else: the device runs
+        headlessly and no window appears. For a person watching an agent drive
+        a phone, a phone they cannot see is most of the value gone.
+
+        Best-effort on purpose. This is presentation, and a window that will
+        not open is no reason to fail a run that is otherwise fine: everything
+        the automation needs goes through `simctl` and WebDriverAgent, neither
+        of which cares whether the UI is up.
+
+        `open -a` is idempotent, so this is safe on an already-booted device
+        with the app already running: measured at about 70 ms, which is noise
+        against a boot.
+        """
+        if not self.settings.simulator.show_window:
+            return
+        result = await run("open", "-a", "Simulator", timeout=20.0)
+        if not result.ok:
+            logger.debug("Could not show Simulator.app: %s", result.stderr[:200])
 
     async def ensure_runner(self) -> WdaEndpoint:
         """Start WebDriverAgent and wait for it to answer /status.

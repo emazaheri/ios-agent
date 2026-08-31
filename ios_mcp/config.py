@@ -149,6 +149,22 @@ class WdaSettings(BaseModel):
     auto_heal: bool = True
 
 
+class SimulatorSettings(BaseModel):
+    """How a simulator is presented, as opposed to how it is driven."""
+
+    #: Bring Simulator.app to the screen when a simulator is booted.
+    #:
+    #: `simctl boot` starts the runtime, not the window: the device runs
+    #: headlessly and nothing appears on the Mac. That is right for CI and
+    #: wrong for a person, who has no way to see what the agent is doing to a
+    #: phone they cannot see.
+    #:
+    #: On by default because the library's callers are a developer tool and an
+    #: agent driven by one. Turn it off for a headless run, where opening a
+    #: window is at best pointless.
+    show_window: bool = True
+
+
 class GoIosSettings(BaseModel):
     binary: str = "ios"
     tunnel_api_host: str = "127.0.0.1"
@@ -220,6 +236,7 @@ class Settings(BaseSettings):
     stabilize: StabilizeSettings = StabilizeSettings()
     policy: PolicySettings = PolicySettings()
     wda: WdaSettings = WdaSettings()
+    simulator: SimulatorSettings = SimulatorSettings()
     goios: GoIosSettings = GoIosSettings()
     server: ServerSettings = ServerSettings()
 
