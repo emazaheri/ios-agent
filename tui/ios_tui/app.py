@@ -167,6 +167,10 @@ class IosAgentApp(App[int]):
         #: warnings cannot be filtered before then, because which of them
         #: apply depends on whether a simulator or a phone is being driven.
         self._report: Any = None
+        #: What the startup probe said to do about the model, if anything.
+        #: Offered again the first time a goal fails, because the cause is
+        #: usually the thing that was already flagged.
+        self._model_remedy: str | None = None
 
     # -- layout ------------------------------------------------------------
 
@@ -236,6 +240,18 @@ class IosAgentApp(App[int]):
                     self._apply(event)
                 except Exception as exc:
                     self._complain(f"display error: {exc!r}")
+
+    def _suggest_a_remedy(self) -> None:
+        """Say what to do about a failed goal, once.
+
+        A wall of the provider's own text with no next step is the same dead
+        end a failed acquire used to be. The remedy comes from the startup
+        probe rather than from reading the error, so it is offered only when
+        the model was already flagged and never guessed at from wording.
+        """
+        remedy, self._model_remedy = self._model_remedy, None
+        if remedy:
+            self.transcript.note(remedy, "yellow")
 
     @property
     def _on_screen(self) -> bool:
@@ -319,7 +335,15 @@ class IosAgentApp(App[int]):
                 status.state = "stale" if self._stale else "ready"
             case Failed(where=where, message=message):
                 transcript.note(f"failed during {where}: {message}", "red")
-                status.state = "failed"
+                if where == "acquire":
+                    status.state = "failed"
+                else:
+                    # A goal that blew up did not take the phone with it. The
+                    # session is still attached and still drivable, and a
+                    # header reading "failed" over a working device says the
+                    # tool is broken when one request was.
+                    status.state = "stale" if self._stale else "ready"
+                    self._suggest_a_remedy()
             case _:
                 return
 
@@ -525,6 +549,10 @@ class IosAgentApp(App[int]):
         probe = probe_provider(self.runner.agent)
         status = self.query_one(StatusBar)
         status.model = self.runner.agent.describe()
+
+        # Kept so a later failure can offer the same remedy without guessing
+        # from the provider's wording.
+        self._model_remedy = probe.remedy if probe.status != "ok" else None
 
         if probe.status == "warn":
             # One line, not two. This fires on every start for anyone using

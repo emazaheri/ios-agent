@@ -202,3 +202,107 @@ def test_the_scripted_model_in_tests_is_not_probed() -> None:
     """
     runner = GoalRunner(object(), settings(), model=ScriptedModel([]))  # type: ignore[arg-type]
     assert runner._model is not None
+
+
+# -- after a goal fails ----------------------------------------------------
+
+
+async def test_a_failed_goal_does_not_report_the_device_as_broken() -> None:
+    """A goal that blew up did not take the phone with it.
+
+    The session is still attached and still drivable, so a header reading
+    "failed" over a working device says the tool is broken when one request
+    was. `Failed.where` exists to tell the two apart and was being ignored.
+    """
+    from ios_tui.events import Failed
+
+    app = _app("anthropic", "claude-opus-5")
+    async with app.run_test(size=(110, 26)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app._apply(Failed(where="run", message="the model refused"))
+        await pilot.pause()
+
+        assert app.query_one(StatusBar).state == "ready"
+        assert app.runner is not None and app.runner.session is not None
+
+
+async def test_a_failure_to_acquire_is_still_reported_as_failed() -> None:
+    """The other half of the distinction: no device means genuinely stuck."""
+    from ios_tui.events import Failed
+
+    app = _app("anthropic", "claude-opus-5")
+    async with app.run_test(size=(110, 26)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app._apply(Failed(where="acquire", message="no WebDriverAgent"))
+        await pilot.pause()
+
+        assert app.query_one(StatusBar).state == "failed"
+
+
+async def test_a_failed_goal_repeats_the_remedy_the_probe_gave() -> None:
+    """A wall of the provider's own text with no next step is a dead end.
+
+    The remedy comes from the startup probe rather than from reading the
+    error, so it is offered only when the model was already flagged and is
+    never guessed at from the provider's wording.
+    """
+    from ios_tui.events import Failed
+
+    app = _app("anthropic", "claude-opus-5")  # no credential, so the probe warns
+    async with app.run_test(size=(110, 26)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app._apply(Failed(where="run", message="Anthropic authentication failed: ..."))
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "set ANTHROPIC_API_KEY" in written
+
+
+async def test_the_remedy_is_offered_once_and_not_after_every_failure() -> None:
+    """It is advice, not a running commentary.
+
+    Counted as whole lines rather than as a substring: the startup warning
+    ends with the same sentence, and it is a different line saying a different
+    thing at a different time. What must not repeat is the standalone remedy,
+    once per failure.
+    """
+    from ios_tui.events import Failed
+
+    app = _app("anthropic", "claude-opus-5")
+    async with app.run_test(size=(110, 26)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        for _ in range(3):
+            app._apply(Failed(where="run", message="Anthropic authentication failed: ..."))
+        await pilot.pause()
+
+        standalone = [
+            line.text.strip()
+            for line in app.transcript.lines
+            if line.text.strip().startswith("set ANTHROPIC_API_KEY")
+        ]
+        assert len(standalone) == 1, f"the remedy repeated: {standalone}"
+
+
+async def test_nothing_is_suggested_when_the_model_was_never_flagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A working provider that fails for some other reason gets no advice
+    about credentials, because guessing would send someone after the wrong
+    thing."""
+    from ios_tui.events import Failed
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key")
+
+    app = _app("anthropic", "claude-opus-5")
+    async with app.run_test(size=(110, 26)) as pilot:
+        await _settle(app, lambda: app.query_one(StatusBar).state == "ready")
+
+        app._apply(Failed(where="run", message="the device stopped responding"))
+        await pilot.pause()
+
+        written = "\n".join(line.text for line in app.transcript.lines)
+        assert "ANTHROPIC_API_KEY" not in written
