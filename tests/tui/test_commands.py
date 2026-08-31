@@ -13,8 +13,9 @@ import pytest
 from ios_tui.app import IosAgentApp
 from ios_tui.commands import Command, matching
 from ios_tui.devices import DevicePicker
+from ios_tui.events import StatsSnapshot
 from ios_tui.runner import GoalRunner
-from ios_tui.widgets import GoalInput, SlashMenu, StatusBar
+from ios_tui.widgets import GoalInput, SlashMenu, StatsBar, StatusBar
 from screens import DeviceModel, build_session
 from textual.widgets import Input
 from tui_harness import ScriptedModel, settings
@@ -234,90 +235,154 @@ async def test_the_palette_offers_the_same_commands() -> None:
 
 
 # -- copying -----------------------------------------------------------------
+#
+# Selecting is the copy. A Textual app turns on mouse reporting, so a drag goes
+# to the app and the terminal's own select-and-copy never happens; Textual makes
+# its own selection and stops there, which leaves text that can be highlighted
+# and not copied.
 
 
-async def test_copy_puts_the_whole_transcript_on_the_clipboard(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A Textual app turns on mouse reporting, so the terminal hands a drag to
-    the app rather than selecting text. Textual has its own selection and a
-    `copy_text` action and binds no key to it, which leaves a log that can be
-    highlighted and not copied.
+async def _drag(app: IosAgentApp, pilot: object, row: int, x1: int, x2: int) -> None:
+    """A real drag across one row of the transcript.
 
-    With no selection the whole transcript is taken, because someone saying the
-    logs are not copiable wants the log rather than a rectangle of it.
+    Driven through `Screen._forward_event`, which is where Textual's selection
+    logic lives. `post_message` reaches the widget's `on_mouse_down` handlers
+    instead and bypasses selection entirely, so a test written that way says
+    nothing about whether a drag selects.
     """
+    from textual import events
+
+    assert hasattr(pilot, "pause")
+    transcript = app.transcript
+    y = transcript.region.y + row - transcript.scroll_offset.y
+
+    def at(kind: type, x: int, button: int) -> events.MouseEvent:
+        return kind(None, x, y, 0, 0, button, False, False, False, screen_x=x, screen_y=y)
+
+    app.screen._forward_event(at(events.MouseDown, x1, 1))
+    await pilot.pause()  # type: ignore[attr-defined]
+    app.screen._forward_event(at(events.MouseMove, x2, 1))
+    await pilot.pause()  # type: ignore[attr-defined]
+    app.screen._forward_event(at(events.MouseUp, x2, 0))
+    for _ in range(3):
+        await pilot.pause()  # type: ignore[attr-defined]
+
+
+async def _selected(app: IosAgentApp, text: str | None) -> None:
+    """Report a selection of exactly `text`, for the cases a drag cannot make.
+
+    A drag of nothing, or of one character, is hard to place precisely with
+    synthetic coordinates; what those cases test is the threshold, not the
+    selection machinery, which `_drag` covers.
+    """
+    from textual import events
+
+    app.screen.get_selected_text = lambda: text  # type: ignore[method-assign]
+    app.post_message(events.TextSelected())
+
+
+async def test_a_drag_selects_and_copies_without_being_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole feature, through Textual's real selection."""
     copied: list[str] = []
-    monkeypatch.setattr(
-        "ios_tui.app._to_clipboard", lambda text: copied.append(text) or True
-    )
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: copied.append(text) or True)
 
     app = IosAgentApp(_Runner)
-    async with app.run_test(size=(100, 30)) as pilot:
+    async with app.run_test(size=(120, 36)) as pilot:
         await _ready(app)
-        app.transcript.goal("turn on bold text")
+        app.transcript.note("a line worth selecting")
         await pilot.pause()
 
-        await pilot.press("ctrl+y")
+        row = next(
+            i for i, line in enumerate(app.transcript.lines) if "worth selecting" in line.text
+        )
+        await _drag(app, pilot, row, app.transcript.region.x + 2, app.transcript.region.x + 24)
+
+        assert copied, "a real drag copied nothing"
+        assert "worth selecting" in copied[0]
+        assert app.query_one(StatsBar).notice.startswith("copied ")
+
+
+async def test_a_drag_copies_the_row_it_crossed_and_not_the_pane() -> None:
+    """The line dragged over, not everything above it.
+
+    Without the offset metadata `SelectableLog.render_line` stamps, the
+    compositor cannot say which character is under the pointer, and the
+    selection degrades to whole widgets: the drag comes back with the wordmark
+    and every line since. Copying nine lines of ASCII phone because someone
+    swiped one row is worse than copying nothing.
+    """
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(120, 36)) as pilot:
+        await _ready(app)
+        app.transcript.note("the only row that should be copied")
         await pilot.pause()
 
-        assert copied, "nothing reached the clipboard"
-        assert "turn on bold text" in copied[0]
+        row = next(
+            i for i, line in enumerate(app.transcript.lines) if "should be copied" in line.text
+        )
+        await _drag(app, pilot, row, app.transcript.region.x + 1, app.transcript.region.x + 40)
+
+        selected = app.screen.get_selected_text()
+        assert selected is not None
+        assert "should be copied" in selected
+        assert "\n" not in selected.strip()
+        assert "ios-agent" not in selected
 
 
-async def test_copy_falls_back_when_pbcopy_is_not_there(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_a_drag_in_progress_is_visible() -> None:
+    """A selection you cannot see is a gesture that looks like it failed.
+
+    Textual highlights selected text inside the visual pipeline, which a
+    `RichLog` never enters, so the transcript would copy on release while
+    showing nothing at all in between. Asserted against the composited strips
+    rather than the widget's own render, because the question is what reaches
+    the terminal.
+    """
+    from textual import events
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(120, 36)) as pilot:
+        await _ready(app)
+        transcript = app.transcript
+        transcript.note("highlight this row")
+        await pilot.pause()
+
+        row = next(i for i, line in enumerate(transcript.lines) if "highlight this" in line.text)
+        y = transcript.region.y + row - transcript.scroll_offset.y
+
+        def at(kind: type, x: int, button: int) -> events.MouseEvent:
+            return kind(None, x, y, 0, 0, button, False, False, False, screen_x=x, screen_y=y)
+
+        # Held down, not released: the highlight has to be there during the drag.
+        app.screen._forward_event(at(events.MouseDown, transcript.region.x + 2, 1))
+        await pilot.pause()
+        app.screen._forward_event(at(events.MouseMove, transcript.region.x + 18, 1))
+        for _ in range(4):
+            await pilot.pause()
+
+        component = app.screen.get_component_styles("screen--selection")
+        expected = (transcript.background_colors[1] + component.background).rich_color
+
+        strip = app.screen._compositor.render_strips()[y]
+        painted = [
+            segment.text
+            for segment in strip
+            if segment.style is not None and segment.style.bgcolor == expected
+        ]
+        assert painted, "the dragged span carries no selection colour"
+        assert "highlight this" in "".join(painted)
+
+
+@pytest.mark.parametrize("selection", [None, "", "a", "ab"])
+async def test_a_stray_drag_leaves_the_clipboard_alone(
+    monkeypatch: pytest.MonkeyPatch, selection: str | None
 ) -> None:
-    """OSC 52 cannot be the only route on a macOS-only tool: Textual's own
-    docstring says it does not work on macOS Terminal. It is the fallback."""
-    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: False)
-    sent: list[str] = []
-    monkeypatch.setattr(IosAgentApp, "copy_to_clipboard", lambda self, text: sent.append(text))
+    """A click, or a drag of a character or two, is not an intention.
 
-    app = IosAgentApp(_Runner)
-    async with app.run_test(size=(100, 30)) as pilot:
-        await _ready(app)
-        app.transcript.goal("turn on bold text")
-        await pilot.pause()
-
-        await pilot.press("ctrl+y")
-        await pilot.pause()
-
-        assert sent and "turn on bold text" in sent[0]
-
-
-async def test_copying_an_empty_transcript_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Silence would read as a copy that worked."""
-    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
-
-    app = IosAgentApp(_Runner, inline=True)  # inline draws no banner
-    async with app.run_test(size=(100, 20)) as pilot:
-        await _ready(app)
-        # Emptied rather than assumed empty: startup legitimately writes to it,
-        # a warning about the model most often, so a fresh app is not a blank
-        # one.
-        app.transcript.clear()
-        await pilot.press("ctrl+y")
-        await pilot.pause()
-
-        written = "\n".join(line.text for line in app.transcript.lines)
-        assert "nothing to copy" in written
-
-
-def test_copy_is_offered_in_the_command_menu() -> None:
-    """Discoverable, since the key is not one anyone would guess."""
-    app = IosAgentApp(_Runner)
-    assert any(c.name == "copy" for c in app.commands())
-
-
-async def test_the_wordmark_is_not_copied_with_the_log(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Nine lines of ASCII phone is not what someone pasting a log wants.
-
-    It is also the one thing on screen carrying no information, which is why
-    the copy is rebuilt from the entries rather than scraped off the rendered
-    lines.
+    Copying on those would quietly replace a clipboard someone was still using,
+    which is worse than not copying at all.
     """
     copied: list[str] = []
     monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: copied.append(text) or True)
@@ -325,13 +390,95 @@ async def test_the_wordmark_is_not_copied_with_the_log(
     app = IosAgentApp(_Runner)
     async with app.run_test(size=(100, 30)) as pilot:
         await _ready(app)
-        assert app.transcript.has_banner, "this test needs the banner to be there"
-        app.transcript.goal("turn on bold text")
+        await _selected(app, selection)
         await pilot.pause()
 
-        await pilot.press("ctrl+y")
+        assert copied == []
+
+
+async def test_the_status_bar_says_how_much_was_copied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In the bar rather than the transcript: it is a fact about the last two
+    seconds, not part of the record of what happened to the phone."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        await _selected(app, "one\ntwo\nthree")
         await pilot.pause()
 
-        assert copied
-        assert "╭─" not in copied[0]
-        assert "turn on bold text" in copied[0]
+        bar = app.query_one(StatsBar)
+        assert bar.notice == "copied 3 lines"
+        assert "copied 3 lines" in bar.render().plain
+        assert "copied" not in "\n".join(line.text for line in app.transcript.lines)
+
+
+async def test_one_line_is_not_called_one_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        await _selected(app, "just the one")
+        await pilot.pause()
+
+        assert app.query_one(StatsBar).notice == "copied 1 line"
+
+
+async def test_the_notice_goes_away_on_its_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Short lived, or it becomes furniture and stops being read."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        bar = app.query_one(StatsBar)
+        # Long enough that the assertion below is not racing the timer: a
+        # pause can outlast a very short window on a loaded machine.
+        bar.flash("copied 2 lines", seconds=0.4)
+        await pilot.pause()
+        assert bar.notice
+
+        await asyncio.sleep(0.6)
+        await pilot.pause()
+        assert bar.notice == ""
+
+
+async def test_a_second_copy_is_not_cut_short_by_the_first_timer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two copies in quick succession: the first one's timer must not clear the
+    second one's message."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _ready(app)
+        bar = app.query_one(StatsBar)
+        bar.flash("copied 1 line", seconds=0.15)
+        await asyncio.sleep(0.1)
+        bar.flash("copied 9 lines", seconds=0.5)
+
+        await asyncio.sleep(0.15)  # the first timer fires in here
+        await pilot.pause()
+        assert bar.notice == "copied 9 lines"
+
+
+async def test_the_notice_survives_a_narrow_bar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The counters will still be there in a second; the notice will not."""
+    monkeypatch.setattr("ios_tui.app._to_clipboard", lambda text: True)
+
+    app = IosAgentApp(_Runner)
+    async with app.run_test(size=(60, 24)) as pilot:
+        await _ready(app)
+        bar = app.query_one(StatsBar)
+        bar.stats = StatsSnapshot(observations=1, actions=9, device_tokens=4321, refusals=2)
+        bar.prompt_tokens, bar.completion_tokens, bar.elapsed_s = 90000, 1234, 240.0
+        await _selected(app, "one\ntwo")
+        await pilot.pause()
+
+        rendered = bar.render()
+        assert "copied 2 lines" in rendered.plain
+        assert rendered.cell_len <= 60

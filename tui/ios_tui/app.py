@@ -24,7 +24,7 @@ from collections.abc import Callable
 from time import monotonic, time
 from typing import Any, ClassVar
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.command import Provider
@@ -63,6 +63,10 @@ from ios_tui.widgets import (
     Thinking,
     Transcript,
 )
+
+#: Below this a drag is a stray gesture rather than an intention, and copying
+#: on it would quietly replace a clipboard someone was still using.
+_MIN_SELECTION = 2
 
 #: The checks a simulator needs, in the order someone would fix them.
 #:
@@ -123,7 +127,6 @@ class IosAgentApp(App[int]):
         Binding("ctrl+o", "device", "Device", show=True),
         Binding("ctrl+r", "reread", "Re-read screen", show=False),
         Binding("ctrl+s", "save", "Save trail", show=False),
-        Binding("ctrl+y", "copy", "Copy", show=False),
         # Only while the slash menu is open; `check_action` disables them
         # otherwise so the arrow keys stay free for the input.
         Binding("down", "menu_down", "Next command", show=False),
@@ -670,12 +673,6 @@ class IosAgentApp(App[int]):
             Command("screen", "read the screen again", self.action_reread, "ctrl+r"),
             Command("log", "show or hide the device startup log", self.action_toggle_log, "ctrl+l"),
             Command("save", "write the audit trail to .artifacts", self.action_save, "ctrl+s"),
-            Command(
-                "copy",
-                "copy the selection, or the whole transcript",
-                self.action_copy,
-                "ctrl+y",
-            ),
             Command("stop", "stop the running goal", self.action_stop, "esc"),
             Command("quit", "release the device and exit", self._quit_later, "ctrl+q"),
         ]
@@ -971,34 +968,34 @@ class IosAgentApp(App[int]):
         box.value = f"/{chosen.name}"
         box.cursor_position = len(box.value)
 
-    def action_copy(self) -> None:
-        """Put the transcript on the clipboard.
+    def on_text_selected(self, event: events.TextSelected) -> None:
+        """Selecting is the copy. Nothing else needs pressing.
 
-        The terminal's own drag-select does not reach it: a Textual app turns
-        on mouse reporting, so the terminal hands the drag to the app instead of
-        selecting text. Textual has its own selection and a `copy_text` action,
-        and binds no key to it, which leaves a log that can be highlighted and
-        not copied.
+        A Textual app turns on mouse reporting, so a drag goes to the app and
+        the terminal's own select-and-copy never happens. Textual makes its own
+        selection and stops there, which leaves text that can be highlighted
+        and not copied: the gesture looks like it worked and does nothing.
 
-        The selection if there is one, the whole transcript if there is not.
-        Someone who says the logs are not copiable usually wants the log, not a
-        rectangle of it.
+        Copied on release rather than offered as a command, because the
+        selection *is* the request. The result goes to the status bar rather
+        than the transcript: it is a fact about the last two seconds, not part
+        of the record of what happened to the phone.
         """
-        selected = self.screen.get_selected_text()
-        text = selected or self.transcript.as_text()
-        if not text.strip():
-            self.transcript.note("nothing to copy yet")
+        text = self.screen.get_selected_text()
+        if text is None or len(text) <= _MIN_SELECTION:
+            # A click, or a drag of a character or two, is a stray gesture
+            # rather than an intention. Copying on those would quietly replace
+            # a clipboard someone was still using.
             return
 
-        what = "selection" if selected else f"{len(text.splitlines())} lines"
-        if _to_clipboard(text):
-            self.transcript.note(f"copied the {what}")
-            return
-        # OSC 52 is the fallback, and Textual's own docstring says it does not
-        # work on macOS Terminal, so it cannot be the only route on a
-        # macOS-only tool.
-        self.copy_to_clipboard(text)
-        self.transcript.note(f"copied the {what} (via the terminal)")
+        if not _to_clipboard(text):
+            # OSC 52 is the fallback: it depends on the terminal implementing
+            # it, and Textual's own docstring says it does not work on macOS
+            # Terminal, which cannot be the only route on a macOS-only tool.
+            self.copy_to_clipboard(text)
+
+        lines = len(text.splitlines())
+        self.query_one(StatsBar).flash(f"copied {lines} line{'' if lines == 1 else 's'}")
 
     def action_toggle_log(self) -> None:
         pane = self.query_one("#log-pane", LogPane)

@@ -9,10 +9,16 @@ watched climbing rather than read afterwards.
 
 from __future__ import annotations
 
+import time
+
+from rich.segment import Segment
+from rich.style import Style
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
+from textual.selection import Selection
+from textual.strip import Strip
 from textual.widgets import Input, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
 
@@ -106,10 +112,35 @@ class StatsBar(Static):
     what a person watches and what the project is measured on are one thing.
     """
 
+    #: When the current notice stops being true. Held apart from the timer so a
+    #: flash arriving during an earlier one is not cut short by its timer.
+    _clear_notice_at = 0.0
+
     stats: reactive[StatsSnapshot] = reactive(StatsSnapshot)
     prompt_tokens: reactive[int] = reactive(0)
     completion_tokens: reactive[int] = reactive(0)
     elapsed_s: reactive[float] = reactive(0.0)
+    #: Something that just happened, shown for a moment and then gone. The
+    #: transcript is the record; this is for things that are not worth a line
+    #: in it, like a copy that worked.
+    notice: reactive[str] = reactive("")
+
+    def flash(self, message: str, seconds: float = 2.5) -> None:
+        """Say something briefly, without writing it down.
+
+        Long enough to read, short enough that it does not become part of the
+        furniture. A later flash replaces the earlier one rather than queueing,
+        because only the most recent one is still true.
+        """
+        self.notice = message
+        self._clear_notice_at = time.monotonic() + seconds
+        self.set_timer(seconds, self._expire_notice)
+
+    def _expire_notice(self) -> None:
+        # A second flash arriving inside the first one's window pushes the
+        # deadline out, and this timer must not clear the newer message.
+        if time.monotonic() >= self._clear_notice_at:
+            self.notice = ""
 
     def render(self) -> Text:
         """Segments, dropped from the right until the row fits.
@@ -133,8 +164,12 @@ class StatsBar(Static):
             # Below that it rounds to "0.0s", which claims a run took no time.
             segments.append((f"{self.elapsed_s:.1f}s", "dim"))
 
+        # The notice is reserved before anything is dropped: it is transient
+        # and it is the answer to something the person just did, where the
+        # counters will still be there a second later.
         width = self.size.width or 80
-        while len(segments) > 1 and _joined_width(segments) + 1 > width:
+        reserved = len(self.notice) + 2 if self.notice else 0
+        while len(segments) > 1 and _joined_width(segments) + 1 + reserved > width:
             segments.pop()
 
         line = Text(" ", style="dim")
@@ -142,6 +177,9 @@ class StatsBar(Static):
             if index:
                 line.append(" · ", style="dim")
             line.append(text, style=style)
+        if self.notice:
+            line.append("  ")
+            line.append(self.notice, style="green")
         return line
 
 
@@ -149,7 +187,111 @@ class StatsBar(Static):
 Entry = tuple[str, object]
 
 
-class Transcript(RichLog):
+class SelectableLog(RichLog):
+    """A `RichLog` a mouse drag can actually select.
+
+    A plain one cannot be selected at all, and the reason is two layers deep.
+
+    Textual finds the character under the pointer by rendering the line and
+    reading an `offset` key out of each segment's **style metadata**
+    (`_compositor.get_widget_and_offset_at`). A `Static` gets that for free,
+    because rendering a `Text` stamps it. A `RichLog` writes strips it has
+    already rendered, and those carry no such metadata, so the compositor
+    reports no offset for any point over the log.
+
+    That is not merely a loss of precision. With no offset the widget is not a
+    *content* widget, so the selection anchors to the log itself as its own
+    container, and `SelectState._walk_selected_widgets` then walks that
+    container's **descendants** for something to select. A log has none. The
+    drag therefore selects nothing, highlights nothing, and never reaches
+    `get_selection`. This is why the transcript was dead to the mouse while the
+    stats bar, one line of `Static`, selected normally.
+
+    So the metadata is stamped back on, per segment, and `get_selection`
+    answers in the same coordinates.
+    """
+
+    def render_line(self, y: int) -> Strip:
+        """Tag each segment with where its text lives in the log.
+
+        `y` is a visible row; the offset has to be an absolute one or a
+        selection means something different after a scroll. The x offset counts
+        **characters**, not cells, because that is what the compositor's own
+        arithmetic assumes when it walks a segment.
+        """
+        strip = super().render_line(y)
+        row = self.scroll_offset.y + y
+        if row >= len(self.lines):
+            return strip
+
+        segments: list[Segment] = []
+        x = 0
+        for segment in strip:
+            meta = Style(meta={"offset": (x, row)})
+            style = segment.style + meta if segment.style else meta
+            segments.append(Segment(segment.text, style, segment.control))
+            x += len(segment.text)
+        return self._highlight(Strip(segments, strip.cell_length), row)
+
+    def _highlight(self, strip: Strip, row: int) -> Strip:
+        """Paint the selected span of one row.
+
+        Textual paints selection inside the visual pipeline, which a log does
+        not go through, so a drag would select and copy while looking like it
+        had done nothing. The colour is the screen's own `screen--selection`
+        component style rather than a chosen one, so the highlight matches
+        every other selectable widget in the app.
+        """
+        selection = self.text_selection
+        if selection is None:
+            return strip
+        span = selection.get_span(row)
+        if span is None:
+            return strip
+
+        start, end = span
+        if end == -1:
+            end = strip.cell_length
+        if end <= start:
+            return strip
+
+        styles = self.screen.get_component_styles("screen--selection")
+        # The selection colour is half transparent, and a Rich style has no
+        # alpha: converting it directly yields the background it was meant to
+        # tint, so the highlight comes out invisible. Blend it against this
+        # widget's own background first, which is what the visual pipeline
+        # does for every widget that gets highlighting for free.
+        style = Style(bgcolor=(self.background_colors[1] + styles.background).rich_color)
+        if styles.color.a:
+            style += Style(color=styles.color.rich_color)
+
+        before, selected, after = strip.divide([start, end, strip.cell_length])
+        # Composed over each segment rather than through `Strip.apply_style`,
+        # which applies a style *underneath* the ones already there: the
+        # transcript colours every row it writes, so a base style loses to
+        # every one of them and highlights nothing.
+        highlighted = Strip(
+            [
+                Segment(segment.text, segment.style + style if segment.style else style)
+                for segment in selected
+            ],
+            selected.cell_length,
+        )
+        return Strip.join([before, highlighted, after])
+
+    def get_selection(self, selection: Selection) -> tuple[str, str] | None:
+        """The selected text, in the coordinates `render_line` handed out.
+
+        Extracted from the rendered lines rather than from whatever produced
+        them, because the offsets above are rendered rows: a wrapped entry
+        occupies several of them, and counting in entries would land in the
+        wrong place on any line long enough to matter.
+        """
+        text = "\n".join(strip.text for strip in self.lines)
+        return selection.extract(text), "\n"
+
+
+class Transcript(SelectableLog):
     """What was said and done, in order.
 
     Two things about `RichLog` shape this class.
@@ -575,7 +717,7 @@ def _target_of(args: object) -> str:
     return ""
 
 
-class LogPane(RichLog):
+class LogPane(SelectableLog):
     """What the machine was doing while it got ready.
 
     A separate pane from the transcript, and hidden by default, because device
