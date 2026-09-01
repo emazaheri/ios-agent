@@ -1,0 +1,46 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.emazaheri/ios-agent",
+  "title": "ios-agent",
+  "description": "Drive a real iPhone or an iOS Simulator with an AI agent, through XCUIAutomation.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/emazaheri/ios-agent#readme",
+  "repository": {
+    "url": "https://github.com/emazaheri/ios-agent",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "ios-mcp",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "IOS_MCP_POLICY__CONFIRM_DESTRUCTIVE",
+          "description": "Ask before an action that sends, deletes, or pays. Leave it on for a device carrying real accounts.",
+          "default": "true"
+        },
+        {
+          "name": "IOS_MCP_POLICY__ENABLED",
+          "description": "The policy gate as a whole: approval, app blocklist, redaction, audit.",
+          "default": "true"
+        },
+        {
+          "name": "IOS_MCP_WDA__BUNDLE_ID",
+          "description": "Bundle id of the WebDriverAgent runner. Free Apple IDs cannot sign com.facebook.*, so device builds need their own.",
+          "default": "com.facebook.WebDriverAgentRunner.xctrunner"
+        },
+        {
+          "name": "IOS_MCP_SIMULATOR__SHOW_WINDOW",
+          "description": "Bring Simulator.app to the front when booting, so a person can watch the agent drive. Set false in CI.",
+          "default": "true"
+        }
+      ]
+    }
+  ]
+}
