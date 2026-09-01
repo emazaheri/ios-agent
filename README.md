@@ -228,7 +228,7 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 419 tests, no device, no model
+uv run pytest tests/unit          # 422 tests, no device, no model
 uv run pytest tests/tui           # 175 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow

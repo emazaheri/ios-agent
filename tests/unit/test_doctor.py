@@ -177,3 +177,51 @@ def test_filtering_only_ever_concerns_warnings() -> None:
 
     assert report.warnings_for("simulator") == []
     assert report.warnings_for("device") == []
+
+
+# -- an expired profile stops a phone, not a simulator ----------------------
+
+
+def _bundle_check(days: int, *, xctestrun: bool) -> Check:
+    data: dict[str, object] = {"runner_app": "/fake.app", "days_remaining": days}
+    if xctestrun:
+        data["xctestrun"] = "/fake.xctestrun"
+    return Check("wda-bundle", "warn" if xctestrun else "fail", "", data=data)
+
+
+def test_an_expired_profile_does_not_make_the_device_look_usable() -> None:
+    """The lapsed profile is the one thing that stops a phone being driven, so
+    reporting it as ready promises something that fails at install time."""
+    ready = {"go-ios": "ok", "devices": "ok", "tunnel": "ok"}
+    checks = [Check(name, st, "") for name, st in ready.items()]  # type: ignore[arg-type]
+
+    live = DoctorReport(checks=[*checks, _bundle_check(5, xctestrun=True)])
+    expired = DoctorReport(checks=[*checks, _bundle_check(-1, xctestrun=True)])
+
+    assert live.can_use_real_device
+    assert not expired.can_use_real_device
+
+
+def test_an_expired_profile_leaves_the_simulator_usable() -> None:
+    """Blocking here would refuse the target that works because of the one
+    that does not. A simulator needs no signing at all."""
+    ready = {"xcode": "ok", "simctl": "ok", "simulators": "ok"}
+    checks = [Check(name, st, "") for name, st in ready.items()]  # type: ignore[arg-type]
+
+    report = DoctorReport(checks=[*checks, _bundle_check(-1, xctestrun=True)])
+
+    assert report.can_use_simulator
+    assert not [c for c in report.checks if c.status == "fail"], (
+        "a blocking failure stops the front end starting against any target"
+    )
+
+
+def test_an_expired_profile_with_no_simulator_bundle_really_is_blocking() -> None:
+    ready = {"xcode": "ok", "simctl": "ok", "simulators": "ok"}
+    checks = [Check(name, st, "") for name, st in ready.items()]  # type: ignore[arg-type]
+
+    report = DoctorReport(checks=[*checks, _bundle_check(-1, xctestrun=False)])
+
+    assert not report.can_use_simulator
+    assert not report.can_use_real_device
+    assert [c.name for c in report.checks if c.status == "fail"] == ["wda-bundle"]

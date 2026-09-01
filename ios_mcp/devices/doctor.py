@@ -97,9 +97,18 @@ class DoctorReport:
 
     @property
     def _has_signed_runner(self) -> bool:
+        """A runner app, signed with a profile that has not lapsed.
+
+        An expired profile is exactly the condition that stops a phone being
+        driven, so reporting the device as usable on the strength of the
+        bundle existing promises something that fails a minute later at
+        install time.
+        """
         for check in self.checks:
             if check.name == "wda-bundle":
-                return "runner_app" in check.data
+                if "runner_app" not in check.data:
+                    return False
+                return int(check.data.get("days_remaining", 0)) >= 0
         return False
 
     def _status(self, name: str) -> Status:
@@ -442,32 +451,42 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
     if runner is not None and profile is not None and profile.exists():
         data["runner_app"] = str(runner)
         parts.append("device runner ready")
-        if True:
-            expiry = _provisioning_expiry(profile)
-            if expiry is not None:
-                days = (expiry - datetime.now(UTC)).days
-                data["signing_expires"] = expiry.isoformat()
-                data["days_remaining"] = days
-                if days < 0:
-                    return Check(
-                        "wda-bundle",
-                        "fail",
-                        f"the device runner's provisioning profile expired {abs(days)} day(s) ago",
-                        remedy=(
-                            "Re-sign with scripts/prepare_wda.sh device. Free Apple IDs "
-                            "get 7-day profiles; a paid Developer Program membership "
-                            "gets a year."
-                        ),
-                        data=data,
-                    )
-                if days <= 2:
-                    return Check(
-                        "wda-bundle",
-                        "warn",
-                        f"the device runner's provisioning profile expires in {days} day(s)",
-                        remedy="Re-sign soon with scripts/prepare_wda.sh device.",
-                        data=data,
-                    )
+        expiry = _provisioning_expiry(profile)
+        if expiry is not None:
+            days = (expiry - datetime.now(UTC)).days
+            data["signing_expires"] = expiry.isoformat()
+            data["days_remaining"] = days
+            if days < 0:
+                # An expired profile stops a phone and means nothing to a
+                # simulator, which needs no signing at all. Blocking here
+                # while `xctestrun` sits ready refuses the target that works
+                # because of the one that does not, which is the same mistake
+                # `_bundle_warning_applies` was written to correct on the warn
+                # path. Only a machine with no simulator bundle either is
+                # actually stuck.
+                simulator_ready = "xctestrun" in data
+                detail = f"the device runner's provisioning profile expired {abs(days)} day(s) ago"
+                if simulator_ready:
+                    detail += ", so only the simulator can be driven"
+                return Check(
+                    "wda-bundle",
+                    "warn" if simulator_ready else "fail",
+                    detail,
+                    remedy=(
+                        "Re-sign with scripts/prepare_wda.sh device. Free Apple IDs "
+                        "get 7-day profiles; a paid Developer Program membership "
+                        "gets a year."
+                    ),
+                    data=data,
+                )
+            if days <= 2:
+                return Check(
+                    "wda-bundle",
+                    "warn",
+                    f"the device runner's provisioning profile expires in {days} day(s)",
+                    remedy="Re-sign soon with scripts/prepare_wda.sh device.",
+                    data=data,
+                )
 
     if not parts:
         return Check(
