@@ -1348,7 +1348,7 @@ provides-extras = ["anthropic", "openai", "google-genai", "google-vertexai", "ol
 
 [[package]]
 name = "ios-mcp"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
