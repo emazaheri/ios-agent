@@ -295,8 +295,13 @@ app in this project's future is a client of this server, never the engine.
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 537 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 618 offline tests on Linux and macOS.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+<!-- Ownership proof for the MCP registry: it checks that the server name
+     appears in the README published to PyPI. -->
+
+mcp-name: io.github.emazaheri/ios-agent

@@ -3,7 +3,7 @@
   "name": "io.github.emazaheri/ios-agent",
   "title": "ios-agent",
   "description": "Drive a real iPhone or an iOS Simulator with an AI agent, through XCUIAutomation.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://github.com/emazaheri/ios-agent#readme",
   "repository": {
     "url": "https://github.com/emazaheri/ios-agent",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "ios-mcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
