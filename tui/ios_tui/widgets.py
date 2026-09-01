@@ -31,6 +31,27 @@ from ios_tui.events import ActionFinished, GoalFinished, Observed, StatsSnapshot
 #: model can read where a screen used to be. 32 columns, which fits the
 #: transcript on a 64-column terminal with room to spare.
 BANNER = """\
+╭────────────────────────────────────────────╮
+│                  ▔▔▔▔▔▔▔▔                  │
+│                                            │
+│           ██████   ████    █████           │
+│             ██    ██  ██  ██               │
+│             ██    ██  ██   ████            │
+│             ██    ██  ██      ██           │
+│           ██████   ████   █████            │
+│                                            │
+│    ████    █████  ██████  ██  ██  ██████   │
+│   ██  ██  ██      ██      ███ ██    ██     │
+│   ██████  ██ ███  █████   ██████    ██     │
+│   ██  ██  ██  ██  ██      ██ ███    ██     │
+│   ██  ██   █████  ██████  ██  ██    ██     │
+│                                            │
+│               ▁▁▁▁▁▁▁▁▁▁▁▁▁▁               │
+╰────────────────────────────────────────────╯"""
+
+#: The same phone, drawn small. A pane can be too narrow for the wordmark
+#: above and still wide enough for a drawing, and a drawing is the point.
+BANNER_SMALL = """\
 ╭──────────────────────────────╮
 │           ▔▔▔▔▔▔▔▔           │
 │                              │
@@ -486,14 +507,20 @@ class Transcript(SelectableLog):
         return ""
 
     def _banner_rows(self, subtitle: str) -> list[Text]:
-        """The drawing if it fits, the name if it does not.
+        """The largest drawing that fits, and the name when none does.
 
         Measured against the pane rather than the terminal: this sits in the
-        left half of a split, so a 64-column terminal gives it about 40.
+        left half of a split, so a 64-column terminal gives it about 40. Two
+        sizes rather than one, for the same reason the status bar carries
+        several phrasings: a pane too narrow for the wordmark is usually still
+        wide enough for a phone, and dropping straight to a line of text throws
+        away more than it has to.
         """
         width = self.size.width or 80
-        if width >= len(BANNER.splitlines()[0]) + 2:
-            rows = [Text(line, style="dim cyan") for line in BANNER.splitlines()]
+        for art in (BANNER, BANNER_SMALL):
+            if width < len(art.splitlines()[0]) + 2:
+                continue
+            rows = [Text(line, style="dim cyan") for line in art.splitlines()]
             rows.append(Text(f"  {subtitle}", style="dim"))
             return rows
 

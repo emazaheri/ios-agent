@@ -27,7 +27,15 @@ from ios_tui.events import (
     StatsSnapshot,
 )
 from ios_tui.runner import GoalRunner
-from ios_tui.widgets import ScreenPane, StatsBar, StatusBar, Transcript
+from ios_tui.widgets import (
+    BANNER,
+    BANNER_NARROW,
+    BANNER_SMALL,
+    ScreenPane,
+    StatsBar,
+    StatusBar,
+    Transcript,
+)
 from screens import DeviceModel, build_session
 from textual.widgets import Static
 from tui_harness import ScriptedModel, settings
@@ -503,3 +511,38 @@ async def test_a_long_goal_wraps_inside_the_transcript(size: tuple[int, int]) ->
             "so it runs under the pane beside it"
         )
         assert "downtown Toronto" in transcript.as_text()
+
+
+# -- the wordmark degrades in steps -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("width", "expected"),
+    # Terminal widths, and the form the transcript pane can hold at each. The
+    # pane is the left half of a split, so 70 columns of terminal is 44 of pane.
+    [(120, "large"), (70, "small"), (44, "text")],
+)
+async def test_the_wordmark_picks_the_largest_drawing_that_fits(width: int, expected: str) -> None:
+    """A pane too narrow for the wordmark is usually still wide enough for a
+    phone, so there are two drawings before the fallback to a line of text."""
+    app = _app()
+    async with app.run_test(size=(width, 40)) as pilot:
+        await _ready(app)
+        transcript = app.query_one(Transcript)
+        transcript.clear()
+        transcript.banner("an agent that drives an iPhone")
+        await pilot.pause()
+
+        # The banner is deliberately absent from `as_text`, so read what was
+        # actually drawn.
+        text = "\n".join(strip.text for strip in transcript.lines)
+        drawn = {
+            "large": BANNER.splitlines()[3] in text,
+            "small": BANNER_SMALL.splitlines()[3] in text,
+            "text": BANNER_NARROW in text,
+        }
+        assert drawn[expected], f"expected the {expected} form at width {width}"
+
+        pane = transcript.size.width
+        widest = max((strip.cell_length for strip in transcript.lines), default=0)
+        assert widest <= pane, f"the wordmark is {widest} wide in a {pane}-column pane"
