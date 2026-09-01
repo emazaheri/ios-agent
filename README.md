@@ -52,7 +52,7 @@ Everything else in the repository is downstream of those.
 | For | You need |
 |---|---|
 | **Simulator** | macOS, Xcode 16.3+, an iOS runtime, Python 3.12+ |
-| **Physical iPhone** | the above plus [go-ios](https://github.com/danielpaulus/go-ios), Developer Mode, and a signing identity |
+| **Physical iPhone** | the above plus [go-ios](https://github.com/danielpaulus/go-ios), Developer Mode, and a signing identity. Follow [docs/real-device-setup.md](docs/real-device-setup.md), which is a longer road than the simulator and has a few steps that look like bugs but are not |
 
 Xcode ships **without** a simulator runtime. If `xcrun simctl list runtimes` is
 empty, `xcodebuild -downloadPlatform iOS` fetches one (around 8 GB). If a

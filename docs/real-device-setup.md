@@ -35,6 +35,17 @@ rather than starting one per session. `scripts/start_tunnel.sh` contains a
 
 ## 4. Build and sign WebDriverAgent
 
+This step is three passes, and the order matters. WebDriverAgent is not
+checked in, so on a fresh clone the project you need to open does not exist
+yet. Fetch it first:
+
+```bash
+./scripts/prepare_wda.sh device        # clones WebDriverAgent, then tries to sign
+```
+
+Expect that first run to stop at signing. That is what the rest of this step
+fixes; run it again at the end.
+
 Sign in to Xcode first (Settings > Accounts). Then open the WebDriverAgent
 project once and pick your team under Signing & Capabilities on both the
 `WebDriverAgentLib` and `WebDriverAgentRunner` targets:
@@ -62,7 +73,7 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
   ~/Library/Keychains/login.keychain-db
 ```
 
-Then build and install:
+Then build and install, this time for real:
 
 ```bash
 ./scripts/prepare_wda.sh device        # finds your team and device
@@ -89,8 +100,11 @@ export IOS_MCP_WDA__BUNDLE_ID=com.yourname.WebDriverAgentRunner.xctrunner
   signed bundle invalidates its signature, and installation then fails with a
   bare `ApplicationVerificationFailed`.
 - **Signing expires after 7 days** on a free Apple ID. Re-run
-  `prepare_wda.sh device` and reinstall. `ios_doctor` reports the expiry date.
-  A paid Developer Program membership gets a year.
+  `prepare_wda.sh device` and reinstall. `ios_doctor` reports the expiry date,
+  and once it has lapsed it says so and drops the device from "Ready to
+  automate", since a runner whose profile has expired will not install. The
+  simulator is unaffected and keeps working, because nothing about a simulator
+  involves signing. A paid Developer Program membership gets a year.
 
 ## 5. Run
 
