@@ -39,7 +39,10 @@ per step, wall time, action count and resolution-tier distribution. A drift
 from `exact` toward `text-fuzzy` is the leading indicator that a flow is about
 to become flaky. Agent tasks declare an **action floor**, the number a
 hand-written oracle needs, asserted by equality so it cannot quietly become an
-aspiration.
+aspiration. Every run of the free series is recorded in
+`tests/evals/history.jsonl`, and CI fails when one of those numbers moves
+without the new line being committed with it. If the change is deliberate, the
+failure prints the `scripts/eval_trend.py append` command that accepts it.
 
 **Layers 1 to 4 must not import MCP, and nothing may import upward.**
 `tests/unit/test_layering.py` enforces this statically. It is what lets an agent

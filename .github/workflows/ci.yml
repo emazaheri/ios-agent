@@ -42,6 +42,29 @@ jobs:
       - name: unit and front-end tests
         run: uv run pytest tests/unit tests/tui -q
 
+      # The oracle drives a scripted device: no model, no network, no hardware,
+      # and no money. Every number it produces is a count on a fixed route, so
+      # it is the one eval series that can run on every push.
+      - name: free eval series
+        run: uv run pytest tests/evals/agent -m "agent and not model" -q
+
+      # Compares against the last recorded run for this suite. It never writes
+      # the history: the value of a committed trend is that a human approved
+      # the new numbers in the commit that changed them, and a bot that appends
+      # automatically turns the file into a log that ratchets to whatever the
+      # code currently does.
+      - name: eval drift
+        run: uv run python scripts/eval_trend.py check .artifacts/evals/agent.json --suite agent-oracle
+
+      # .artifacts/ is gitignored, so a failing report is otherwise
+      # unrecoverable from the job that produced it.
+      - name: upload the eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: .artifacts/evals/agent.json
+
   # The same suites on the platform this actually runs on. Nothing here needs a
   # device, so it is a check that the code imports and behaves on macOS, not a
   # substitute for `tests/integration`.
@@ -66,9 +89,14 @@ jobs:
 #
 #   tests/integration   needs a booted simulator and a built WebDriverAgent,
 #                       which is an Xcode build measured in minutes
+#   tests/evals -m eval   needs a booted simulator, so the golden flows are
+#                       run by hand
 #   tests/evals -m model  calls a real provider and costs real money
 #   tests/evals/agent -m device   needs a physical iPhone
 #
-# The eval suite is the quality gate for this project and it is run by hand,
-# because its output is a set of numbers to read rather than a pass or a fail.
-# See the Development section of the README.
+# The free deterministic series does run here, and its numbers are guarded
+# against tests/evals/history.jsonl. The rest of the eval suite is the quality
+# gate for this project and is run by hand, because its output is a set of
+# numbers to read rather than a pass or a fail, and because it costs either a
+# simulator or money. Append a hand-run slice to the same history with
+# `scripts/eval_trend.py append`. See the Development section of the README.

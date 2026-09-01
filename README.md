@@ -228,7 +228,7 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 378 tests, no device, no model
+uv run pytest tests/unit          # 418 tests, no device, no model
 uv run pytest tests/tui           # 159 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow
@@ -240,7 +240,23 @@ and resolution-tier distribution per flow. A drift from `exact` toward
 `text-fuzzy` is the leading indicator that a flow is about to become flaky.
 Agent tasks additionally declare an **action floor**, the number of actions a
 hand-written oracle needs, asserted against that oracle so it cannot drift into
-an aspiration.
+an aspiration. Failures are attributed too: a report says which of them were
+the device, perception, the model or the policy gate, rather than only that
+something failed.
+
+Those numbers are kept over time in `tests/evals/history.jsonl`, one committed
+line per measured run. CI runs the one series that costs nothing (the oracle
+against a scripted device) and fails if any of it moves without the new line
+being committed alongside. Hand-run slices go in the same file:
+
+```bash
+python scripts/eval_trend.py show --suite agent-oracle
+python scripts/eval_trend.py append .artifacts/evals/agent-s5.json --suite agent-model
+```
+
+The guard is exact rather than banded, because every number it checks is a
+count on a fixed route with no model, no network and no clock in it. See
+[docs/adr/0009](docs/adr/0009-the-eval-trend-is-committed.md).
 
 ```bash
 uv run python scripts/tui_screenshot.py   # render the front end to .artifacts
