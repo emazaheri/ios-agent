@@ -411,6 +411,18 @@ class Transcript(SelectableLog):
         self._entries.append(entry)
         for line in self._rows(entry):
             self._write_row(line)
+        self._follow()
+
+    def _follow(self) -> None:
+        """Keep the newest row on screen.
+
+        `RichLog` follows the end on its own while it is already there, but a
+        relayout rewrites every row from the top and leaves it looking at the
+        wordmark. The last thing the agent said is the one line a reader is
+        waiting for, so the pane is put back at the bottom explicitly rather
+        than left to a default that a rewrite has just invalidated.
+        """
+        self.scroll_end(animate=False)
 
     def _write_row(self, line: Text) -> None:
         """Write one row, wrapped to the pane rather than to a guess.
@@ -442,6 +454,7 @@ class Transcript(SelectableLog):
         for entry in self._entries:
             for line in self._rows(entry):
                 self._write_row(line)
+        self._follow()
 
     def _rows(self, entry: Entry) -> list[Text]:
         kind, data = entry

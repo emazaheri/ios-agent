@@ -572,3 +572,30 @@ async def test_a_short_pane_gets_the_smaller_drawing() -> None:
         drawn = "\n".join(strip.text for strip in transcript.lines)
         assert BANNER.splitlines()[3] not in drawn, "the tall drawing does not fit"
         assert BANNER_SMALL.splitlines()[3] in drawn
+
+
+async def test_the_newest_row_stays_on_screen() -> None:
+    """The last thing the agent said is the line a reader is waiting for.
+
+    `RichLog` follows the end while it is already there, but a relayout
+    rewrites every row from the top; without putting the pane back, the answer
+    ends up below the fold under a wordmark that fills the view.
+    """
+    app = _app()
+    # Tall enough that the large wordmark draws, which is what pushes the run
+    # below the fold in the first place.
+    async with app.run_test(size=(100, 32)) as pilot:
+        await _ready(app)
+        transcript = app.query_one(Transcript)
+        transcript.clear()
+        transcript.banner("an agent that drives an iPhone")
+        transcript.goal("What are the estimated driving and walking times?")
+        for _ in range(8):
+            transcript.note("a line of the run")
+        transcript.said("Driving is about 35 minutes and walking 3 hours 48 minutes.")
+        await pilot.pause()
+
+        assert transcript.max_scroll_y > 0, "the pane must have more than it can show"
+        assert transcript.scroll_offset.y == transcript.max_scroll_y, (
+            "the transcript is not following its newest row"
+        )

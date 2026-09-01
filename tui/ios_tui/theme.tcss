@@ -81,7 +81,10 @@ Screen {
  */
 #transcript {
     height: 1fr;
-    padding: 0 1;
+    /* A row of clearance under the last line. Without it the newest row sits
+     * flush against the stats bar, which reads as a line cut in half rather
+     * than as the end of the transcript. */
+    padding: 0 1 1 1;
     background: $background;
     /* The lines wrap, so a horizontal scrollbar is only ever a stripe across
      * the bottom of the pane that nothing needs. */
