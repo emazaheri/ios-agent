@@ -33,15 +33,31 @@ async def test_open_does_not_terminate_the_foreground_app_on_teardown(
     await wda_session.open("com.apple.Preferences")
     create = next(b for m, p, b in fake_wda.calls if p == "/session" and m == "POST")
     assert create["capabilities"]["alwaysMatch"]["shouldTerminateApp"] is False
-    assert create["capabilities"]["alwaysMatch"]["bundleId"] == "com.apple.Preferences"
+
+
+async def test_open_leaves_the_session_unbound_and_launches_after(
+    wda_session: WdaSession, fake_wda: FakeWda
+) -> None:
+    """A bundleId in the capabilities pins /source to that app for the whole
+    session, so the agent keeps seeing a backgrounded app after it navigates
+    away. Measured on a simulator: neither activate, nor launch, nor
+    defaultActiveApplication=auto undoes it. Launch after opening instead."""
+    await wda_session.open("com.apple.Preferences")
+
+    create = next(b for m, p, b in fake_wda.calls if p == "/session" and m == "POST")
+    assert "bundleId" not in create["capabilities"]["alwaysMatch"]
+
+    launch = next(b for m, p, b in fake_wda.calls if p.endswith("/wda/apps/launch"))
+    assert launch["bundleId"] == "com.apple.Preferences"
+    assert wda_session.bundle_id == "com.apple.Preferences"
 
 
 async def test_fresh_launch_sets_force_app_launch(
     wda_session: WdaSession, fake_wda: FakeWda
 ) -> None:
     await wda_session.open("com.apple.Preferences", fresh=True)
-    create = next(b for m, p, b in fake_wda.calls if p == "/session" and m == "POST")
-    assert create["capabilities"]["alwaysMatch"]["forceAppLaunch"] is True
+    launch = next(b for m, p, b in fake_wda.calls if p.endswith("/wda/apps/launch"))
+    assert launch["forceAppLaunch"] is True
 
 
 async def test_source_parses_into_a_snapshot_tree(wda_session: WdaSession) -> None:

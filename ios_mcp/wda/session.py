@@ -56,7 +56,23 @@ class WdaSession:
     # -- lifecycle ---------------------------------------------------------
 
     async def open(self, bundle_id: str | None = None, *, fresh: bool = False) -> str:
-        """Create a session, optionally launching an app into the foreground."""
+        """Create a session, then launch the app into it.
+
+        The app is launched *after* the session exists rather than named in the
+        capabilities, and that ordering is the whole point. A `bundleId` in the
+        capabilities pins the session to that app for its entire life: every
+        later `/source` keeps returning that app's tree no matter what is
+        actually in front. Open a session on SpringBoard and the agent sees the
+        home screen, taps an app, and then watches an empty four-node status
+        bar forever, because it is still being shown the backgrounded
+        SpringBoard. Neither `activate`, nor `launch`, nor the
+        `defaultActiveApplication=auto` setting undoes it; all three were
+        measured against a real simulator and none moved the binding.
+
+        Launching afterwards leaves the session unbound, so `/source` follows
+        whatever is in the foreground, which is what every consumer above this
+        already assumes.
+        """
         capabilities: dict[str, Any] = {
             "alwaysMatch": {
                 # Without this WDA terminates whatever app is running on session
@@ -66,11 +82,6 @@ class WdaSession:
             },
             "firstMatch": [{}],
         }
-        if bundle_id:
-            capabilities["alwaysMatch"]["bundleId"] = bundle_id
-            capabilities["alwaysMatch"]["shouldWaitForQuiescence"] = True
-            if fresh:
-                capabilities["alwaysMatch"]["forceAppLaunch"] = True
 
         value = await self.client.post("/session", {"capabilities": capabilities})
         session_id = _session_id_of(value)
@@ -80,8 +91,10 @@ class WdaSession:
                 hint="Restart the runner, then retry.",
             )
         self.session_id = session_id
-        self.bundle_id = bundle_id
+        self.bundle_id = None
         await self.apply_settings()
+        if bundle_id:
+            await self.launch_app(bundle_id, fresh=fresh)
         logger.info("WDA session %s open (app=%s)", session_id, bundle_id or "<none>")
         return session_id
 
