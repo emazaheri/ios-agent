@@ -29,7 +29,7 @@ uv run ios-agent "turn on bold text"
 - [Connecting your own agent over MCP](#connecting-your-own-agent-over-mcp)
 - [What the model sees](#what-the-model-sees)
 - [Safety](#safety)
-- [What it cost to find out which ideas were worth keeping](#what-it-cost-to-find-out-which-ideas-were-worth-keeping)
+- [Measured on real hardware](#measured-on-real-hardware)
 - [Development](#development) · [Contributing](#contributing)
 
 ## Why it is built this way
@@ -184,32 +184,11 @@ See [SAFETY.md](SAFETY.md). Every default is settable through an `IOS_MCP_*`
 environment variable, a `.env`, or an optional `ios-mcp.toml`, in that order of
 precedence. Copy `.env.example` to `.env` for the full list.
 
-## What it cost to find out which ideas were worth keeping
+## Measured on real hardware
 
-The interesting part is not the agent, it is that **the measurement was built
-first and then used to reject most of what was planned.** Four "deep agent"
-pillars were specified up front. One survived contact with a number.
-
-| pillar | outcome | evidence |
-|---|---|---|
-| Verification | **kept** | actions 85 → 53 (−38%), cost $1.21 → $0.74 (−39%), success 21/21 |
-| Planning | rejected | already at a hand-written oracle's floor on 8 of 10 tasks; total headroom 1 action in 20 |
-| Subagents | rejected | 5,864 prompt tokens/run against a 1M window |
-| Memory | rejected | hedged, it measured *worse* than none; asserted, the agent stopped checking the device |
-
-Each rejection is an ADR in [docs/adr/](docs/adr/) with the numbers behind it.
-Two results contradicted the plan outright:
-
-- The loop was predicted to look before every move. It spent **exactly one
-  observation per run**, the oracle's floor, because every action already folds
-  the resulting screen into its response. The lever the whole phase was designed
-  around was at its limit before anything was built.
-- Memory's two framings are the two ends of one dial with no good setting.
-  Hedge it enough to be safe and it motivates an investigation rather than
-  removing one; assert it enough to save the work and one run in three finished
-  **without touching the device at all**, reporting a failure it never observed.
-
-Latest measurement, 13 tasks × 3 runs on `gpt-5.6-sol`:
+The eval harness was built before the agent, which is the only reason any
+of these numbers exist. Latest measurement, 13 tasks × 3 runs on
+`gpt-5.6-sol`:
 
 | | |
 |---|---|
@@ -217,6 +196,10 @@ Latest measurement, 13 tasks × 3 runs on `gpt-5.6-sol`:
 | observations | **39, against an oracle floor of 39** |
 | refusals, unusable runs | 0, 0 |
 | cost | $2.13 over 10m28s |
+
+Every task sits at the observation floor, including two in an app Apple did
+not write, because every action already folds the screen it produced into
+its response.
 
 ### Verified on real iOS, including a physical iPhone
 
@@ -235,8 +218,8 @@ independently of what the agent claimed, then restored.
 
 Most importantly, **a real no-op still reports `screen_changed=False` on the
 phone.** If a physical device had moved its fingerprint between settled
-snapshots, the one pillar this phase kept would have been silently dead on
-hardware while every simulator and fake test stayed green.
+snapshots, the verification step would have been silently dead on hardware
+while every simulator and fake test stayed green.
 
 Hardware is opt-in twice over, by the `device` marker and
 `IOS_MCP_ALLOW_DEVICE=1`, because hardware being present is not consent to
