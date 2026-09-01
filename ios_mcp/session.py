@@ -23,10 +23,12 @@ from ios_mcp.actions.idempotency import IdempotencyCache
 from ios_mcp.actions.result import ActionResult, DigestDelta, diff_digests
 from ios_mcp.actions.stabilize import settle, wait_until
 from ios_mcp.config import Settings
+from ios_mcp.devices.base import best_app_match, closest_app_names
 from ios_mcp.devices.pool import Lease
 from ios_mcp.errors import (
     ActionRejectedByPolicy,
     ActionRequiresApproval,
+    AppNotFound,
     ElementNotInteractable,
     ErrorCode,
     InvalidArgument,
@@ -516,6 +518,29 @@ class IosSession:
                 started=started,
                 args={"bundle_id": bundle_id, "fresh": fresh},
             )
+
+    async def open_app(self, name: str) -> ActionResult:
+        """Open an app by the name a person would use for it.
+
+        The match runs here rather than in the caller, for the same reason
+        element resolution does: a retry on this side costs nothing, while
+        handing an agent a list of thirty apps to choose from costs a whole
+        turn and puts thirty bundle ids into its context.
+
+        Ranking always produces a single winner rather than refusing when two
+        candidates tie. An ambiguity error is a dead end for a caller whose
+        only handle on an app is its name, which is exactly the trap the
+        element resolver's "pass a ref instead" hint sets for the agent.
+        """
+        apps = await self.lease.adapter.list_apps("all")
+        bundle_id = best_app_match(name, apps)
+        if bundle_id is None:
+            raise AppNotFound(
+                f"No installed app matches {name!r}",
+                hint="Use the name shown under the icon on the home screen.",
+                details={"closest": closest_app_names(name, apps)},
+            )
+        return await self.launch_app(bundle_id)
 
     async def terminate_app(self, bundle_id: str) -> bool:
         return await self.wda.terminate_app(bundle_id)

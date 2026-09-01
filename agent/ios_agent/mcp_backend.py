@@ -45,6 +45,7 @@ import json
 from typing import Any, Protocol
 
 from ios_agent.verify import Attempt, Verifier
+from ios_mcp.devices.base import AppInfo, best_app_match
 
 #: Matches the digest's own estimate and both eval harnesses, so a number from
 #: this backend can be put beside one from `SessionBackend` without conversion.
@@ -128,6 +129,20 @@ class McpBackend:
 
     async def open_url(self, url: str) -> str:
         return await self._act(("open_url", url.strip().lower(), ""), "ios_open_url", {"url": url})
+
+    async def open_app(self, name: str) -> str:
+        # The server has no ios_open_app: it already exposes ios_list_apps and
+        # ios_launch_app, and the tool count is deliberately bounded. Resolving
+        # over the protocol costs one extra round trip and no model tokens.
+        payload = await self._call("ios_list_apps", {"kind": "all"})
+        rows = payload.get("apps", []) if isinstance(payload, dict) else []
+        apps = [AppInfo(bundle_id=r["bundle_id"], name=r.get("name")) for r in rows]
+        bundle = best_app_match(name, apps)
+        if bundle is None:
+            return f"No installed app matches {name!r}."
+        return await self._act(
+            ("open_app", name.strip().lower(), ""), "ios_launch_app", {"bundle_id": bundle}
+        )
 
     # -- approval ----------------------------------------------------------
 

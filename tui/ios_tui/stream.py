@@ -127,6 +127,9 @@ class EventBackend:
     async def open_url(self, url: str) -> str:
         return await self._wrap("open_url", {"url": url}, lambda: self._inner.open_url(url))
 
+    async def open_app(self, name: str) -> str:
+        return await self._wrap("open_app", {"name": name}, lambda: self._inner.open_app(name))
+
     # -- approval and stopping ---------------------------------------------
 
     def approve(self, signature: str) -> None:

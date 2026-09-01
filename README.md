@@ -101,7 +101,7 @@ observations, device tokens, cost.
 | `--inline` | run in a short region under the prompt |
 | `--no-tui` | plain lines, for a pipe |
 
-**`manual` mode needs no API key.** It drives the same eight verbs by hand,
+**`manual` mode needs no API key.** It drives the same nine verbs by hand,
 which is the fastest way to debug perception on an app nobody has pointed this
 at before.
 

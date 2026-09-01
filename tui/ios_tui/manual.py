@@ -12,7 +12,7 @@ should be one keystroke rather than one model turn.
 below the agent works without a key, and a front end that refuses to start
 without one would hide that.
 
-The parser is deliberately thin. These are the same eight verbs the agent has,
+The parser is deliberately thin. These are the same nine verbs the agent has,
 spelled the same way, so what you type by hand and what the agent does are the
 same operations and produce the same events, the same counters and the same
 audit rows.
@@ -68,6 +68,7 @@ set <value> > <target>      set a switch or slider
 scroll <up|down|left|right> [> <until>]
 press <home|back|enter|volumeup|volumedown>
 open <url>                  open a deep link
+app <name>                  open an app by name, e.g. "app Maps"
 help                        this
 """
 
@@ -107,6 +108,8 @@ def parse(line: str) -> Command:
             return Command("press_button", lambda b: b.press_button(rest, idem_key=key()))
         case "open" if rest:
             return Command("open_url", lambda b: b.open_url(rest))
+        case "app" if rest:
+            return Command("open_app", lambda b: b.open_app(rest))
         case "help" | "?":
             raise Help
         case _:
@@ -114,7 +117,7 @@ def parse(line: str) -> Command:
 
 
 #: What a bare verb can be, for suggesting a near miss.
-_VERBS = ("observe", "tap", "type", "set", "scroll", "press", "open", "help")
+_VERBS = ("observe", "tap", "type", "set", "scroll", "press", "open", "app", "help")
 
 
 def _nearest(verb: str) -> str | None:

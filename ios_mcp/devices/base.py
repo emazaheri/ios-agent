@@ -6,6 +6,7 @@ through 6 never branch on device kind.
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -98,3 +99,45 @@ class DeviceAdapter(Protocol):
     ) -> AsyncIterator[str]: ...
 
     async def teardown(self) -> None: ...
+
+
+#: Below this ratio a fuzzy app-name match is a guess rather than a match.
+_APP_FUZZY_THRESHOLD = 0.6
+
+
+def best_app_match(name: str, apps: list[AppInfo]) -> str | None:
+    """Rank installed apps against a spoken name, best first, ties broken."""
+    needle = name.strip().lower()
+    if not needle:
+        return None
+
+    def label(app: AppInfo) -> str:
+        return (app.name or "").strip().lower()
+
+    for app in apps:  # exact name, the overwhelmingly common case
+        if label(app) == needle:
+            return app.bundle_id
+    for app in apps:  # someone pasted a bundle id
+        if app.bundle_id.lower() == needle:
+            return app.bundle_id
+    partial = [a for a in apps if needle in label(a) or label(a) in needle]
+    if partial:  # shortest name containing it: "Maps" over "Maps Settings"
+        return min(partial, key=lambda a: len(label(a))).bundle_id
+    scored = [
+        (difflib.SequenceMatcher(None, needle, label(a)).ratio(), a) for a in apps if label(a)
+    ]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    if scored and scored[0][0] >= _APP_FUZZY_THRESHOLD:
+        return scored[0][1].bundle_id
+    return None
+
+
+def closest_app_names(name: str, apps: list[AppInfo]) -> list[str]:
+    needle = name.strip().lower()
+    scored = [
+        (difflib.SequenceMatcher(None, needle, (a.name or "").lower()).ratio(), a)
+        for a in apps
+        if a.name
+    ]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [f"{a.name} ({a.bundle_id})" for _, a in scored[:5]]

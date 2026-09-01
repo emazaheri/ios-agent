@@ -192,6 +192,13 @@ def build_tools(run: Run) -> list[BaseTool]:
         return await guarded("press_button", lambda: backend.press_button(name, idem_key=key))
 
     @tool
+    async def open_app(name: str) -> str:
+        """Open an app by name, for example "Maps". Use this rather than
+        hunting for its icon on the home screen."""
+        run.count()
+        return await guarded("open_app", lambda: backend.open_app(name))
+
+    @tool
     async def open_url(url: str) -> str:
         """Open a deep link, the cheapest way to reach a known screen.
 

@@ -77,6 +77,7 @@ class Backend(Protocol):
     async def scroll(self, direction: str, until: str | None, *, idem_key: str) -> str: ...
     async def press_button(self, name: str, *, idem_key: str) -> str: ...
     async def open_url(self, url: str) -> str: ...
+    async def open_app(self, name: str) -> str: ...
 
     def approve(self, signature: str) -> None: ...
 
@@ -134,6 +135,11 @@ class SessionBackend:
             attempt_key("press_button", name),
             lambda: self.session.press_button(name, idem_key=idem_key),
         )
+
+    async def open_app(self, name: str) -> str:
+        # No idempotency key for the same reason as open_url: launching an app
+        # that is already open lands on the same screen.
+        return await self._act(attempt_key("open_app", name), lambda: self.session.open_app(name))
 
     async def open_url(self, url: str) -> str:
         # `IosSession.open_url` takes no idempotency key, so this one cannot be
