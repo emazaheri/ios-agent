@@ -3,10 +3,11 @@
 **Drive an iPhone or an iOS Simulator with an AI agent.** A terminal app, an
 MCP server, and the library beneath both.
 
+[![CI](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-537%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-597%20offline-brightgreen.svg)](#development)
 
 ![ios-agent driving Settings on an iPhone simulator](docs/images/ios-agent.png)
 
