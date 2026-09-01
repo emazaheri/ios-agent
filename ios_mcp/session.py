@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from ios_mcp.actions.idempotency import IdempotencyCache
 from ios_mcp.actions.result import ActionResult, DigestDelta, diff_digests
@@ -27,6 +28,7 @@ from ios_mcp.errors import (
     ActionRejectedByPolicy,
     ActionRequiresApproval,
     ElementNotInteractable,
+    ErrorCode,
     InvalidArgument,
     IosAutomationError,
     NotSupported,
@@ -36,6 +38,7 @@ from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
 from ios_mcp.perception.roles import SETTABLE_ROLES
 from ios_mcp.policy.audit import AuditTrail
+from ios_mcp.policy.faults import Fault, classify
 from ios_mcp.policy.gate import PolicyGate, Verdict
 from ios_mcp.policy.redact import Redactor
 from ios_mcp.policy.secrets import resolve_secret
@@ -51,6 +54,11 @@ ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool]]
 _SCROLL_FRACTION = 0.6
 #: Below this identity overlap the screen is a new one, so send a full digest.
 _DELTA_OVERLAP_THRESHOLD = 0.5
+#: Error details worth keeping in the trail. Everything else, notably the
+#: whole-screen ``visible`` summary, is dropped before recording.
+_AUDITED_DETAIL_KEYS = frozenset(
+    {"closest", "candidates", "known_refs", "ref", "signature", "best_score"}
+)
 
 
 class IosSession:
@@ -287,48 +295,49 @@ class IosSession:
         ``until`` is bounded by ``max_scrolls`` and stops early when the screen
         stops changing, so a list that has reached its end does not spin.
         """
-        started = time.monotonic()
-        cached = self.idempotency.get(idem_key)
-        if cached is not None:
-            return _from_cache(cached)
+        async with self._auditing("scroll", {"direction": direction, "until": until}):
+            started = time.monotonic()
+            cached = self.idempotency.get(idem_key)
+            if cached is not None:
+                return _from_cache(cached)
 
-        before = await self.snapshot()
-        area = await self._scroll_area(before, ref=ref, target=target)
+            before = await self.snapshot()
+            area = await self._scroll_area(before, ref=ref, target=target)
 
-        found = False
-        scrolls = 0
-        digest = before
-        for _ in range(max_scrolls if until else 1):
-            previous_fp = digest.fingerprint
-            await self._swipe_within(area, direction)
-            outcome = await settle(self.snapshot, self.settings.stabilize)
-            digest = outcome.digest
-            scrolls += 1
-            if until and _contains_text(digest, until):
-                found = True
-                break
-            if until and digest.fingerprint == previous_fp:
-                break  # reached the end of the content
+            found = False
+            scrolls = 0
+            digest = before
+            for _ in range(max_scrolls if until else 1):
+                previous_fp = digest.fingerprint
+                await self._swipe_within(area, direction)
+                outcome = await settle(self.snapshot, self.settings.stabilize)
+                digest = outcome.digest
+                scrolls += 1
+                if until and _contains_text(digest, until):
+                    found = True
+                    break
+                if until and digest.fingerprint == previous_fp:
+                    break  # reached the end of the content
 
-        note = None
-        if until:
-            note = (
-                f"found {until!r} after {scrolls} scroll(s)"
-                if found
-                else f"{until!r} not found after {scrolls} scroll(s); the list may have ended"
+            note = None
+            if until:
+                note = (
+                    f"found {until!r} after {scrolls} scroll(s)"
+                    if found
+                    else f"{until!r} not found after {scrolls} scroll(s); the list may have ended"
+                )
+
+            result = await self._finish(
+                "scroll",
+                before,
+                digest,
+                target=None,
+                started=started,
+                args={"direction": direction, "until": until},
+                note=note,
             )
-
-        result = await self._finish(
-            "scroll",
-            before,
-            digest,
-            target=None,
-            started=started,
-            args={"direction": direction, "until": until},
-            note=note,
-        )
-        self.idempotency.put(idem_key, result)
-        return result
+            self.idempotency.put(idem_key, result)
+            return result
 
     async def swipe(
         self,
@@ -338,25 +347,28 @@ class IosSession:
         target: str | None = None,
         idem_key: str | None = None,
     ) -> ActionResult:
-        started = time.monotonic()
-        cached = self.idempotency.get(idem_key)
-        if cached is not None:
-            return _from_cache(cached)
+        async with self._auditing("swipe", {"direction": direction}):
+            started = time.monotonic()
+            cached = self.idempotency.get(idem_key)
+            if cached is not None:
+                return _from_cache(cached)
 
-        before = await self.snapshot()
-        area = await self._scroll_area(before, ref=ref, target=target)
-        await self._swipe_within(area, direction)
-        outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
-        result = await self._finish(
-            "swipe",
-            before,
-            outcome.digest,
-            target=None,
-            started=started,
-            args={"direction": direction},
-        )
-        self.idempotency.put(idem_key, result)
-        return result
+            before = await self.snapshot()
+            area = await self._scroll_area(before, ref=ref, target=target)
+            await self._swipe_within(area, direction)
+            outcome = await settle(
+                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
+            )
+            result = await self._finish(
+                "swipe",
+                before,
+                outcome.digest,
+                target=None,
+                started=started,
+                args={"direction": direction},
+            )
+            self.idempotency.put(idem_key, result)
+            return result
 
     async def drag(
         self,
@@ -366,28 +378,31 @@ class IosSession:
         duration_s: float = 0.6,
         idem_key: str | None = None,
     ) -> ActionResult:
-        started = time.monotonic()
-        cached = self.idempotency.get(idem_key)
-        if cached is not None:
-            return _from_cache(cached)
+        async with self._auditing("drag", {"from_ref": from_ref, "to_ref": to_ref}):
+            started = time.monotonic()
+            cached = self.idempotency.get(idem_key)
+            if cached is not None:
+                return _from_cache(cached)
 
-        before = await self.snapshot()
-        source = self.resolve(before, ref=from_ref)
-        destination = self.resolve(before, ref=to_ref, actionable_only=False)
-        sx, sy = source.point
-        dx, dy = destination.point
-        await self.wda.drag(sx, sy, dx, dy, duration_s)
-        outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
-        result = await self._finish(
-            "drag",
-            before,
-            outcome.digest,
-            target=source,
-            started=started,
-            args={"from_ref": from_ref, "to_ref": to_ref},
-        )
-        self.idempotency.put(idem_key, result)
-        return result
+            before = await self.snapshot()
+            source = self.resolve(before, ref=from_ref)
+            destination = self.resolve(before, ref=to_ref, actionable_only=False)
+            sx, sy = source.point
+            dx, dy = destination.point
+            await self.wda.drag(sx, sy, dx, dy, duration_s)
+            outcome = await settle(
+                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
+            )
+            result = await self._finish(
+                "drag",
+                before,
+                outcome.digest,
+                target=source,
+                started=started,
+                args={"from_ref": from_ref, "to_ref": to_ref},
+            )
+            self.idempotency.put(idem_key, result)
+            return result
 
     async def press_button(self, name: str, *, idem_key: str | None = None) -> ActionResult:
         """Press a hardware button or a keyboard key.
@@ -429,18 +444,21 @@ class IosSession:
     async def handle_alert(
         self, action: Literal["accept", "dismiss"], button: str | None = None
     ) -> ActionResult:
-        started = time.monotonic()
-        before = await self.snapshot()
-        await self.wda.handle_alert(action, button)
-        outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
-        return await self._finish(
-            f"handle_alert:{action}",
-            before,
-            outcome.digest,
-            target=None,
-            started=started,
-            args={"action": action, "button": button},
-        )
+        async with self._auditing(f"handle_alert:{action}", {"button": button}):
+            started = time.monotonic()
+            before = await self.snapshot()
+            await self.wda.handle_alert(action, button)
+            outcome = await settle(
+                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
+            )
+            return await self._finish(
+                f"handle_alert:{action}",
+                before,
+                outcome.digest,
+                target=None,
+                started=started,
+                args={"action": action, "button": button},
+            )
 
     async def wait_for(
         self,
@@ -472,48 +490,54 @@ class IosSession:
             started=started,
             args={"condition": condition, "absent": absent},
             note=note,
+            ok=met,
+            code=None if met else ErrorCode.TIMEOUT.value,
+            error=None if met else note,
         )
-        result.ok = met
         return result
 
     # -- app control -------------------------------------------------------
 
     async def launch_app(self, bundle_id: str, *, fresh: bool = False) -> ActionResult:
-        self.gate.check_running()
-        self.gate.check_app(bundle_id)
-        started = time.monotonic()
-        before = self._last_digest
-        await self.wda.launch_app(bundle_id, fresh=fresh)
-        outcome = await settle(self.snapshot, self.settings.stabilize)
-        return await self._finish(
-            f"launch_app:{bundle_id}",
-            before,
-            outcome.digest,
-            target=None,
-            started=started,
-            args={"bundle_id": bundle_id, "fresh": fresh},
-        )
+        async with self._auditing(
+            f"launch_app:{bundle_id}", {"bundle_id": bundle_id, "fresh": fresh}
+        ):
+            self.gate.check_running()
+            self.gate.check_app(bundle_id)
+            started = time.monotonic()
+            before = self._last_digest
+            await self.wda.launch_app(bundle_id, fresh=fresh)
+            outcome = await settle(self.snapshot, self.settings.stabilize)
+            return await self._finish(
+                f"launch_app:{bundle_id}",
+                before,
+                outcome.digest,
+                target=None,
+                started=started,
+                args={"bundle_id": bundle_id, "fresh": fresh},
+            )
 
     async def terminate_app(self, bundle_id: str) -> bool:
         return await self.wda.terminate_app(bundle_id)
 
     async def open_url(self, url: str) -> ActionResult:
         """Deep links skip navigation entirely and are the cheapest way to arrive."""
-        started = time.monotonic()
-        before = self._last_digest
-        if self.lease.device.kind == "simulator":
-            await self.lease.adapter.open_url(url)
-        else:
-            await self.wda.open_url(url)
-        outcome = await settle(self.snapshot, self.settings.stabilize)
-        return await self._finish(
-            "open_url",
-            before,
-            outcome.digest,
-            target=None,
-            started=started,
-            args={"url": url},
-        )
+        async with self._auditing("open_url", {"url": url}):
+            started = time.monotonic()
+            before = self._last_digest
+            if self.lease.device.kind == "simulator":
+                await self.lease.adapter.open_url(url)
+            else:
+                await self.wda.open_url(url)
+            outcome = await settle(self.snapshot, self.settings.stabilize)
+            return await self._finish(
+                "open_url",
+                before,
+                outcome.digest,
+                target=None,
+                started=started,
+                args={"url": url},
+            )
 
     async def app_state(self, bundle_id: str) -> int:
         return await self.wda.app_state(bundle_id)
@@ -607,8 +631,11 @@ class IosSession:
             raise
 
         # Approval is requested before the action, while it is still
-        # preventable, rather than reported after the fact.
-        await self._require_approval(name, resolved, text=policy_text)
+        # preventable, rather than reported after the fact. The refusal is
+        # audited: a trail that omits the actions a human declined cannot
+        # answer the one question it exists for.
+        async with self._auditing(name, args):
+            await self._require_approval(name, resolved, text=policy_text)
 
         recovered_before = self.wda.recovered_count
         try:
@@ -657,9 +684,62 @@ class IosSession:
             )
         self.gate.approve(signature)
 
+    @asynccontextmanager
+    async def _auditing(self, action: str, args: dict[str, Any]) -> AsyncIterator[None]:
+        """Record a failure raised anywhere inside, then let it through.
+
+        Scrolls, swipes, drags, alerts and app launches never pass through
+        ``_act``, so without this the trail stayed silent about every way they
+        can fail. It deliberately does not wrap ``_act`` itself, which records
+        its own failures and would otherwise record them twice.
+        """
+        try:
+            yield
+        except IosAutomationError as exc:
+            self._record_failure(action, args, exc)
+            raise
+
     def _record_failure(self, action: str, args: dict[str, Any], exc: IosAutomationError) -> None:
-        self.audit.record(action, args, ok=False, error=str(exc))
-        self.gate.record_failure()
+        """Write the failure to the trail, with the cause as a field.
+
+        ``code`` is stored rather than left to be parsed back out of the
+        formatted message, which is what reading the trail used to require.
+
+        A policy refusal is recorded but never counted toward the halt.
+        ``max_consecutive_failures`` bounds an agent thrashing at a device, and
+        the gate saying no is the system working. Halting a session because the
+        operator declined three times would be a safety bug wearing the costume
+        of a safety feature.
+        """
+        entry = self.audit.record(
+            action,
+            args,
+            ok=False,
+            error=str(exc),
+            code=exc.code.value,
+            details=self._audit_details(exc),
+        )
+        if classify(entry) is not Fault.POLICY:
+            self.gate.record_failure()
+
+    def _audit_details(self, exc: IosAutomationError) -> dict[str, Any] | None:
+        """The part of an error's details worth keeping, redacted.
+
+        Only the keys that say something about *why* the action failed are
+        kept. ``visible`` is dropped deliberately: it is a summary of the whole
+        screen, so storing it would balloon every trail, and its absence is
+        itself the signal that the screen offered nothing matchable.
+
+        Redaction happens here rather than at the server boundary because the
+        trail is also written straight to disk, where nothing else would strip
+        the on-screen text these details carry.
+        """
+        if not exc.details:
+            return None
+        kept = {k: v for k, v in exc.details.items() if k in _AUDITED_DETAIL_KEYS}
+        if not kept:
+            return None
+        return cast("dict[str, Any]", self.redactor.payload(kept))
 
     async def _finish(
         self,
@@ -672,6 +752,9 @@ class IosSession:
         args: dict[str, Any] | None = None,
         note: str | None = None,
         recovered: bool = False,
+        ok: bool = True,
+        code: str | None = None,
+        error: str | None = None,
     ) -> ActionResult:
         """Record the new screen, write the audit entry, and shape the result.
 
@@ -691,21 +774,25 @@ class IosSession:
             delta = diff_digests(before, after)
             digest = None  # the delta already says everything that changed
 
-        self.gate.record_success()
+        if ok:
+            self.gate.record_success()
         elapsed_ms = int((time.monotonic() - started) * 1000)
         self.audit.record(
             name,
             args or {},
-            ok=True,
+            ok=ok,
             resolved_via=target.resolved_via if target else None,
             target=target.describe if target else None,
             fingerprint=after.fingerprint,
             screen_changed=changed,
             elapsed_ms=elapsed_ms,
+            error=error,
+            code=code,
+            recovered=recovered or None,
         )
         return ActionResult(
             action=name,
-            ok=True,
+            ok=ok,
             screen_changed=changed,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             target=target,

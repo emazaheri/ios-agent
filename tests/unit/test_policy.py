@@ -234,3 +234,52 @@ def test_the_trail_writes_json(tmp_path) -> None:
     path = trail.write(tmp_path / "sub" / "trace.json")
     assert path.exists()
     assert '"steps"' in path.read_text()
+
+
+def test_the_trail_attributes_its_failures() -> None:
+    """A count of failures does not say which of three fixes is needed."""
+    trail = AuditTrail()
+    trail.record("tap", {"ref": "e1"}, ok=True, resolved_via="exact")
+    trail.record("tap", {"target": "Send"}, ok=False, code="runner_crashed", error="boom")
+    trail.record("tap", {"target": "Ghost"}, ok=False, code="element_not_found", error="nope")
+    trail.record("launch_app:x", {}, ok=False, code="app_not_allowed", error="no")
+
+    summary = trail.summary()
+    assert summary["faults"] == {"device": 1, "perception": 1, "policy": 1}
+    assert sum(summary["faults"].values()) == summary["failures"]
+
+
+def test_an_absorbed_device_fault_is_reported_beside_the_histogram() -> None:
+    """A recovered action succeeded, so it cannot go in a sum over failures.
+
+    It still says the device misbehaved, which is worth knowing.
+    """
+    trail = AuditTrail()
+    trail.record("tap", {"ref": "e1"}, ok=True, recovered=True)
+    trail.record("tap", {"ref": "e2"}, ok=True)
+
+    summary = trail.summary()
+    assert summary["absorbed_device_faults"] == 1
+    assert summary["faults"] == {}
+
+
+def test_an_entry_carries_the_cause_as_a_field() -> None:
+    """Reading the trail used to mean parsing '[code]' back out of a string."""
+    trail = AuditTrail()
+    entry = trail.record(
+        "tap",
+        {"target": "Ghost"},
+        ok=False,
+        error="[element_not_found] Nothing on screen matches 'Ghost'",
+        code="element_not_found",
+        details={"closest": ["e3: button 'Wi-Fi'"]},
+    )
+    assert entry.code == "element_not_found"
+    assert entry.to_dict()["details"] == {"closest": ["e3: button 'Wi-Fi'"]}
+
+
+def test_a_plain_entry_gains_no_new_keys() -> None:
+    """Every existing consumer must see byte-identical output."""
+    trail = AuditTrail()
+    entry = trail.record("tap", {"ref": "e1"}, ok=True, resolved_via="exact")
+    assert set(entry.to_dict()) == {"seq", "at", "action", "args", "ok", "resolved_via"}

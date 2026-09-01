@@ -266,3 +266,110 @@ async def test_audit_entries_carry_what_the_action_did() -> None:
     assert entry.args["until"] == "Bluetooth"
     assert entry.elapsed_ms is not None
     assert entry.fingerprint
+
+
+# -- what the trail can now answer ------------------------------------------
+
+
+async def test_a_declined_action_reaches_the_trail() -> None:
+    """A record of what a session did that omits what a human stopped is not
+    a record of what the session did."""
+    session, fake, _ = make_session(form_screen())
+    await session.observe()
+
+    with pytest.raises(ActionRequiresApproval):
+        await session.tap(target="Send")
+
+    entry = session.audit.failures[-1]
+    assert entry.action == "tap"
+    assert entry.code == "action_requires_approval"
+    assert fake.taps() == []
+
+
+async def test_a_refusal_never_counts_toward_the_halt() -> None:
+    """Halting because the operator said no would be a safety bug."""
+    session, _, _ = make_session(form_screen())
+    await session.observe()
+
+    for _ in range(session.settings.policy.max_consecutive_failures + 2):
+        with pytest.raises(ActionRequiresApproval):
+            await session.tap(target="Send")
+
+    assert session.gate.consecutive_failures == 0
+    assert not session.halted
+
+
+async def test_a_blocked_launch_is_recorded_with_its_code() -> None:
+    session, _, _ = make_session(settings_screen())
+    with pytest.raises(AppNotAllowed):
+        await session.launch_app("com.apple.Passbook")
+
+    entry = session.audit.failures[-1]
+    assert entry.code == "app_not_allowed"
+    assert session.audit.summary()["faults"] == {"policy": 1}
+
+
+async def test_a_wait_that_times_out_is_not_recorded_as_a_success() -> None:
+    """_finish used to hardcode ok=True, so an unmet wait looked like one, and
+    worse, reset the consecutive-failure counter on its way past."""
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    result = await session.wait_for("Nothing Like This", timeout_s=0.1)
+
+    assert not result.ok
+    entry = next(e for e in session.audit.entries if e.action == "wait_for")
+    assert not entry.ok
+    assert entry.code == "timeout"
+    assert session.audit.summary()["faults"] == {"model": 1}
+
+
+async def test_a_wait_that_times_out_does_not_clear_earlier_failures() -> None:
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    with pytest.raises(Exception):  # noqa: B017
+        await session.tap(target="Nonexistent Thing")
+    before = session.gate.consecutive_failures
+    await session.wait_for("Nothing Like This", timeout_s=0.1)
+
+    assert session.gate.consecutive_failures == before
+
+
+async def test_a_resolution_failure_records_what_it_could_see() -> None:
+    """The candidates are the discriminator between a digest that showed
+    nothing and a model that named the wrong thing."""
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    with pytest.raises(Exception):  # noqa: B017
+        await session.tap(target="Nonexistent Thing")
+
+    entry = session.audit.failures[-1]
+    assert entry.details is not None
+    assert entry.details["closest"]
+    assert "visible" not in entry.details, "the whole screen must not enter the trail"
+    assert session.audit.summary()["faults"] == {"model": 1}
+
+
+async def test_details_are_redacted_before_they_are_stored() -> None:
+    """The trail is written straight to disk by the front end, so redacting at
+    the server boundary would be too late."""
+    screen = node(
+        "Application",
+        label="Mail",
+        h=852,
+        children=[
+            node("Button", label="someone@example.com", y=120, h=44),
+            node("Button", label="Compose", y=200, h=44),
+        ],
+    )
+    session, _, _ = make_session(screen)
+    await session.observe()
+
+    with pytest.raises(Exception):  # noqa: B017
+        await session.tap(target="Nonexistent Thing")
+
+    stored = str(session.audit.failures[-1].details)
+    assert "someone@example.com" not in stored
+    assert "[redacted]" in stored

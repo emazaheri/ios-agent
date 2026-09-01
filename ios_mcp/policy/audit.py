@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ios_mcp.policy.faults import attribute
+
 
 @dataclass(slots=True)
 class AuditEntry:
@@ -27,6 +29,9 @@ class AuditEntry:
     screen_changed: bool | None = None
     elapsed_ms: int | None = None
     error: str | None = None
+    code: str | None = None
+    details: dict[str, Any] | None = None
+    recovered: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
@@ -49,6 +54,9 @@ class AuditTrail:
         screen_changed: bool | None = None,
         elapsed_ms: int | None = None,
         error: str | None = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        recovered: bool | None = None,
     ) -> AuditEntry:
         entry = AuditEntry(
             seq=len(self.entries) + 1,
@@ -62,6 +70,9 @@ class AuditTrail:
             screen_changed=screen_changed,
             elapsed_ms=elapsed_ms,
             error=error,
+            code=code,
+            details=details,
+            recovered=recovered,
         )
         self.entries.append(entry)
         return entry
@@ -80,6 +91,14 @@ class AuditTrail:
             "failures": len(self.failures),
             "duration_s": round(time.time() - self.started_at, 1),
             "resolution_tiers": by_tier,
+            # Which failures were whose. Sums to "failures", which is what
+            # makes it readable at a glance.
+            "faults": attribute(self.entries),
+            # A device fault the auto-heal absorbed. Kept out of the histogram
+            # above precisely so that sum holds: the action succeeded, and a
+            # session that recovered from four runner crashes is still not a
+            # healthy one.
+            "absorbed_device_faults": sum(1 for e in self.entries if e.ok and e.recovered),
         }
 
     def to_dict(self) -> dict[str, Any]:
