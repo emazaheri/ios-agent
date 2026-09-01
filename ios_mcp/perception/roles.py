@@ -31,7 +31,14 @@ ROLE_MAP: dict[str, str] = {
     "DatePicker": "datepicker",
     "Cell": "cell",
     "Image": "image",
-    "Icon": "image",
+    # Not an image. `XCUIElementTypeIcon` is what SpringBoard uses for a home
+    # screen app icon: labelled with the app's name and there to be tapped.
+    # Folding it into "image" made every icon decoration, because the
+    # drawn-control rule only rescues an image that is *unlabelled*. The
+    # visible effect was that the agent could not launch an app by tapping it,
+    # on any device, and no eval noticed because every task starts inside an
+    # app that something else opened.
+    "Icon": "icon",
     "Alert": "alert",
     "Sheet": "sheet",
     "Menu": "menu",
@@ -67,6 +74,7 @@ INTERACTIVE_ROLES: frozenset[str] = frozenset(
         "datepicker",
         "cell",
         "menuitem",
+        "icon",
         "checkbox",
         "radio",
         "key",
