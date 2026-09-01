@@ -66,6 +66,10 @@ BANNER_SMALL = """\
 #: reads as a rendering fault, where a line of text reads as a line of text.
 BANNER_NARROW = "ios-agent"
 
+#: Rows kept clear beneath the drawing: the subtitle, the goal, and enough of
+#: the run to see that something is happening.
+_BANNER_HEADROOM = 8
+
 #: Verbs that changed the device get one colour, reads another. A transcript
 #: where everything looks the same is a log, not a view.
 _ACTING = {"tap", "type_text", "set_value", "scroll", "press_button", "open_url"}
@@ -517,10 +521,18 @@ class Transcript(SelectableLog):
         away more than it has to.
         """
         width = self.size.width or 80
+        height = self.size.height or 24
         for art in (BANNER, BANNER_SMALL):
-            if width < len(art.splitlines()[0]) + 2:
+            lines = art.splitlines()
+            if width < len(lines[0]) + 2:
                 continue
-            rows = [Text(line, style="dim cyan") for line in art.splitlines()]
+            # Height matters as much as width. A drawing taller than the pane
+            # can hold alongside a few rows of transcript is scrolled off the
+            # moment anything is written, so the reader sees its bottom half
+            # and nothing that looks deliberate about it.
+            if height < len(lines) + _BANNER_HEADROOM:
+                continue
+            rows = [Text(line, style="dim cyan") for line in lines]
             rows.append(Text(f"  {subtitle}", style="dim"))
             return rows
 

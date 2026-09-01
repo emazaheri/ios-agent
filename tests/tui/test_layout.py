@@ -546,3 +546,29 @@ async def test_the_wordmark_picks_the_largest_drawing_that_fits(width: int, expe
         pane = transcript.size.width
         widest = max((strip.cell_length for strip in transcript.lines), default=0)
         assert widest <= pane, f"the wordmark is {widest} wide in a {pane}-column pane"
+
+
+async def test_a_short_pane_gets_the_smaller_drawing() -> None:
+    """A drawing taller than the pane is scrolled off the moment anything is
+    written, leaving its bottom half on screen and nothing that reads as
+    deliberate. Width is not the only thing that has to fit."""
+    tall = _app()
+    async with tall.run_test(size=(120, 40)) as pilot:
+        await _ready(tall)
+        transcript = tall.query_one(Transcript)
+        transcript.clear()
+        transcript.banner("sub")
+        await pilot.pause()
+        drawn = "\n".join(strip.text for strip in transcript.lines)
+        assert BANNER.splitlines()[3] in drawn
+
+    short = _app()
+    async with short.run_test(size=(120, 26)) as pilot:
+        await _ready(short)
+        transcript = short.query_one(Transcript)
+        transcript.clear()
+        transcript.banner("sub")
+        await pilot.pause()
+        drawn = "\n".join(strip.text for strip in transcript.lines)
+        assert BANNER.splitlines()[3] not in drawn, "the tall drawing does not fit"
+        assert BANNER_SMALL.splitlines()[3] in drawn
