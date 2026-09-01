@@ -228,8 +228,8 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 418 tests, no device, no model
-uv run pytest tests/tui           # 159 tests, the terminal front end
+uv run pytest tests/unit          # 419 tests, no device, no model
+uv run pytest tests/tui           # 175 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui

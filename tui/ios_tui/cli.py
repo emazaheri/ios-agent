@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from ios_mcp.config import Settings, set_settings
+from ios_mcp.policy.audit import AuditEntry
 
 #: Subcommands. Anything else in the first position is treated as a goal, so
 #: `ios-agent "turn on bold text"` keeps working without the verb.
@@ -105,6 +106,19 @@ def _normalise(argv: list[str]) -> list[str]:
     if any(token in _COMMANDS for token in argv):
         return argv
     return ["run", *argv]
+
+
+def trail_row(entry: AuditEntry) -> str:
+    """One line of the "what it did" table.
+
+    A failed entry and an action that changed nothing otherwise render
+    identically, which is the ambiguity `ios_agent.verify` exists for. The
+    trail now records failures raised outside `_act`, so without the code here
+    a refused launch would read as a launch that did nothing.
+    """
+    target = entry.target or entry.args.get("url") or entry.args.get("bundle_id") or ""
+    outcome = f"changed={entry.screen_changed}" if entry.ok else f"FAILED {entry.code or 'unknown'}"
+    return f"    {entry.seq:>2}. {entry.action:<12} {str(target)[:40]:<40} {outcome}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -318,10 +332,14 @@ async def _run_plain(settings: Settings, args: argparse.Namespace) -> int:
         print("\n  what it did")
         for entry in session.audit.entries[before:]:
             target = entry.target or entry.args.get("url") or entry.args.get("bundle_id") or ""
-            print(
-                f"    {entry.seq:>2}. {entry.action:<12} "
-                f"{str(target)[:40]:<40} changed={entry.screen_changed}"
-            )
+            # A failed row and a row that changed nothing are the same shape
+            # otherwise, which is the ambiguity the verifier exists for. The
+            # trail now records failures raised outside `_act`, so without the
+            # code here a refused launch reads as a launch that did nothing.
+            outcome_text = f"changed={entry.screen_changed}"
+            if not entry.ok:
+                outcome_text = f"FAILED {entry.code or 'unknown'}"
+            print(f"    {entry.seq:>2}. {entry.action:<12} {str(target)[:40]:<40} {outcome_text}")
 
         print("\n  the screen it ended on")
         for line in runner.last_screen.splitlines()[:20]:

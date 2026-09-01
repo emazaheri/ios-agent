@@ -204,6 +204,11 @@ def _resolve_text(
         ),
         details={
             "closest": [f"{n.ref}: {n.role} {n.label!r}" for _, n in scored[:5]],
+            # How near the nearest miss was. Recorded because attribution
+            # currently splits on whether there were any candidates at all,
+            # and a name that scored 0.71 against a real element is a
+            # different failure from one that scored 0.1.
+            "best_score": round(scored[0][0], 2) if scored else 0.0,
             "visible": _summary(digest.nodes),
         },
     )

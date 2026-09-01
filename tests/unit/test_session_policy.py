@@ -373,3 +373,17 @@ async def test_details_are_redacted_before_they_are_stored() -> None:
     stored = str(session.audit.failures[-1].details)
     assert "someone@example.com" not in stored
     assert "[redacted]" in stored
+
+
+async def test_a_near_miss_records_how_near_it_was() -> None:
+    """Attribution splits on whether there were candidates at all. The score
+    is what a finer split would need, and it costs nothing to record now."""
+    session, _, _ = make_session(settings_screen())
+    await session.observe()
+
+    with pytest.raises(Exception):  # noqa: B017
+        await session.tap(target="Wireless")
+
+    details = session.audit.failures[-1].details
+    assert details is not None
+    assert 0.0 < details["best_score"] < 1.0

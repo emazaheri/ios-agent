@@ -8,7 +8,9 @@ without either of them swallowing a real subcommand.
 from __future__ import annotations
 
 import pytest
-from ios_tui.cli import _normalise, build_parser
+from ios_tui.cli import _normalise, build_parser, trail_row
+
+from ios_mcp.policy.audit import AuditEntry
 
 
 @pytest.mark.parametrize(
@@ -72,3 +74,37 @@ def test_the_plain_front_end_still_needs_a_goal() -> None:
     from ios_tui.cli import main
 
     assert main(["--no-tui"]) == 2
+
+
+# -- the trail table --------------------------------------------------------
+
+
+def _entry(**kwargs) -> AuditEntry:
+    fields = {"seq": 1, "at": 0.0, "action": "tap", "args": {}, "ok": True}
+    return AuditEntry(**{**fields, **kwargs})
+
+
+def test_a_successful_row_reports_whether_the_screen_moved() -> None:
+    row = trail_row(_entry(target="Wi-Fi", screen_changed=True))
+    assert "tap" in row
+    assert "Wi-Fi" in row
+    assert "changed=True" in row
+
+
+def test_a_failed_row_says_so_rather_than_looking_idle() -> None:
+    """Without this a refused launch reads as a launch that changed nothing,
+    which is the one thing the table exists to tell apart."""
+    row = trail_row(_entry(action="launch_app:x", ok=False, code="app_not_allowed"))
+    assert "FAILED" in row
+    assert "app_not_allowed" in row
+    assert "changed=" not in row
+
+
+def test_a_failure_from_before_codes_were_recorded_still_renders() -> None:
+    row = trail_row(_entry(ok=False, code=None))
+    assert "FAILED unknown" in row
+
+
+def test_a_row_falls_back_to_the_argument_when_nothing_was_resolved() -> None:
+    row = trail_row(_entry(action="open_url", args={"url": "App-prefs:root"}))
+    assert "App-prefs:root" in row
