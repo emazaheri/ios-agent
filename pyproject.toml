@@ -5,6 +5,25 @@ description = "MCP server that lets AI agents drive iOS devices and simulators v
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [{ name = "Ehsan Mazaheri" }]
+keywords = ["mcp", "ios", "iphone", "simulator", "agent", "llm", "automation", "xcuitest"]
+# macOS only, and stated up front: this builds on Xcode, simctl and
+# WebDriverAgent. A pip install that succeeds on Linux and then cannot do
+# anything is a worse first impression than a clear platform classifier.
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+
 dependencies = [
     "fastmcp>=3.0.0",
     "httpx>=0.28",
@@ -56,12 +75,41 @@ dev = [
     "ios-tui",
 ]
 
+[project.urls]
+Homepage = "https://github.com/emazaheri/ios-agent"
+Repository = "https://github.com/emazaheri/ios-agent"
+Issues = "https://github.com/emazaheri/ios-agent/issues"
+Documentation = "https://github.com/emazaheri/ios-agent#readme"
+Changelog = "https://github.com/emazaheri/ios-agent/releases"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ios_mcp"]
+
+# An allow-list, not exclusions. A source distribution defaults to "everything
+# in the directory", which here meant the private notes under .claude/, a
+# 2.6 MB docs/images, and scripts that are not part of the package. Naming what
+# ships is the only version of this that stays correct as the tree grows.
+[tool.hatch.build.targets.sdist]
+include = [
+    "ios_mcp",
+    "pyproject.toml",
+    "server.json",
+    "README.md",
+    "LICENSE",
+    "SAFETY.md",
+    "SECURITY.md",
+    "ARCHITECTURE.md",
+    ".env.example",
+    "docs/real-device-setup.md",
+    "docs/tool-reference.md",
+    "docs/adr",
+    "scripts/prepare_wda.sh",
+    "scripts/start_tunnel.sh",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
