@@ -9,6 +9,7 @@ round-trip cost for latency-critical steps.
 from __future__ import annotations
 
 import logging
+from importlib import metadata
 
 from fastmcp import FastMCP
 
@@ -39,12 +40,22 @@ Never guess coordinates when a ref exists. Never retype a password into
 """
 
 
+def _version() -> str:
+    """This package's version, or a placeholder when it is not installed."""
+    try:
+        return metadata.version("ios-mcp")
+    except metadata.PackageNotFoundError:  # running from a source checkout
+        return "0.0.0+unknown"
+
+
 def build_server(settings: Settings | None = None) -> FastMCP:
     """Construct the MCP server with every tool module registered."""
     cfg = settings or get_settings()
     ctx = ServerContext(cfg)
 
-    mcp: FastMCP = FastMCP(name="ios-automation", instructions=INSTRUCTIONS)
+    # Without a version FastMCP reports its own, so a client asking what it is
+    # talking to was told "4.0.0", which is the framework rather than this.
+    mcp: FastMCP = FastMCP(name="ios-automation", version=_version(), instructions=INSTRUCTIONS)
 
     from ios_mcp.server import (
         resources,

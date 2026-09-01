@@ -255,3 +255,13 @@ async def test_the_trace_records_what_the_session_did(server_with_session) -> No
 
     assert trace["summary"]["steps"] == 1
     assert trace["steps"][0]["action"] == "tap"
+
+
+def test_the_server_reports_its_own_version_not_the_frameworks() -> None:
+    """Without a version FastMCP reports its own, so a client asking what it
+    was talking to was told "4.0.0", which is the framework."""
+    from importlib import metadata
+
+    server = build_server(Settings())
+    assert server.version == metadata.version("ios-mcp")
+    assert not server.version.startswith("4."), "that is FastMCP's version"
