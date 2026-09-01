@@ -53,7 +53,7 @@ if [ "$TARGET" = "simulator" ]; then
 else
   # The team must come from a provisioning profile, not from the signing
   # certificate's name. On a free personal team those are different strings
-  # (cert "Apple Development: you (8GCJFTF6MK)" against team QPYD2D7U3F), and
+  # (cert "Apple Development: you (ABCDE12345)" against team FGHIJ67890), and
   # passing the certificate's one makes xcodebuild report "No Account for Team".
   #
   # `|| true` throughout: grep exits non-zero when it finds nothing, and under

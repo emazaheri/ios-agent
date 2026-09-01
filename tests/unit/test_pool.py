@@ -22,7 +22,7 @@ def sim(name: str, state: str = "Shutdown", udid: str | None = None) -> DeviceIn
     )
 
 
-def phone(name: str = "Ehsan's iPhone", ready: bool = True) -> DeviceInfo:
+def phone(name: str = "Test iPhone", ready: bool = True) -> DeviceInfo:
     return DeviceInfo(
         udid="00008120-REAL",
         name=name,
@@ -159,7 +159,7 @@ async def test_a_network_device_is_discovered_when_goios_is_blind(
         return [
             DevicectlDevice(
                 udid="UDID-WIFI",
-                name="Ehsan's iPhone",
+                name="Test iPhone",
                 os_version="26.6",
                 model="iPhone18,2",
                 transport="network",
@@ -188,7 +188,7 @@ async def test_goios_wins_when_both_sources_see_a_device(settings: Settings, mon
         return [
             DeviceInfo(
                 udid="SHARED",
-                name="Ehsan's iPhone",
+                name="Test iPhone",
                 os_version="26.6",
                 kind="device",
                 state="connected",
@@ -200,7 +200,7 @@ async def test_goios_wins_when_both_sources_see_a_device(settings: Settings, mon
         return [
             DevicectlDevice(
                 udid="SHARED",
-                name="Ehsan's iPhone",
+                name="Test iPhone",
                 os_version="26.6",
                 model=None,
                 transport="network",

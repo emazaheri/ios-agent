@@ -39,7 +39,7 @@ COLD_SIM = DeviceInfo(
 )
 PHONE = DeviceInfo(
     udid="phone",
-    name="Ehsan's iPhone",
+    name="Test iPhone",
     os_version="26.6",
     kind="device",
     state="connected",

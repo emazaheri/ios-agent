@@ -10,11 +10,11 @@ from ios_mcp.devices.devicectl import _parse, _transport
 def entry(**overrides) -> dict:
     base = {
         "hardwareProperties": {
-            "udid": "00008150-0011648C2150C01C",
+            "udid": "00008030-0011223344556677",
             "productType": "iPhone18,2",
             "platform": "iOS",
         },
-        "deviceProperties": {"name": "Ehsan's iPhone", "osVersionNumber": "26.6"},
+        "deviceProperties": {"name": "Test iPhone", "osVersionNumber": "26.6"},
         "connectionProperties": {
             "transportType": "localNetwork",
             "pairingState": "paired",
@@ -29,7 +29,7 @@ def entry(**overrides) -> dict:
 def test_a_network_device_is_parsed_and_marked_as_such() -> None:
     device = _parse(entry())
     assert device is not None
-    assert device.name == "Ehsan's iPhone"
+    assert device.name == "Test iPhone"
     assert device.os_version == "26.6"
     assert device.transport == "network"
     assert device.is_wired is False
@@ -81,4 +81,4 @@ def test_ipados_counts_as_drivable() -> None:
 def test_a_missing_name_falls_back_to_the_udid() -> None:
     device = _parse(entry(deviceProperties={"name": None}))
     assert device is not None
-    assert device.name == "00008150"
+    assert device.name == "00008030"

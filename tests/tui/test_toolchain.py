@@ -212,7 +212,7 @@ async def test_the_same_warnings_are_shown_when_driving_a_phone(machine: object)
                 DeviceReady(
                     lease={
                         "device": {
-                            "name": "Ehsan's iPhone",
+                            "name": "Test iPhone",
                             "os_version": "26.6",
                             "kind": "device",
                         }
