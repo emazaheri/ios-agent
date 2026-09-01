@@ -27,7 +27,7 @@ from ios_tui.events import (
     StatsSnapshot,
 )
 from ios_tui.runner import GoalRunner
-from ios_tui.widgets import ScreenPane, StatsBar, StatusBar
+from ios_tui.widgets import ScreenPane, StatsBar, StatusBar, Transcript
 from screens import DeviceModel, build_session
 from textual.widgets import Static
 from tui_harness import ScriptedModel, settings
@@ -439,3 +439,67 @@ async def test_a_reply_from_an_earlier_goal_does_not_silence_a_later_summary() -
 
         shown = [line.text for line in app.transcript.lines if reply in line.text]
         assert len(shown) == 2, "the second goal's summary was suppressed by the first goal's"
+
+
+# -- naming the screen, and wrapping what is said about it ------------------
+
+
+async def test_the_strip_names_the_screen_rather_than_asserting_it_is_current() -> None:
+    """ " current" said only that the pane was not stale. It left the reader to
+    work out what they were looking at from the body text."""
+    app = _app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _ready(app)
+        pane = app.query_one(ScreenPane)
+        pane.show('screen: com.apple.Maps / "Display & Text Size"\ne1 button "Back"')
+        await pilot.pause()
+
+        strip = str(pane.query_one("#screen-currency", Static).content)
+        assert "Maps" in strip
+        assert "Display & Text Size" in strip
+        assert "com.apple.Maps" not in strip, "the bundle id spends columns saying Maps"
+
+
+async def test_a_screen_with_no_title_still_names_its_app() -> None:
+    app = _app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _ready(app)
+        pane = app.query_one(ScreenPane)
+        pane.show('screen: com.apple.springboard / ""\ne1 icon "Maps"')
+        await pilot.pause()
+        assert "springboard" in str(pane.query_one("#screen-currency", Static).content)
+
+
+async def test_an_unparsable_body_falls_back_rather_than_showing_chrome() -> None:
+    app = _app()
+    async with app.run_test(size=(120, 40)) as pilot:
+        await _ready(app)
+        pane = app.query_one(ScreenPane)
+        pane.show("something that is not a digest header")
+        await pilot.pause()
+        assert "on screen" in str(pane.query_one("#screen-currency", Static).content)
+
+
+@pytest.mark.parametrize("size", [(90, 30), (140, 40)])
+async def test_a_long_goal_wraps_inside_the_transcript(size: tuple[int, int]) -> None:
+    """RichLog fixes a line's wrapping when it is written, against a width it
+    does not have until it has been rendered, so a goal longer than the pane
+    ran off under the device readout instead of wrapping."""
+    goal = (
+        "What's the estimated driving time from North York to downtown Toronto, "
+        "and which route does it suggest taking at this hour?"
+    )
+    app = _app()
+    async with app.run_test(size=size) as pilot:
+        await _ready(app)
+        transcript = app.query_one(Transcript)
+        transcript.goal(goal)
+        await pilot.pause()
+
+        pane_width = transcript.size.width
+        widest = max((strip.cell_length for strip in transcript.lines), default=0)
+        assert widest <= pane_width, (
+            f"a row is {widest} columns wide in a {pane_width}-column pane, "
+            "so it runs under the pane beside it"
+        )
+        assert "downtown Toronto" in transcript.as_text()

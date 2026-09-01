@@ -9,6 +9,7 @@ watched climbing rather than read afterwards.
 
 from __future__ import annotations
 
+import re
 import time
 
 from rich.segment import Segment
@@ -16,6 +17,7 @@ from rich.style import Style
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.events import Resize
 from textual.reactive import reactive
 from textual.selection import Selection
 from textual.strip import Strip
@@ -383,7 +385,38 @@ class Transcript(SelectableLog):
     def _add(self, entry: Entry) -> None:
         self._entries.append(entry)
         for line in self._rows(entry):
-            self.write(line)
+            self._write_row(line)
+
+    def _write_row(self, line: Text) -> None:
+        """Write one row, wrapped to the pane rather than to a guess.
+
+        `RichLog` fixes a line's wrapping when it is written and, given no
+        width, wraps at its own 80-column default however wide the pane is. In
+        a pane narrower than that the row simply runs past the edge and under
+        the device readout beside it, which is what a goal longer than the pane
+        did. Handing it the measured width is the whole fix; before the first
+        render there is no width to hand it, which is what `on_resize` is for.
+        """
+        self.write(line, width=self.content_size.width or None)
+
+    def on_resize(self, event: Resize) -> None:
+        """Lay the rows out again, now that the pane's width is known.
+
+        `RichLog` fixes a line's wrapping when the line is written, against a
+        width it does not have until it has been rendered, so every row written
+        before the first render wraps at its 80-column default however wide the
+        pane is. A goal longer than the pane therefore ran off the right-hand
+        edge and under the device readout instead of wrapping.
+
+        The rows are kept as entries precisely so they can be written again.
+        This is the only thing that re-lays them out, which is why the note on
+        `_entries` said nothing did.
+        """
+        super().on_resize(event)
+        RichLog.clear(self)
+        for entry in self._entries:
+            for line in self._rows(entry):
+                self._write_row(line)
 
     def _rows(self, entry: Entry) -> list[Text]:
         kind, data = entry
@@ -587,6 +620,22 @@ class ScreenPane(Vertical):
         )
         self.query_one("#screen-currency", Static).update(self._currency())
 
+    def _where(self) -> str:
+        """The app and screen this pane is showing, from the digest's own header.
+
+        The digest opens with `screen: <bundle id> / "<title>"`, which is the
+        only place either fact exists by the time it reaches this widget. The
+        bundle id is trimmed to its last component, because "com.apple.Maps"
+        spends eleven columns saying "Maps" in a strip that has about forty.
+        """
+        first = self.text.splitlines()[0] if self.text else ""
+        match = re.match(r'screen:\s*(\S+)\s*/\s*"(.*?)"', first)
+        if match is None:
+            return ""
+        app = match.group(1).rsplit(".", 1)[-1]
+        title = match.group(2).strip()
+        return f"{app} \u00b7 {title}" if title else app
+
     def _currency(self) -> Text:
         """One row: is this what the phone shows?
 
@@ -602,14 +651,24 @@ class ScreenPane(Vertical):
         width = self.size.width or 40
         if not self.text:
             return Text(_fit(width, "waiting for the first screen", "waiting"), style="dim")
+        where = self._where()
         if not self.stale_by:
-            return Text(" current", style="dim")
+            # Naming the screen rather than asserting " current", which said
+            # only that the pane was not stale and left the reader to work out
+            # what they were looking at from the body text.
+            if not where:
+                return Text(" on screen", style="dim")
+            return Text(_fit(width, f" {where}", " on screen"), style="dim")
         plural = "" if self.stale_by == 1 else "s"
+        behind = f"{self.stale_by} action{plural} behind"
         return Text(
             _fit(
                 width,
-                f"{self.stale_by} action{plural} behind \u00b7 ctrl+r to re-read",
-                f"{self.stale_by} action{plural} behind",
+                f" {where} \u00b7 {behind} \u00b7 ctrl+r to re-read"
+                if where
+                else f"{behind} \u00b7 ctrl+r to re-read",
+                f"{behind} \u00b7 ctrl+r to re-read",
+                behind,
                 f"{self.stale_by} behind",
             ),
             style="yellow",
