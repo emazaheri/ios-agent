@@ -7,9 +7,15 @@ MCP server, and the library beneath both.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-597%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-618%20offline-brightgreen.svg)](#development)
 
-![ios-agent driving Settings on an iPhone simulator](docs/images/ios-agent.png)
+![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
+
+<sub>One goal, start to finish, at 2.5x. The agent deep-links into Maps for the
+driving time, then taps through to walking and transit and scrolls to read the
+detail: 4 actions, 1 observation, 2,767 device tokens, 49.8s of real time. The
+terminal is the agent's own transcript; the phone is an iOS Simulator being
+driven by it.</sub>
 
 Built on Apple's XCUIAutomation through WebDriverAgent. It runs on a Mac and
 drives a simulator or a tethered phone. It is designed for **agents rather than
@@ -86,6 +92,8 @@ uv run ios-agent --pick "turn wi-fi off"     # choose the device from a list
 uv run ios-agent manual                      # drive it by hand, no model needed
 uv run ios-agent devices                     # what is reachable
 ```
+
+![the terminal app, mid-run](docs/images/ios-agent.png)
 
 It streams the model's reasoning as it arrives, shows the digest the model is
 reading beside it, and keeps the numbers on screen while they climb: actions,
@@ -229,8 +237,8 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 422 tests, no device, no model
-uv run pytest tests/tui           # 175 tests, the terminal front end
+uv run pytest tests/unit          # 433 tests, no device, no model
+uv run pytest tests/tui           # 185 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui
