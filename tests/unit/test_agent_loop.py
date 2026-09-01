@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 from ios_agent.backend import SessionBackend
+from ios_agent.graph import opening_messages
 from ios_agent.loop import run_goal
 from langchain.messages import AIMessage, AnyMessage
 from screens import DeviceModel, Injection, build_session
@@ -348,3 +349,29 @@ def test_the_prompt_is_not_empty(bad: str) -> None:
     from ios_agent.loop import operator_prompt
 
     assert operator_prompt().strip() != bad
+
+
+# -- knowing what is on the device ------------------------------------------
+
+
+def test_the_goal_alone_is_sent_when_nothing_is_installed() -> None:
+    """No list, no noise: the opening turn stays exactly the goal."""
+    messages = opening_messages("SYSTEM", "Turn on Bold Text.")
+    assert messages[1].content == "Turn on Bold Text."
+
+
+def test_the_installed_apps_ride_in_the_goal_turn() -> None:
+    """The agent cannot see past the first page of icons, and an app in a
+    folder is invisible, so it is told what exists before it has to guess."""
+    messages = opening_messages("SYSTEM", "Open Maps.", ["Maps", "Safari", "Settings"])
+    human = messages[1].content
+    assert human.startswith("Open Maps.")
+    assert "Maps, Safari, Settings" in human
+
+
+def test_the_system_prompt_never_carries_the_app_list() -> None:
+    """It is per-device, and the system prompt is kept byte-identical so it
+    stays cacheable across every run."""
+    with_apps = opening_messages("SYSTEM", "Goal.", ["Maps"])
+    without = opening_messages("SYSTEM", "Goal.")
+    assert with_apps[0].content == without[0].content == "SYSTEM"

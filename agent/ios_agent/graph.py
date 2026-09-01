@@ -17,7 +17,7 @@ otherwise spend a budget discovering that.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -116,11 +116,18 @@ def build_graph(
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
 
 
-def opening_messages(system_prompt: str, goal: str) -> list[AnyMessage]:
+def opening_messages(system_prompt: str, goal: str, apps: Sequence[str] = ()) -> list[AnyMessage]:
     """The transcript the loop starts from.
 
     The goal arrives as a user turn rather than being folded into the system
     prompt, so the system prompt stays byte-identical across every task and
     stays cacheable.
+
+    `apps` rides along in the same user turn, for the same reason. The agent
+    cannot otherwise know what this device has: the home screen shows one page
+    of icons, and an app on page three or in a folder is invisible. Naming them
+    up front costs about a hundred tokens once, against a whole turn for a
+    `list_apps` call that only happens after the agent notices it is stuck.
     """
-    return [SystemMessage(content=system_prompt), HumanMessage(content=goal)]
+    human = goal if not apps else f"{goal}\n\nApps on this device: {', '.join(apps)}."
+    return [SystemMessage(content=system_prompt), HumanMessage(content=human)]

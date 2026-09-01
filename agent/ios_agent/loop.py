@@ -91,6 +91,20 @@ def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
     return factory
 
 
+async def _installed_apps(session: IosSession) -> list[str]:
+    """The names of the apps on this device, for the opening turn.
+
+    Best effort on purpose. A device that will not enumerate its apps is still
+    a device the agent can drive, and failing a run over a nicety would be a
+    worse trade than starting without the list.
+    """
+    try:
+        apps = await session.lease.adapter.list_apps("all")
+    except Exception:
+        return []
+    return sorted({a.name for a in apps if a.name})
+
+
 async def run_goal(
     session: IosSession,
     goal: str,
@@ -130,7 +144,8 @@ async def run_goal(
     # runs would resume someone else's conversation.
     config = {"configurable": {"thread_id": f"{id(run):x}"}}
 
-    step: Any = {"messages": opening_messages(operator_prompt(), goal)}
+    apps = await _installed_apps(session)
+    step: Any = {"messages": opening_messages(operator_prompt(), goal, apps)}
     while True:
         result = await graph.ainvoke(step, config=config)
         pending = result.get("__interrupt__") if isinstance(result, dict) else None
