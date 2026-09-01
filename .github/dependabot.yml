@@ -1,0 +1,21 @@
+# Dependency updates. Grouped and monthly on purpose: this project pins
+# WebDriverAgent deliberately (see scripts/prepare_wda.sh) and a stream of
+# single-dependency pull requests would bury the changes worth reading.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
