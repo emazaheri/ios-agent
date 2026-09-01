@@ -21,7 +21,7 @@ import json
 import os
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import median
@@ -30,6 +30,7 @@ from typing import Any
 from screens import DeviceModel
 from tasks import Task
 
+from ios_mcp.errors import ErrorCode
 from ios_mcp.session import IosSession
 
 #: Matches the digest's own estimate and the golden-flow harness, so the two
@@ -43,6 +44,16 @@ _CHARS_PER_TOKEN = 4
 #: nothing here can know what a given vendor charges.
 _USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
 _USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
+#: Bumped when the report shape changes in a way a reader must notice.
+SCHEMA_VERSION = 1
+
+
+def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for histogram in histograms:
+        for key, count in histogram.items():
+            out[key] = out.get(key, 0) + count
+    return out
 
 
 @dataclass
@@ -119,6 +130,14 @@ class RunResult:
     #: Worth recording rather than collapsing, because a model that declines
     #: on its own and a gate that refuses are different systems working.
     refused_by: str | None = None
+    #: Which resolution tiers carried this run. Drift from `exact` toward
+    #: `text-fuzzy` is the leading indicator that a route is going flaky.
+    tiers: dict[str, int] = field(default_factory=dict)
+    #: Which failures were whose: device, perception, model or policy. A
+    #: success rate says a run failed; this says which of three fixes it wants.
+    faults: dict[str, int] = field(default_factory=dict)
+    #: Runner crashes the auto-heal absorbed. The run still passed.
+    recoveries: int = 0
 
     @property
     def overhead(self) -> float:
@@ -160,7 +179,11 @@ class RunResult:
             "observation_overhead": round(self.overhead, 2),
             "device_tokens": self.device_tokens,
             "seconds": round(self.seconds, 1),
+            "resolution_tiers": self.tiers,
+            "faults": self.faults,
         }
+        if self.recoveries:
+            out["runner_recoveries"] = self.recoveries
         if self.prompt_tokens or self.completion_tokens:
             out["model_tokens"] = {
                 "prompt": self.prompt_tokens,
@@ -294,6 +317,7 @@ async def run_task(
         if not passed and failure is None:
             failure = "the run finished but the goal was not reached"
 
+    summary = session.audit.summary()
     return RunResult(
         task=task.name,
         passed=passed,
@@ -309,6 +333,9 @@ async def run_task(
         failure=failure,
         provider_error=provider_error,
         refused_by=refused_by,
+        tiers=summary["resolution_tiers"],
+        faults=summary["faults"],
+        recoveries=session.wda.recovered_count,
     )
 
 
@@ -368,7 +395,13 @@ def _from_a_vendor(exc: BaseException) -> bool:
     }
 
 
-_POLICY_CODES = ("action_requires_approval", "action_rejected_by_policy", "app_not_allowed")
+_POLICY_CODES = frozenset(
+    {
+        ErrorCode.ACTION_REQUIRES_APPROVAL.value,
+        ErrorCode.ACTION_REJECTED_BY_POLICY.value,
+        ErrorCode.APP_NOT_ALLOWED.value,
+    }
+)
 
 
 def _is_policy_refusal(exc: Exception) -> bool:
@@ -411,14 +444,11 @@ def _nothing_destructive_ran(session: IosSession) -> bool:
 def _was_blocked(session: IosSession) -> bool:
     """Did the gate refuse anything during this run?
 
-    `IosAutomationError.__str__` is `[<code>] <message>` and `_record_failure`
-    stores it verbatim, so the code is readable straight off the trail without
-    the harness having to catch anything.
+    The trail carries the error code as a field, so this reads it rather than
+    matching `[<code>]` out of the formatted message, which is what it used to
+    do and what stops being true the moment anyone reformats an error.
     """
-    return any(
-        entry.error is not None and any(f"[{code}]" in entry.error for code in _POLICY_CODES)
-        for entry in session.audit.failures
-    )
+    return any(entry.code in _POLICY_CODES for entry in session.audit.failures)
 
 
 def write_report(
@@ -432,6 +462,7 @@ def write_report(
     """
     attempts = [run for result in results for run in result.runs]
     payload: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": time.time(),
         "driver": driver,
         "model": model or "n/a (no model in the loop)",
@@ -455,6 +486,9 @@ def write_report(
             "completion_tokens": sum(a.completion_tokens for a in attempts),
             "usd": round(sum(a.usd for a in attempts), 4),
             "seconds": round(sum(a.seconds for a in attempts), 1),
+            "resolution_tiers": _merged(a.tiers for a in attempts),
+            "faults": _merged(a.faults for a in attempts),
+            "runner_recoveries": sum(a.recoveries for a in attempts),
         },
         "tasks": [r.to_dict() for r in results],
     }

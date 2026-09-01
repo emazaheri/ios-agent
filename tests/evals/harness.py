@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,16 @@ from ios_mcp.session import IosSession
 
 #: Rough characters-per-token, matching the digest's own estimate.
 _CHARS_PER_TOKEN = 4
+#: Bumped when the report shape changes in a way a reader must notice.
+SCHEMA_VERSION = 1
+
+
+def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for histogram in histograms:
+        for key, count in histogram.items():
+            out[key] = out.get(key, 0) + count
+    return out
 
 
 @dataclass
@@ -37,6 +47,8 @@ class EvalResult:
     #: for four payloads.
     steps: int = 0
     tiers: dict[str, int] = field(default_factory=dict)
+    #: Which failures were whose: device, perception, model or policy.
+    faults: dict[str, int] = field(default_factory=dict)
     failure: str | None = None
     recovered: int = 0
 
@@ -54,6 +66,7 @@ class EvalResult:
             "steps": self.steps,
             "tokens_per_step": round(self.tokens_per_step, 1),
             "resolution_tiers": self.tiers,
+            "faults": self.faults,
         }
         if self.recovered:
             out["runner_recoveries"] = self.recovered
@@ -120,10 +133,9 @@ async def run_flow(
     except Exception as exc:
         failure = f"{type(exc).__name__}: {exc}"
 
-    tiers: dict[str, int] = {}
-    for entry in session.audit.entries:
-        if entry.resolved_via:
-            tiers[entry.resolved_via] = tiers.get(entry.resolved_via, 0) + 1
+    # The trail already computes both of these, and computing them twice is
+    # how two answers to the same question start disagreeing.
+    summary = session.audit.summary()
 
     return EvalResult(
         name=name,
@@ -132,7 +144,8 @@ async def run_flow(
         seconds=time.monotonic() - started,
         actions=meter.actions,
         steps=meter.steps,
-        tiers=tiers,
+        tiers=summary["resolution_tiers"],
+        faults=summary["faults"],
         failure=failure,
         recovered=session.wda.recovered_count,
     )
@@ -141,6 +154,7 @@ async def run_flow(
 def write_report(results: list[EvalResult], path: Path) -> Path:
     """Persist the run so the numbers can be diffed against a previous commit."""
     payload = {
+        "schema_version": SCHEMA_VERSION,
         "generated_at": time.time(),
         "totals": {
             "flows": len(results),
@@ -152,6 +166,9 @@ def write_report(results: list[EvalResult], path: Path) -> Path:
             "tokens_per_step": round(
                 sum(r.tokens for r in results) / max(sum(r.steps for r in results), 1), 1
             ),
+            "resolution_tiers": _merged(r.tiers for r in results),
+            "faults": _merged(r.faults for r in results),
+            "runner_recoveries": sum(r.recovered for r in results),
         },
         "flows": [r.to_dict() for r in results],
     }
