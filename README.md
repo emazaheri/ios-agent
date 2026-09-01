@@ -24,7 +24,15 @@ XML, actions hand back the screen they produced, and anything irreversible asks
 first.
 
 ```bash
-uv sync && ./scripts/prepare_wda.sh simulator
+uv sync && uv run ios-agent quickstart
+```
+
+`quickstart` checks the toolchain, offers the repairs that are cheap enough to
+be worth offering, builds WebDriverAgent if it is missing (about 20 seconds,
+once), and drops you into manual mode, which drives the device by hand and
+needs no API key. When you want the agent itself:
+
+```bash
 uv run ios-agent "turn on bold text"
 ```
 

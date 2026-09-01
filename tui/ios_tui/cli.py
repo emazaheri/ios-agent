@@ -20,10 +20,11 @@ from pathlib import Path
 
 from ios_mcp.config import Settings, set_settings
 from ios_mcp.policy.audit import AuditEntry
+from ios_tui.quickstart import quickstart
 
 #: Subcommands. Anything else in the first position is treated as a goal, so
 #: `ios-agent "turn on bold text"` keeps working without the verb.
-_COMMANDS = frozenset({"run", "devices", "doctor", "manual"})
+_COMMANDS = frozenset({"run", "devices", "doctor", "manual", "quickstart"})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,6 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Wait for each model turn instead of showing it as it arrives.",
     )
     run.add_argument("-v", "--verbose", action="store_true", help="Show device startup lines.")
+
+    quick = sub.add_parser(
+        "quickstart", help="Set this Mac up and open manual mode, with no API key"
+    )
+    quick.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Answer yes to creating a simulator and building WebDriverAgent.",
+    )
 
     manual = sub.add_parser("manual", help="Drive the device by hand, with no model in the loop")
     manual.add_argument("--device", help="UDID or part of a device name.")
@@ -148,6 +159,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(settings, json_out=args.json)
     if args.command == "devices":
         return _cmd_devices(settings, json_out=args.json)
+    if args.command == "quickstart":
+        code = quickstart(settings, assume_yes=args.yes)
+        if code != 0:
+            return code
+        # Straight into manual mode, which needs no key. The point of the
+        # command is that it ends somewhere a person can act, rather than
+        # with a report saying they could.
+        return _cmd_manual(settings, build_parser().parse_args(["manual"]))
     if args.command == "manual":
         return _cmd_manual(settings, args)
     if args.command == "run":
