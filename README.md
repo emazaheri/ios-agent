@@ -226,11 +226,17 @@ about a fake. The same goal, `turn on Bold Text`, across all three tiers:
 | | actions | observations | digest |
 |---|---|---|---|
 | scripted fake | 3 | 1 | — |
-| iOS 26.5 simulator | 3 | 1 | 167 raw nodes → 14 elements, 261 tokens |
+| iOS 27.0 simulator | 4 | 1 | 166 raw nodes → 15 elements, 272 tokens |
 | **iPhone, iOS 26.6, Wi-Fi** | **3** | **1** | 140 raw nodes → 15 elements, 243 tokens |
 
-Identical on all three, and on the phone it took 48.6s where the simulator took
-seconds. The switch was confirmed by navigating there and reading `value="1"`
+One observation on every tier, which is the number the design argument rests
+on, and on the phone it took 48.6s where the simulator took seconds. The
+simulator row was re-measured on iOS 27.0 after the 26.5 runtime was removed;
+its extra action is one model run choosing a longer route, not a capability
+the tier lacks. The phone row still reads 26.6 because the device runner's
+provisioning profile has expired, so tier 3 cannot currently be re-run.
+
+The switch was confirmed by navigating there and reading `value="1"`
 independently of what the agent claimed, then restored.
 
 Most importantly, **a real no-op still reports `screen_changed=False` on the
