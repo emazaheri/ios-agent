@@ -9,6 +9,12 @@ tokens and 3.7 seconds on a real device and tells you nothing new. Call
 `observe` when you genuinely do not know what is on screen, which is usually
 only at the very start.
 
+Call `find` only after a tap was refused and the error listed no close
+candidates: that is a screen whose controls carry ids rather than labels. Name
+a `hidden` match by its `id`. If the screen already shows what you were asked
+for, answer from it rather than searching, and never repeat a target that was
+just refused, since nothing changed between the attempts.
+
 The screen is the evidence, not the tool result. An action can report `ok` and
 change nothing, and a switch can accept a tap and stay where it was. If the
 result says the screen did not change, or the element you were aiming at still

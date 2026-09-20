@@ -32,7 +32,11 @@ Core loop: observe -> act -> verify.
    short ref like `e12`. Pass those refs to the action tools.
 4. Action tools already return the resulting screen, so you rarely need to call
    `ios_observe` again right after acting.
-5. If an element has no accessibility label, call `ios_screenshot` with
+5. If `ios_observe` does not show something you can see on the device, call
+   `ios_find`. It reads the tree before compaction and says whether each match
+   is `shown` or `hidden`, which tells you whether to name it differently or
+   stop trying to reach it through the digest at all.
+6. If an element has no accessibility label, call `ios_screenshot` with
    `annotate_refs=true` and work from the image.
 
 Never guess coordinates when a ref exists. Never retype a password into

@@ -148,7 +148,7 @@ def test_fuzzy_matching_refuses_a_wild_guess() -> None:
     with pytest.raises(ElementNotFound) as exc_info:
         resolve(digest, refs, target="launch the rocket")
     assert "closest" in exc_info.value.details
-    assert "annotate_refs" in (exc_info.value.hint or "")
+    assert "search the tree" in (exc_info.value.hint or "")
 
 
 def test_duplicate_labels_raise_rather_than_guess() -> None:

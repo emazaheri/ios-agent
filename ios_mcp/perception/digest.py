@@ -142,7 +142,7 @@ class Digest:
         if self.truncated:
             lines.append(
                 f"... {self.total_nodes - len(self.nodes)} more elements omitted "
-                f"(narrow with ios_observe(query=...) or region=...)"
+                "(narrow by query or region, or search the tree for what you expect)"
             )
         lines.extend(f"note: {note}" for note in self.notes)
         return "\n".join(lines)

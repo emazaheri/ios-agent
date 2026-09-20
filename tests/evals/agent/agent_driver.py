@@ -93,6 +93,7 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     # place that can distinguish an explicit observation from a screen that
     # arrived folded into an action's result.
     meter.observations = backend.stats.observations
+    meter.finds = backend.stats.finds
     meter.actions = backend.stats.actions
     meter.device_tokens = backend.stats.device_tokens
     meter.refusals = backend.stats.refusals

@@ -16,7 +16,7 @@ from ios_agent import SessionBackend
 from ios_tui.app import IosAgentApp
 from ios_tui.bus import ListSink
 from ios_tui.events import ActionFinished, Observed
-from ios_tui.manual import Help, Unknown, parse
+from ios_tui.manual import USAGE, Help, Unknown, parse
 from ios_tui.runner import GoalRunner
 from ios_tui.stream import EventBackend
 from ios_tui.widgets import StatusBar
@@ -413,8 +413,20 @@ async def test_an_error_and_its_hint_arrive_in_that_order() -> None:
 
         rows = [line.text for line in app.transcript.lines]
         failed = next(i for i, r in enumerate(rows) if "tap" in r and "Nonexistent" in r)
-        hint = next(i for i, r in enumerate(rows) if "ios_observe" in r or "annotate_refs" in r)
+        hint = next(i for i, r in enumerate(rows) if "search the tree" in r or "ios_observe" in r)
         assert hint > failed, "the hint arrived before the problem it explains"
 
         # And it is said once, not once by the row and once by the handler.
         assert sum("Nothing on screen matches" in r for r in rows) == 1
+
+
+def test_find_is_typeable_by_hand() -> None:
+    """Manual mode exists to debug perception on an unfamiliar app.
+
+    `find` is the verb for exactly that, so leaving it out of the grammar
+    would have made the one mode aimed at reading a strange screen the only
+    one that could not ask what was on it.
+    """
+    assert parse("find Signals").verb == "find"
+    assert parse("f Signals").verb == "find"
+    assert "find <text>" in USAGE

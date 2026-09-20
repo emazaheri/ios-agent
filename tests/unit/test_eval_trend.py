@@ -221,3 +221,20 @@ def test_a_suite_is_only_compared_against_itself(tmp_path: Path) -> None:
     )
 
     assert main(["--history", str(history), "check", str(report), "--suite", "agent-oracle"]) == 0
+
+
+def test_a_metric_added_later_does_not_read_as_a_change() -> None:
+    """A record written before `finds` existed is not evidence that it moved.
+
+    Without this, the run that introduces a guarded metric fails the check it
+    just joined, and the message says a count changed when nothing did.
+    """
+    old = {"passed": 39, "finds": None}
+    del old["finds"]
+    assert compare({"passed": 39, "finds": 0}, old) == []
+    assert compare({"passed": 39, "finds": 2}, old) == ["finds: 0 -> 2"]
+
+
+def test_a_histogram_added_later_reads_as_empty_rather_than_missing() -> None:
+    assert compare({"faults": {}}, {}) == []
+    assert compare({"faults": {"model": 1}}, {}) == ["faults: {} -> {'model': 1}"]

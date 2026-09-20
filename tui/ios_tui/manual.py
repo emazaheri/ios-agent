@@ -61,6 +61,7 @@ class Command:
 #: What `help` prints, and the only place the grammar is written down.
 USAGE = """\
 observe                     read the screen
+find <text>                 search the tree, including what the digest dropped
 tap <target>                tap something by its label, value or id
 type <text>                 type into the focused field
 type <text> > <target>      type into a named field
@@ -91,6 +92,8 @@ def parse(line: str) -> Command:
     match verb:
         case "observe" | "o":
             return Command("observe", lambda b: b.observe())
+        case "find" | "f" if rest:
+            return Command("find", lambda b: b.find(rest))
         case "tap" | "t" if rest:
             return Command("tap", lambda b: b.tap(rest, idem_key=key()))
         case "type" if rest:
@@ -117,7 +120,7 @@ def parse(line: str) -> Command:
 
 
 #: What a bare verb can be, for suggesting a near miss.
-_VERBS = ("observe", "tap", "type", "set", "scroll", "press", "open", "app", "help")
+_VERBS = ("observe", "find", "tap", "type", "set", "scroll", "press", "open", "app", "help")
 
 
 def _nearest(verb: str) -> str | None:

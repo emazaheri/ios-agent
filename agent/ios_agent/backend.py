@@ -40,6 +40,12 @@ class BackendStats:
     """What this run has cost so far, in the units the design argument uses."""
 
     observations: int = 0
+    #: Read-only tree searches. Counted apart from `observations` because a
+    #: find returns no refs and is not a screen, so folding it into the
+    #: observation floor would make a task look like it re-read a screen it
+    #: never read. What it does cost is a device round trip, which `device_tokens`
+    #: and the eval's wall clock both still see.
+    finds: int = 0
     actions: int = 0
     device_tokens: int = 0
     #: Calls refused by verification before reaching the device. Counted apart
@@ -63,7 +69,7 @@ class BackendStats:
 class Backend(Protocol):
     """The tool surface, narrow on purpose.
 
-    Eight verbs, not the server's thirty. A large set of confusable tools
+    Nine verbs, not the server's thirty-one. A large set of confusable tools
     measurably degrades tool selection, and the server already accounts for
     that; an agent driving the same device does not get a free pass on it.
     """
@@ -76,6 +82,7 @@ class Backend(Protocol):
     last_action: LastAction | None
 
     async def observe(self) -> str: ...
+    async def find(self, text: str) -> str: ...
     async def tap(self, target: str, *, idem_key: str) -> str: ...
     async def type_text(self, text: str, target: str | None, *, idem_key: str) -> str: ...
     async def set_value(self, value: str, target: str, *, idem_key: str) -> str: ...
@@ -110,6 +117,19 @@ class SessionBackend:
         self._charge(digest.to_dict())
         self.last_screen = digest.render()
         return self.last_screen
+
+    async def find(self, text: str) -> str:
+        """Search the tree, including what the digest dropped.
+
+        Deliberately does not set `last_screen`. A find is not a screen: it
+        carries no refs, and the verifier judges an action against the screen
+        it produced. Letting a find overwrite that would hand the verifier a
+        search result to reason about instead of a screen.
+        """
+        result = await self.session.find(text)
+        self.stats.finds += 1
+        self._charge(result.to_dict())
+        return result.render()
 
     # -- actions -----------------------------------------------------------
 

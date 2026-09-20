@@ -160,11 +160,15 @@ def test_the_device_verbs_are_the_backend_verbs() -> None:
 
     This is what keeps the literal honest: a verb added to the backend and not
     here would be executed without ever being guarded.
+
+    The read-only verbs are subtracted rather than ignored, so a new one has to
+    be classified as read-only on purpose instead of by forgetting.
     """
     from ios_agent.backend import Backend
+    from ios_agent.batch import _ASKED_A_QUESTION
 
     not_verbs = {"approve", "stop_reason", "stats", "last_screen", "last_action"}
-    verbs = set(Backend.__protocol_attrs__) - not_verbs - {"observe"}
+    verbs = set(Backend.__protocol_attrs__) - not_verbs - _ASKED_A_QUESTION
     assert verbs == DEVICE_VERBS
 
 
@@ -199,3 +203,15 @@ def test_a_no_op_splits_the_route() -> None:
 def test_a_terminator_in_last_place_costs_nothing_extra() -> None:
     """Nothing follows it, so there is no batch to abort."""
     assert simulate_turns([_ran("tap", seq=1), _ran("scroll", seq=2)]) == 3
+
+
+def test_a_batch_stops_after_a_find() -> None:
+    """Asking where something is means the rest of the turn was chosen blind.
+
+    Same argument as `observe`, and it has to be the same answer: a find that
+    reports a hidden match changes what the next call should be, so a call
+    queued behind it was decided without the one fact it asked for.
+    """
+    reason = stop_after("find", None, before_seq=0, finished=False, stopped=None)
+    assert reason is not None
+    assert "`find` was called" in reason
