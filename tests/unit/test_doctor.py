@@ -225,3 +225,66 @@ def test_an_expired_profile_with_no_simulator_bundle_really_is_blocking() -> Non
     assert not report.can_use_simulator
     assert not report.can_use_real_device
     assert [c.name for c in report.checks if c.status == "fail"] == ["wda-bundle"]
+
+
+# -- the simulator window ---------------------------------------------------
+#
+# Xcode 27 replaced Simulator.app with Device Hub and moved it from
+# Contents/Developer/Applications to Contents/Applications. `open -a
+# Simulator` then failed on every boot while `_show_window` logged it at
+# debug, so simulators ran headless and nothing said why. This check exists
+# so the next rename is a sentence in `doctor` rather than silence.
+
+
+def _developer_dir(tmp_path: Path, *, xcode: str) -> Path:
+    """A fake Xcode layout. `xcode` is "27" (Device Hub) or "26" (Simulator)."""
+    developer = tmp_path / "Xcode.app" / "Contents" / "Developer"
+    if xcode == "27":
+        (developer.parent / "Applications" / "DeviceHub.app").mkdir(parents=True)
+    elif xcode == "26":
+        (developer / "Applications" / "Simulator.app").mkdir(parents=True)
+    developer.mkdir(parents=True, exist_ok=True)
+    return developer
+
+
+def _patch(monkeypatch, developer: Path) -> None:
+    from ios_mcp.devices import doctor as mod
+    from ios_mcp.devices.shell import CommandResult
+
+    async def fake_probe(*argv: str, **_kw: object) -> CommandResult:
+        return CommandResult(argv=argv, returncode=0, stdout=str(developer), stderr="")
+
+    monkeypatch.setattr(mod, "probe", fake_probe)
+    monkeypatch.setattr(mod.platform, "system", lambda: "Darwin")
+
+
+async def test_device_hub_is_found_on_xcode_27(monkeypatch, tmp_path: Path) -> None:
+    from ios_mcp.devices.doctor import _check_simulator_window
+
+    _patch(monkeypatch, _developer_dir(tmp_path, xcode="27"))
+    check = await _check_simulator_window()
+
+    assert check.status == "ok"
+    assert "Device Hub" in check.detail
+
+
+async def test_simulator_app_is_still_found_on_older_xcode(monkeypatch, tmp_path: Path) -> None:
+    from ios_mcp.devices.doctor import _check_simulator_window
+
+    _patch(monkeypatch, _developer_dir(tmp_path, xcode="26"))
+    check = await _check_simulator_window()
+
+    assert check.status == "ok"
+    assert "Simulator.app" in check.detail
+
+
+async def test_neither_app_warns_and_says_automation_is_fine(monkeypatch, tmp_path: Path) -> None:
+    """A warning, never a failure: the device boots and the agent drives it."""
+    from ios_mcp.devices.doctor import _check_simulator_window
+
+    _patch(monkeypatch, _developer_dir(tmp_path, xcode="none"))
+    check = await _check_simulator_window()
+
+    assert check.status == "warn"
+    assert check.remedy and "Automation is unaffected" in check.remedy
+    assert len(check.data["looked_in"]) == 2

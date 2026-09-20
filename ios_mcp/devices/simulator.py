@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 SIM_WDA_BUNDLE = "com.facebook.WebDriverAgentRunner.xctrunner"
 
+#: The app that draws the simulator, as of Xcode 27. It replaced
+#: `Simulator.app`, which no longer exists at any path, so `open -a
+#: Simulator` fails on 27 and later. Matched by bundle id rather than
+#: name: "Device Hub" is a plausible name for something else, and a
+#: bundle id cannot be shadowed by an unrelated app on the Mac.
+SIMULATOR_UI_BUNDLE_ID = "com.apple.dt.Devices"
+
 #: simctl privacy service names, mapped from the friendlier names we expose.
 PERMISSION_SERVICES = {
     "location": "location",
@@ -72,26 +79,45 @@ class SimulatorAdapter:
         await self._show_window()
 
     async def _show_window(self) -> None:
-        """Put Simulator.app on screen, if it is wanted.
+        """Put the simulator window on screen, if it is wanted.
 
         `simctl boot` starts the runtime and nothing else: the device runs
         headlessly and no window appears. For a person watching an agent drive
         a phone, a phone they cannot see is most of the value gone.
+
+        **Xcode 27 renamed the app.** `Simulator.app` is gone, replaced by
+        Device Hub (`com.apple.dt.Devices`), which also moved out of
+        `Contents/Developer/Applications` into `Contents/Applications`;
+        `SimulatorKit.framework` moved to `Contents/SharedFrameworks` in the
+        same change. So `open -a Simulator` fails outright on 27 and later,
+        and every simulator run on such a machine is silently headless. The
+        new bundle id is tried first and the old name second, because a
+        bundle id cannot collide with an unrelated app the way a bare name
+        can. Both are idempotent, so this stays safe on a device that is
+        already booted with the window already up.
 
         Best-effort on purpose. This is presentation, and a window that will
         not open is no reason to fail a run that is otherwise fine: everything
         the automation needs goes through `simctl` and WebDriverAgent, neither
         of which cares whether the UI is up.
 
-        `open -a` is idempotent, so this is safe on an already-booted device
-        with the app already running: measured at about 70 ms, which is noise
-        against a boot.
+        It warns rather than debugs when neither works. Debug is what hid the
+        Xcode 27 rename: the call failed on every boot for days and nothing
+        said so, which is the wrong trade for a feature whose whole purpose is
+        that somebody is watching.
         """
         if not self.settings.simulator.show_window:
             return
-        result = await run("open", "-a", "Simulator", timeout=20.0)
-        if not result.ok:
-            logger.debug("Could not show Simulator.app: %s", result.stderr[:200])
+        for argv in (("-b", SIMULATOR_UI_BUNDLE_ID), ("-a", "Simulator")):
+            result = await run("open", *argv, timeout=20.0)
+            if result.ok:
+                return
+        logger.warning(
+            "Could not show the simulator window: neither %s (Xcode 27+) nor "
+            "Simulator.app (Xcode 26 and earlier) would open. The device is "
+            "running headlessly; automation is unaffected.",
+            SIMULATOR_UI_BUNDLE_ID,
+        )
 
     async def ensure_runner(self) -> WdaEndpoint:
         """Start WebDriverAgent and wait for it to answer /status.
