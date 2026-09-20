@@ -87,6 +87,13 @@ class McpBackend:
         self.last_screen = str(payload.get("text", ""))
         return self.last_screen
 
+    async def find(self, text: str) -> str:
+        payload = await self._call("ios_find", {"text": text})
+        self.stats.finds += 1
+        self._charge(payload)
+        # No `last_screen`: see the direct backend for why a find is not a screen.
+        return str(payload.get("rendered", ""))
+
     # -- actions -----------------------------------------------------------
 
     async def tap(self, target: str, *, idem_key: str) -> str:
@@ -264,6 +271,7 @@ class _Stats:
 
     def __init__(self) -> None:
         self.observations = 0
+        self.finds = 0
         self.actions = 0
         self.device_tokens = 0
         self.refusals = 0

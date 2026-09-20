@@ -85,10 +85,11 @@ from dataclasses import dataclass
 TERMINATES_SEQUENCE = frozenset({"open_app", "open_url", "press_button", "scroll"})
 
 #: Verbs that touch the device, and so are expected to advance the backend's
-#: record. `observe` is deliberately absent: it records no outcome, so the
-#: freshness check would abort on it for the wrong reason. It ends a batch all
-#: the same, handled separately in `stop_after`, because a turn that had to
-#: ask what was on screen did not know it when it chose the rest.
+#: record. `observe` and `find` are deliberately absent: they record no
+#: outcome, so the freshness check would abort on them for the wrong reason.
+#: Both end a batch all the same, handled separately in `stop_after`, because a
+#: turn that had to ask what was on screen did not know it when it chose the
+#: rest, and the same is true of one that had to ask where something was.
 #: `done` is absent because the run being finished is checked before any of
 #: this. Anything else, including a name the model invented, is left alone; the
 #: graph already answers it and the rest of the batch may still be valid.
@@ -98,6 +99,10 @@ TERMINATES_SEQUENCE = frozenset({"open_app", "open_url", "press_button", "scroll
 DEVICE_VERBS = frozenset(
     {"tap", "type_text", "set_value", "scroll", "press_button", "open_app", "open_url"}
 )
+
+#: Read-only verbs. They cost a device round trip but record no outcome, so
+#: they end a batch without going through the freshness check.
+_ASKED_A_QUESTION = frozenset({"observe", "find"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,14 +142,15 @@ def stop_after(
         return "the run finished when `done` was called."
     if stopped is not None:
         return f"the session stopped: {stopped}."
-    if verb == "observe":
-        # Calling it means the screen was unknown, so anything queued behind
-        # it was chosen without the answer. Cheap to get wrong in both
-        # directions, and the operator prompt already says to observe only
-        # when you genuinely do not know, so the strict reading costs a turn
-        # the model should not have been spending anyway.
+    if verb in _ASKED_A_QUESTION:
+        # Calling one means the screen, or where something on it was, was
+        # unknown, so anything queued behind it was chosen without the answer.
+        # Cheap to get wrong in both directions, and the operator prompt
+        # already says to ask only when you genuinely do not know, so the
+        # strict reading costs a turn the model should not have been spending
+        # anyway.
         return (
-            "`observe` was called, so the screen was not known when the rest "
+            f"`{verb}` was called, so the screen was not known when the rest "
             "of this turn was chosen."
         )
     if verb not in DEVICE_VERBS:

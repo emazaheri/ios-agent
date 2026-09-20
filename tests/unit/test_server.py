@@ -8,7 +8,7 @@ import pytest
 from fake_device import make_session
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
-from trees import form_screen, settings_screen
+from trees import form_screen, node, settings_screen
 
 from ios_mcp.config import Settings
 from ios_mcp.server.app import build_server
@@ -265,3 +265,66 @@ def test_the_server_reports_its_own_version_not_the_frameworks() -> None:
     server = build_server(Settings())
     assert server.version == metadata.version("ios-mcp")
     assert not server.version.startswith("4."), "that is FastMCP's version"
+
+
+async def test_find_reaches_the_tree_over_the_protocol(server_with_session) -> None:
+    """The tool is wired end to end, and its payload carries the diagnosis.
+
+    `rendered` is what a model reads and `matches` is what a program reads, so
+    both have to survive redaction and serialisation.
+    """
+    mcp, _, _ = server_with_session
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        result = payload(await client.call_tool("ios_find", {"text": "Wi-Fi"}))
+
+    assert result["total"] >= 1
+    assert result["hidden"] == 0
+    assert any(m["shown"] for m in result["matches"])
+    assert "Wi-Fi" in result["rendered"]
+
+
+async def test_find_does_not_hand_back_refs(server_with_session) -> None:
+    """The decision the whole module is shaped around.
+
+    A ref here would have to come from a digest the ref table never recorded,
+    so passing one back to an action would resolve against a generation the
+    agent was never shown. Nothing in the payload may look like one.
+    """
+    mcp, _, _ = server_with_session
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        result = payload(await client.call_tool("ios_find", {"text": "Wi-Fi"}))
+
+    assert all("ref" not in match for match in result["matches"])
+
+
+async def test_find_results_are_redacted_like_every_other_payload(monkeypatch) -> None:
+    """A find reads the tree before compaction, so it sees more than the digest.
+
+    That is the point of it, and it is also why redaction has to reach every
+    string it returns, including the nested matches and the rendered form.
+    """
+    screen = node(
+        "Application",
+        label="Mail",
+        name="Mail",
+        h=852,
+        children=[node("Button", label="someone@example.com", y=120, h=44)],
+    )
+    mcp = build_server(Settings())
+    ctx = mcp.ios_context
+
+    async def fake_open(device=None, *, app=None, fresh=False):
+        session, _, _ = make_session(screen)
+        ctx.session = session
+        return session
+
+    monkeypatch.setattr(ctx, "open", fake_open)
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        result = payload(await client.call_tool("ios_find", {"text": "someone"}))
+
+    assert result["total"] >= 1
+    assert "someone@example.com" not in json.dumps(result)
+    assert "[redacted]" in json.dumps(result)

@@ -10,6 +10,7 @@ from fastmcp.utilities.types import Image
 from pydantic import Field
 
 from ios_mcp.config import Settings
+from ios_mcp.perception.find import DEFAULT_LIMIT
 from ios_mcp.server.annotations import READ_ONLY
 from ios_mcp.server.context import ServerContext
 from ios_mcp.server.errors import tool_errors
@@ -95,6 +96,38 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         session = ctx.require()
         text = await session.read_text(ref=ref, target=target)
         return {"text": session.redactor.text(text) or ""}
+
+    @mcp.tool(annotations=READ_ONLY)
+    @tool_errors
+    async def ios_find(
+        text: Annotated[str, Field(description="Text to look for, matched case-insensitively.")],
+        limit: Annotated[
+            int, Field(description="Most matches to return.", ge=1, le=100)
+        ] = DEFAULT_LIMIT,
+        budget: Annotated[
+            int | None,
+            Field(
+                description=(
+                    "The budget you observed with. It decides `shown`, so pass "
+                    "it whenever you set one on ios_observe."
+                )
+            ),
+        ] = None,
+    ) -> dict[str, Any]:
+        """Search the screen's accessibility tree, including what the digest hides.
+
+        Prefer `ios_observe` with a `query` when you want a usable digest you
+        can tap from: what it returns carries refs. Use this when `ios_observe`
+        shows nothing matching but the text is on the device, or when a tap
+        keeps missing. It reads the tree before compaction, so it reports
+        matches the digest dropped, which `ios_observe` by construction cannot,
+        and each one says whether it is `shown` or `hidden`. A hidden match is
+        the diagnosis: the words are on screen and perception is why you cannot
+        reach them. Name it by the `id` reported here.
+        """
+        session = ctx.require()
+        result = await session.find(text, limit=limit, budget=budget)
+        return session.redactor.mapping(result.to_dict())
 
     @mcp.tool(annotations=READ_ONLY)
     @tool_errors

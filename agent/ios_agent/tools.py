@@ -1,10 +1,17 @@
 """The verbs the model is given, and the run they act on.
 
-Nine tools, not the server's thirty. The reason is the same one the server
+Ten tools, not the server's thirty-one. The reason is the same one the server
 already acts on: a large set of confusable tools measurably degrades tool
 selection. `read_text`, `handle_alert`, `wait_for` and `screenshot` are
 deliberately absent until a task fails without them, so that adding one is a
 decision with a number behind it.
+
+`find` is the one that was added, and ADR 0011 carries the number. It exists
+because every perception fault in the S7 measurement fell on the two
+third-party tasks, where the whole actionable pool is unlabelled ids: the
+resolver's "nothing matches" error there lists no candidates at all, because
+it suggests by prose and there is none, so a miss told the agent nothing about
+what it had missed.
 
 ## Idempotency keys come from the tool call id
 
@@ -143,6 +150,19 @@ def build_tools(run: Run) -> list[BaseTool]:
         return await guarded("observe", backend.observe)
 
     @tool
+    async def find(text: str) -> str:
+        """Search the screen for text, including anything the digest left out.
+
+        Use it when the screen does not show what you expect, or when a tap
+        reports that nothing matches. Each match says whether it is `shown`,
+        meaning you can name it the ordinary way, or `hidden`, meaning it is on
+        the device but not in what you were given: name those by the `id` it
+        reports. This does not return a screen, so it does not replace reading
+        one.
+        """
+        return await guarded("find", lambda: backend.find(text))
+
+    @tool
     async def tap(target: str, tool_call_id: Annotated[str, InjectedToolCallId]) -> str:
         """Tap an element by its visible label, for example "Accessibility"."""
         run.count()
@@ -220,7 +240,18 @@ def build_tools(run: Run) -> list[BaseTool]:
         run.summary = summary
         return "recorded"
 
-    return [observe, tap, type_text, set_value, scroll, press_button, open_app, open_url, done]
+    return [
+        observe,
+        find,
+        tap,
+        type_text,
+        set_value,
+        scroll,
+        press_button,
+        open_app,
+        open_url,
+        done,
+    ]
 
 
 def _is_yes(answer: object) -> bool:

@@ -105,7 +105,10 @@ def test_budget_truncation_is_announced_not_silent() -> None:
     assert d.truncated is True
     assert d.total_nodes > len(d.nodes)
     assert "more elements omitted" in d.render()
-    assert "ios_observe" in d.render()
+    # The note says how to get the rest without naming a tool: the digest is
+    # read by the MCP server and by the bundled agent, whose verbs differ, and
+    # advice naming the wrong one has cost this project a whole run before.
+    assert "narrow by query or region" in d.render()
 
 
 def test_budget_keeps_the_most_salient_elements_first() -> None:

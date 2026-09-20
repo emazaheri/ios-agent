@@ -46,7 +46,7 @@ _CHARS_PER_TOKEN = 4
 _USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
 _USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
 #: Bumped when the report shape changes in a way a reader must notice.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
@@ -88,6 +88,11 @@ class Meter:
 
     session: IosSession
     observations: int = 0
+    #: Read-only tree searches. Apart from `observations` on purpose: a find
+    #: returns no refs and is not a screen, so counting it as one would move
+    #: the floor every task is asserted against. It still costs a device round
+    #: trip, which `device_tokens` and the wall clock both see.
+    finds: int = 0
     actions: int = 0
     device_tokens: int = 0
     prompt_tokens: int = 0
@@ -122,6 +127,12 @@ class Meter:
         self.last_screen = digest.render()
         return digest
 
+    async def find(self, text: str, **kwargs: Any) -> Any:
+        result = await self.session.find(text, **kwargs)
+        self.finds += 1
+        self.charge_device(result.to_dict())
+        return result
+
     async def act(self, coro: Awaitable[Any]) -> Any:
         result = await coro
         self.actions += 1
@@ -148,6 +159,7 @@ class RunResult:
     task: str
     passed: bool
     observations: int
+    finds: int
     actions: int
     device_tokens: int
     prompt_tokens: int
@@ -219,6 +231,7 @@ class RunResult:
             "passed": self.passed,
             "observations": self.observations,
             "floor": self.floor,
+            "finds": self.finds,
             "over_floor": round(self.over_floor, 2),
             "actions": self.actions,
             "turns": self.turns,
@@ -307,11 +320,18 @@ class TaskResult:
             if first
             else ""
         )
+        # Only shown when one happened. A column of zeros across thirteen
+        # tasks is how a feature nobody used comes to look like a feature.
+        finds = (
+            f"  {sum(r.finds for r in self.runs):>2} finds"
+            if any(r.finds for r in self.runs)
+            else ""
+        )
         return (
             f"[{self.success_rate:>4.0%}] {self.task:28} "
             f"{self.median_observations:>4.0f} obs (floor {floor})  "
             f"{self.median_overhead:>5.2f} overhead  "
-            f"worst {self.worst_overhead:>5.2f}{turns}"
+            f"worst {self.worst_overhead:>5.2f}{turns}{finds}"
         )
 
 
@@ -379,6 +399,7 @@ async def run_task(
         task=task.name,
         passed=passed,
         observations=meter.observations,
+        finds=meter.finds,
         actions=meter.actions,
         turns=meter.turns,
         # Only the oracle records outcomes, and only a model run records
@@ -539,6 +560,7 @@ def write_report(
             # Anything higher means some runs measured the infrastructure.
             "unusable_runs": sum(len(r.unusable) for r in results),
             "observations": sum(a.observations for a in attempts),
+            "finds": sum(a.finds for a in attempts),
             "floor": sum(a.floor for a in attempts),
             "actions": sum(a.actions for a in attempts),
             # Model calls, and the ceiling a perfect batcher would reach on

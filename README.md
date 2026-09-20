@@ -117,7 +117,7 @@ observations, device tokens, cost.
 | `--inline` | run in a short region under the prompt |
 | `--no-tui` | plain lines, for a pipe |
 
-**`manual` mode needs no API key.** It drives the same nine verbs by hand,
+**`manual` mode needs no API key.** It drives the same ten verbs by hand,
 which is the fastest way to debug perception on an app nobody has pointed this
 at before.
 
@@ -141,7 +141,7 @@ all supported. See [agent/README.md](agent/README.md).
 
 ## Connecting your own agent over MCP
 
-30 tools and 4 resources, over stdio or HTTP. Add to `.mcp.json` (already
+31 tools and 4 resources, over stdio or HTTP. Add to `.mcp.json` (already
 present here for Claude Code):
 
 ```json
@@ -210,16 +210,24 @@ of these numbers exist. Latest measurement, 13 tasks × 3 runs on
 | | |
 |---|---|
 | success | 39/39 |
-| observations | **40, against an oracle floor of 39** |
-| actions | **135, 1.25x a hand-written oracle** |
-| model turns | 238 |
+| observations | **41, against an oracle floor of 39** |
+| actions | **123, 1.14x a hand-written oracle** |
+| model turns | 216 |
+| faults | perception 6, policy 6, model 0 |
 | refusals, unusable runs | 0, 0 |
-| cost | $2.01 over 8m20s |
+| cost | $1.87 over 6m39s |
 
-One observation per run, give or take a single one across the whole set,
-including the two tasks in an app Apple did not write. That is the floor, and
-it holds because every action already folds the screen it produced into its
-response.
+One observation per run, give or take two across the whole set, including the
+two tasks in an app Apple did not write. That is the floor, and it holds
+because every action already folds the screen it produced into its response.
+
+Actions were 1.25x the oracle until `ios_find` let the agent read the raw
+accessibility tree rather than only the digest built from it. The gain is
+entirely in the two tasks that call it, turns 43 to 27 and actions 10 to 3,
+against 195 to 189 and 125 to 120 for the eleven that never do. It is not free:
+a tenth verb costs about 190 prompt tokens on every turn of every run, used or
+not, which is [docs/adr/0011](docs/adr/0011-a-find-that-reads-the-tree-the-digest-threw-away.md)
+and the reason there is no eleventh.
 
 Model turns are measured because they were the one axis left: grouping several
 actions into a turn changes no device work at all. Invited to do it, the model
@@ -260,8 +268,8 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 433 tests, no device, no model
-uv run pytest tests/tui           # 185 tests, the terminal front end
+uv run pytest tests/unit          # 508 tests, no device, no model
+uv run pytest tests/tui           # 192 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui

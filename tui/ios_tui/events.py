@@ -29,6 +29,7 @@ class StatsSnapshot:
     """A frozen copy of what a run had cost at one instant."""
 
     observations: int = 0
+    finds: int = 0
     actions: int = 0
     device_tokens: int = 0
     refusals: int = 0
@@ -37,6 +38,7 @@ class StatsSnapshot:
     def of(cls, stats: BackendStats) -> StatsSnapshot:
         return cls(
             observations=stats.observations,
+            finds=stats.finds,
             actions=stats.actions,
             device_tokens=stats.device_tokens,
             refusals=stats.refusals,

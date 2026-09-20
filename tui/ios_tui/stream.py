@@ -98,6 +98,14 @@ class EventBackend:
         self._sink.emit(ScreenUpdated(text=self.last_screen))
         return rendered
 
+    async def find(self, text: str) -> str:
+        rendered = await self._inner.find(text)
+        self._sink.emit(Observed(rendered=rendered, stats=StatsSnapshot.of(self.stats)))
+        # No `ScreenUpdated`: a find carries no refs and is not a screen, and
+        # the inner backend deliberately leaves `last_screen` alone. Emitting
+        # one would put a search result where the screen pane goes.
+        return rendered
+
     # -- actions -----------------------------------------------------------
 
     async def tap(self, target: str, *, idem_key: str) -> str:

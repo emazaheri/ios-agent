@@ -199,8 +199,10 @@ def _resolve_text(
     raise ElementNotFound(
         f"Nothing on screen matches {target!r}",
         hint=(
-            "Check the closest candidates below. If the element is drawn without "
-            "accessibility data, call ios_screenshot with annotate_refs=true."
+            "Check the closest candidates below. If there are none, nothing on "
+            "this screen carries prose to suggest, which is common where every "
+            "control is drawn rather than labelled: search the tree for the text "
+            "you expect, and a match reported as hidden names the id to use."
         ),
         details={
             "closest": [f"{n.ref}: {n.role} {n.label!r}" for _, n in scored[:5]],

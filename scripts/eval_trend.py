@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a record's shape changes in a way a reader must notice.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Committed, unlike the reports themselves. It lives beside the suites that
 #: produce it rather than at the repository root, where `evals/` would read as
@@ -48,6 +48,7 @@ CHECKED = (
     "passed",
     "observations",
     "floor",
+    "finds",
     "actions",
     "turns",
     "turn_floor",
@@ -73,6 +74,7 @@ _KEY_ORDER = (
     "passed",
     "observations",
     "floor",
+    "finds",
     "actions",
     "turns",
     "turn_floor",
@@ -138,6 +140,10 @@ def flatten(report: dict[str, Any], *, suite: str, note: str | None = None) -> d
         "passed": passed,
         "observations": totals.get("observations", 0),
         "floor": totals.get("floor", 0),
+        # Apart from `observations` on purpose: a find returns no refs and is
+        # not a screen, so counting it as one would move the floor every task
+        # is asserted against. Zero in the guarded series, and checked for it.
+        "finds": totals.get("finds", 0),
         "actions": totals.get("actions", 0),
         # Zero in both guarded series, and checked for it: the agent-oracle
         # suite has no model, so a `turns` that ever moved would mean one had
@@ -175,10 +181,26 @@ def load(path: Path, *, suite: str | None = None) -> list[dict[str, Any]]:
 def compare(new: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
     """Every guarded metric that moved, as `name: old -> new`."""
     return [
-        f"{key}: {baseline.get(key)!r} -> {new.get(key)!r}"
+        f"{key}: {_baseline(baseline, key, new.get(key))!r} -> {new.get(key)!r}"
         for key in CHECKED
-        if new.get(key) != baseline.get(key)
+        if new.get(key) != _baseline(baseline, key, new.get(key))
     ]
+
+
+def _baseline(baseline: dict[str, Any], key: str, new_value: Any) -> Any:
+    """What the baseline said, for a key it may predate.
+
+    A metric added after a record was written is absent from it, and absent is
+    not the same claim as moved: comparing 0 against `None` would fail every
+    guarded suite once, on the run that introduced the metric, and the failure
+    would say the count changed when nothing did. An older record is read as
+    the empty value of whatever the new one carries -- 0 for a count, {} for a
+    histogram -- which is exactly what a suite that never did the thing would
+    have recorded.
+    """
+    if key in baseline:
+        return baseline[key]
+    return type(new_value)() if new_value is not None else None
 
 
 def render(rows: list[dict[str, Any]], last: int) -> str:

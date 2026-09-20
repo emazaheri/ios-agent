@@ -35,6 +35,7 @@ are unsure completed.
 | `ios_observe` | The digest. `query` and `region` narrow it; prefer those over raising `budget` when truncated. `include_elements` adds structured JSON at roughly double the cost. |
 | `ios_screenshot` | `annotate_refs=true` draws numbered boxes, for UI with no accessibility data. |
 | `ios_read_text` | Text of the screen or one element. Use this to extract content; `ios_observe` is shaped for deciding what to tap. |
+| `ios_find` | Searches the accessibility tree *before* compaction, so it reports matches the digest dropped. Each is `shown` (nameable the ordinary way) or `hidden` (on screen, not in the digest: name it by its `id`). Returns no refs by design. |
 | `ios_wait_for` | Waits for text to appear or disappear. Reports failure as data rather than raising. |
 | `ios_get_logs` | Device logs, when the UI does not explain a failure. |
 | `ios_export_trace` | Everything this session did. |

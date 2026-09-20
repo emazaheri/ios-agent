@@ -36,6 +36,7 @@ from ios_mcp.errors import (
     NotSupported,
 )
 from ios_mcp.perception.digest import Digest, build_digest
+from ios_mcp.perception.find import DEFAULT_LIMIT, FindResult, find_in_tree
 from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
 from ios_mcp.perception.roles import SETTABLE_ROLES
@@ -44,7 +45,7 @@ from ios_mcp.policy.faults import Fault, classify
 from ios_mcp.policy.gate import PolicyGate, Verdict
 from ios_mcp.policy.redact import Redactor
 from ios_mcp.policy.secrets import resolve_secret
-from ios_mcp.wda.models import AlertInfo, Rect
+from ios_mcp.wda.models import AlertInfo, Rect, SnapshotNode
 from ios_mcp.wda.session import WdaSession
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,18 @@ class IosSession:
         would destroy the ref table's memory of what the agent was actually
         shown, which is what lets a reassigned ref be detected.
         """
+        _, digest = await self._snapshot_with_root(query=query, region=region, budget=budget)
+        return digest
+
+    async def _snapshot_with_root(
+        self, *, query: str | None = None, region: Rect | None = None, budget: int | None = None
+    ) -> tuple[SnapshotNode, Digest]:
+        """One fetch, both artefacts.
+
+        `find` needs the raw tree and the digest built from it, and they have
+        to be the same tree or `shown` is decided against a screen that has
+        moved on. Two `source()` calls would be both slower and wrong.
+        """
         root = await self.wda.source()
         app = (await self._active_bundle_id()) or self.wda.bundle_id
         digest_settings = self.settings.digest
@@ -113,7 +126,7 @@ class IosSession:
             digest_settings = digest_settings.model_copy(update={"token_budget": budget})
         digest = build_digest(root, digest_settings, app=app, query=query, region=region)
         self._last_digest = digest
-        return digest
+        return root, digest
 
     async def observe(
         self, *, query: str | None = None, region: Rect | None = None, budget: int | None = None
@@ -139,6 +152,27 @@ class IosSession:
         resolved = self.resolve(digest, ref=ref, target=target, actionable_only=False)
         inside = [n.text for n in digest.nodes if n.text and _within(n.rect, resolved.rect)]
         return "\n".join(t for t in inside if t)
+
+    async def find(
+        self, text: str, *, limit: int = DEFAULT_LIMIT, budget: int | None = None
+    ) -> FindResult:
+        """Search the raw accessibility tree, including what the digest dropped.
+
+        Fresh, like the other read paths: a match reported off a screen that
+        has since changed is misinformation. Deliberately does not touch the
+        ref table, so a find is never mistaken for an observation -- see
+        `ios_mcp.perception.find` for why that matters.
+
+        ``budget`` has to be the one the caller observed with, because it is
+        what decides `shown`. Found on a real Settings root: observing at a
+        tight budget drops five elements, and a find at the default budget then
+        reports every one of them `shown`, which is true of the digest it just
+        built and false of the one the caller is looking at. Answering "you can
+        name this" to someone who cannot is the single way this result can
+        mislead, so the question has to be asked under the caller's own budget.
+        """
+        root, digest = await self._snapshot_with_root(budget=budget)
+        return find_in_tree(root, text, digest, limit=limit)
 
     def resolve(
         self,
