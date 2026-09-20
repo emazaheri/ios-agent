@@ -20,6 +20,7 @@ from typing import Any, Literal
 from ios_mcp.config import Settings, get_settings
 from ios_mcp.devices.base import DeviceInfo
 from ios_mcp.devices.shell import probe, which
+from ios_mcp.devices.simulator import SIMULATOR_UI_BUNDLE_ID
 from ios_mcp.devices.tunnel import list_tunnels
 
 Status = Literal["ok", "warn", "fail", "skip"]
@@ -197,6 +198,7 @@ async def run_doctor(settings: Settings | None = None) -> DoctorReport:
     checks.append(xcode)
     checks.append(await _check_simctl())
     checks.append(await _check_simulators())
+    checks.append(await _check_simulator_window())
     checks.append(await _check_devicectl())
     goios = await _check_goios(cfg)
     checks.append(goios)
@@ -280,6 +282,60 @@ async def _check_simctl() -> Check:
             ),
         )
     return Check("simctl", "ok", "xcrun simctl available")
+
+
+async def _check_simulator_window() -> Check:
+    """Can the simulator actually be put on screen?
+
+    A warning rather than a failure: nothing the automation does needs the
+    window, and CI wants it off. It is a check at all because the alternative
+    is silence, and silence is what happened here. Xcode 27 replaced
+    `Simulator.app` with Device Hub and moved it, `open -a Simulator` began
+    failing on every boot, and `_show_window` logged that at debug. Runs went
+    headless for days on a machine whose owner expected to watch them.
+
+    Resolved on the filesystem rather than through `open`, because every
+    variant of `open` either launches the app or reveals it in Finder, and a
+    diagnostic that opens windows is not a diagnostic.
+    """
+    if platform.system() != "Darwin":
+        return Check("simulator-window", "skip", "not macOS")
+    if not get_settings().simulator.show_window:
+        return Check("simulator-window", "skip", "show_window is off")
+
+    active = await probe("xcode-select", "-p", timeout=20.0)
+    if active is None or not active.ok or not active.stdout.strip():
+        return Check("simulator-window", "skip", "no active developer directory")
+    developer = Path(active.stdout.strip())
+
+    # Xcode 27 moved it up a level, into Contents/Applications, beside
+    # Contents/Developer rather than inside it.
+    candidates = (
+        ("Device Hub", developer.parent / "Applications" / "DeviceHub.app"),
+        ("Simulator.app", developer / "Applications" / "Simulator.app"),
+    )
+    for label, path in candidates:
+        if path.exists():
+            return Check(
+                "simulator-window",
+                "ok",
+                f"{label} at {path}",
+                data={"app": str(path), "bundle_id": SIMULATOR_UI_BUNDLE_ID},
+            )
+
+    return Check(
+        "simulator-window",
+        "warn",
+        "no simulator UI app found, so a booted simulator will be invisible",
+        remedy=(
+            "Automation is unaffected and the device still boots. To watch it, "
+            "install the full Xcode: 27 and later ship Device Hub "
+            "(Contents/Applications/DeviceHub.app) and earlier versions ship "
+            "Contents/Developer/Applications/Simulator.app. Set "
+            "IOS_MCP_SIMULATOR__SHOW_WINDOW=false to silence this."
+        ),
+        data={"looked_in": [str(p) for _, p in candidates]},
+    )
 
 
 async def _check_simulators() -> Check:

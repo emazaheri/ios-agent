@@ -7,7 +7,7 @@ MCP server, and the library beneath both.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-618%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-673%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -210,13 +210,22 @@ of these numbers exist. Latest measurement, 13 tasks × 3 runs on
 | | |
 |---|---|
 | success | 39/39 |
-| observations | **39, against an oracle floor of 39** |
+| observations | **40, against an oracle floor of 39** |
+| actions | **135, 1.25x a hand-written oracle** |
+| model turns | 238 |
 | refusals, unusable runs | 0, 0 |
-| cost | $2.13 over 10m28s |
+| cost | $2.01 over 8m20s |
 
-Every task sits at the observation floor, including two in an app Apple did
-not write, because every action already folds the screen it produced into
-its response.
+One observation per run, give or take a single one across the whole set,
+including the two tasks in an app Apple did not write. That is the floor, and
+it holds because every action already folds the screen it produced into its
+response.
+
+Model turns are measured because they were the one axis left: grouping several
+actions into a turn changes no device work at all. Invited to do it, the model
+never once did, so [docs/adr/0010](docs/adr/0010-no-multi-action-batching.md)
+rejects the idea and keeps the guard that bounds the path it would have run
+on.
 
 ### Verified on real iOS, including a physical iPhone
 
@@ -226,11 +235,17 @@ about a fake. The same goal, `turn on Bold Text`, across all three tiers:
 | | actions | observations | digest |
 |---|---|---|---|
 | scripted fake | 3 | 1 | — |
-| iOS 26.5 simulator | 3 | 1 | 167 raw nodes → 14 elements, 261 tokens |
+| iOS 27.0 simulator | 4 | 1 | 166 raw nodes → 15 elements, 272 tokens |
 | **iPhone, iOS 26.6, Wi-Fi** | **3** | **1** | 140 raw nodes → 15 elements, 243 tokens |
 
-Identical on all three, and on the phone it took 48.6s where the simulator took
-seconds. The switch was confirmed by navigating there and reading `value="1"`
+One observation on every tier, which is the number the design argument rests
+on, and on the phone it took 48.6s where the simulator took seconds. The
+simulator row was re-measured on iOS 27.0 after the 26.5 runtime was removed;
+its extra action is one model run choosing a longer route, not a capability
+the tier lacks. The phone row still reads 26.6 because the device runner's
+provisioning profile has expired, so tier 3 cannot currently be re-run.
+
+The switch was confirmed by navigating there and reading `value="1"`
 independently of what the agent claimed, then restored.
 
 Most importantly, **a real no-op still reports `screen_changed=False` on the
@@ -257,7 +272,11 @@ and resolution-tier distribution per flow. A drift from `exact` toward
 `text-fuzzy` is the leading indicator that a flow is about to become flaky.
 Agent tasks additionally declare an **action floor**, the number of actions a
 hand-written oracle needs, asserted against that oracle so it cannot drift into
-an aspiration. Failures are attributed too: a report says which of them were
+an aspiration, and a **turn floor**, the model calls a perfect batcher would
+need for the same route. The turn floor is derived rather than declared:
+`batch.simulate_turns` walks what the oracle actually did and splits it
+wherever the batch guard would stop, so it measures the guard rather than a
+number typed beside it. Failures are attributed too: a report says which of them were
 the device, perception, the model or the policy gate, rather than only that
 something failed.
 

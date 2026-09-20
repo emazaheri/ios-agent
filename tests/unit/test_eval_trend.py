@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from eval_trend import CHECKED, append, compare, flatten, load, main, render
+from eval_trend import CHECKED, SCHEMA_VERSION, append, compare, flatten, load, main, render
 
 FLOW_REPORT = {
-    "schema_version": 1,
+    "schema_version": SCHEMA_VERSION,
     "generated_at": 0.0,
     "totals": {
         "flows": 11,
@@ -27,7 +27,7 @@ FLOW_REPORT = {
 }
 
 TASK_REPORT = {
-    "schema_version": 1,
+    "schema_version": SCHEMA_VERSION,
     "generated_at": 0.0,
     "driver": "oracle",
     "model": "n/a (no model in the loop)",
@@ -75,7 +75,7 @@ def test_an_unreadable_schema_fails_loudly() -> None:
 
 def test_a_report_that_is_neither_shape_is_rejected() -> None:
     with pytest.raises(ValueError, match="neither"):
-        flatten({"schema_version": 1, "totals": {}}, suite="x")
+        flatten({"schema_version": SCHEMA_VERSION, "totals": {}}, suite="x")
 
 
 def test_appending_never_rewrites_what_is_there(tmp_path: Path) -> None:
@@ -131,6 +131,23 @@ def test_time_is_never_guarded() -> None:
     slower = json.loads(json.dumps(TASK_REPORT))
     slower["totals"]["seconds"] = 99.0
     assert compare(flatten(slower, suite="agent-oracle"), baseline) == []
+
+
+def test_the_turn_counts_are_guarded() -> None:
+    """Both are counts on a fixed route, so ADR 0009 puts them in the exact guard.
+
+    `turn_floor` is the real one: it is derived from the batch rule, so
+    widening what terminates a sequence moves it and CI says so. `turns` is
+    zero in both guarded series and checked for it, because the only way it
+    could move is a model finding its way into the suite that runs for free.
+    """
+    assert {"turns", "turn_floor"} <= set(CHECKED)
+
+    baseline = flatten(TASK_REPORT, suite="agent-oracle")
+    batched = json.loads(json.dumps(TASK_REPORT))
+    batched["totals"]["turn_floor"] = 39
+    drift = compare(flatten(batched, suite="agent-oracle"), baseline)
+    assert any("turn_floor" in line for line in drift)
 
 
 def test_rendering_an_empty_history_says_so() -> None:

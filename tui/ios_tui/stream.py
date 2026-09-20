@@ -24,6 +24,7 @@ from typing import Any
 
 from ios_agent import AgentSettings, export_provider_credentials
 from ios_agent.backend import Backend, BackendStats
+from ios_agent.batch import LastAction
 from ios_agent.loop import ModelFactory
 from langchain.messages import AIMessage, AnyMessage
 
@@ -80,6 +81,14 @@ class EventBackend:
     @last_screen.setter
     def last_screen(self, value: str) -> None:
         self._inner.last_screen = value
+
+    @property
+    def last_action(self) -> LastAction | None:
+        return self._inner.last_action
+
+    @last_action.setter
+    def last_action(self, value: LastAction | None) -> None:
+        self._inner.last_action = value
 
     # -- perception --------------------------------------------------------
 

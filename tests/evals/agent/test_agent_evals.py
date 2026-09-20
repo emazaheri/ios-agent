@@ -11,15 +11,17 @@ and the two columns are the argument.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import oracle
 import pytest
-from measure import Driver, TaskResult, run_task, write_report
+from measure import Driver, Meter, TaskResult, run_task, write_report
 from screens import build_session
 from tasks import TASKS, Task
 
 from ios_mcp.config import Settings
+from ios_mcp.errors import IosAutomationError
 
 pytestmark = pytest.mark.agent
 
@@ -103,6 +105,47 @@ async def test_the_oracle_spends_no_more_actions_than_its_floor(task: Task) -> N
     assert actions == [task.action_floor] * ORACLE_RUNS, (
         f"{task.name}: oracle took {actions}, action_floor says {task.action_floor}"
     )
+
+
+@pytest.mark.parametrize("task", TASKS, ids=lambda t: t.name)
+async def test_the_oracle_route_batches_into_its_turn_floor(task: Task) -> None:
+    """The ceiling on what grouping actions into one turn can win.
+
+    Asserted by equality for the same reason the other two floors are, and
+    derived rather than declared: `batch.simulate_turns` walks the outcomes
+    the oracle actually recorded and splits them wherever the guard would
+    abort. So this is a test of the guard, not of arithmetic over a script
+    written to satisfy it. Widen `TERMINATES_SEQUENCE` and the tasks whose
+    routes cross one will fail here by name.
+    """
+    result = await measure(task, oracle.drive, ORACLE_RUNS)
+    floors = [run.turn_floor for run in result.runs]
+    assert floors == [task.turn_floor] * ORACLE_RUNS, (
+        f"{task.name}: the route batches into {floors}, turn_floor says {task.turn_floor}"
+    )
+
+
+@pytest.mark.parametrize("task", TASKS, ids=lambda t: t.name)
+async def test_the_oracle_only_produces_verbs_the_guard_knows(task: Task) -> None:
+    """A verb the guard has never heard of is one it can never stop on.
+
+    `ActionResult.action` is the audit trail's name, not the tool's, and two
+    of them differ: typing is `type` and launching is `launch_app:<bundle>`.
+    `measure._verb_of` reconciles them, and an unmapped name would fail
+    silently, claiming a batch `TERMINATES_SEQUENCE` would never have allowed.
+    """
+    from ios_agent.batch import DEVICE_VERBS
+
+    model = task.model()
+    session, _fake, _adapter = build_session(model, eval_settings(task))
+    meter = Meter(session)
+    # `refuse_erasing_the_device` is supposed to be stopped, and the verbs it
+    # managed before that are still verbs the guard has to recognise.
+    with contextlib.suppress(IosAutomationError):
+        await oracle.drive(task, session, meter)
+
+    unknown = {o.verb for o in meter.outcomes} - DEVICE_VERBS
+    assert not unknown, f"{task.name}: the guard cannot recognise {sorted(unknown)}"
 
 
 def test_write_the_report() -> None:

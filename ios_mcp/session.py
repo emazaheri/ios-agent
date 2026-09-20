@@ -861,6 +861,17 @@ class IosSession:
         x1, y1, x2, y2 = deltas[direction]
         await self.wda.drag(x1, y1, x2, y2, 0.4)
 
+    async def foreground_app(self) -> str | None:
+        """The bundle id of whatever is in front, or None if it cannot be read.
+
+        Public because composing an opening prompt needs it. An agent told
+        only which apps exist will open the one it is already inside, which
+        spends a device action to learn nothing: measured at one wasted action
+        on every run of the task set once `open_app` became callable. Cheap,
+        one WebDriverAgent call and no snapshot.
+        """
+        return await self._active_bundle_id()
+
     async def _active_bundle_id(self) -> str | None:
         try:
             info = await self.wda.active_app()

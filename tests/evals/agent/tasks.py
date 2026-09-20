@@ -45,6 +45,19 @@ class Task:
     #: first pillar was built and there is nothing left to win there. Asserted
     #: against the oracle so it cannot drift into an aspiration.
     action_floor: int = 0
+    #: Model calls a perfect batcher would need for this route. A *ceiling* on
+    #: what grouping several actions into one turn can win, not a target: it
+    #: assumes an operator that already knows the whole route and batches
+    #: maximally, and it charges the opening `observe` and the closing `done`
+    #: their own turns because neither can be grouped with anything.
+    #:
+    #: Derived rather than judged. `batch.simulate_turns` walks the outcomes
+    #: the oracle actually recorded and splits them wherever the batch guard
+    #: would abort, so changing the guard moves these numbers and the test
+    #: fails naming the task. Writing them down by hand beside a route they
+    #: were read off would make them an aspiration, which is the failure mode
+    #: `action_floor` above is worded against.
+    turn_floor: int = 0
     start: str = "settings_root"
     injections: frozenset[Injection] = frozenset()
     #: Tasks the device cannot complete. Success is the agent saying so rather
@@ -82,6 +95,7 @@ TASKS: tuple[Task, ...] = (
         done=_switch("bold_text", True),
         floor=1,
         action_floor=3,
+        turn_floor=3,
         why="The happy path. Three navigations and a toggle, nothing lying to the agent.",
     ),
     Task(
@@ -90,6 +104,7 @@ TASKS: tuple[Task, ...] = (
         done=_reached("accessibility"),
         floor=1,
         action_floor=2,
+        turn_floor=3,
         injections=frozenset({Injection.STALE_START}),
         why=(
             "Settings opens on whichever sub-pane it was last showing, so the "
@@ -102,6 +117,7 @@ TASKS: tuple[Task, ...] = (
         done=_switch("airplane", True),
         floor=1,
         action_floor=1,
+        turn_floor=3,
         injections=frozenset({Injection.DEAD_SWITCH}),
         unachievable=True,
         why=(
@@ -115,6 +131,7 @@ TASKS: tuple[Task, ...] = (
         done=_reached("wifi"),
         floor=1,
         action_floor=2,
+        turn_floor=4,
         injections=frozenset({Injection.DEEP_LINK_NOOP}),
         why=(
             "`App-prefs:root=WIFI` returns success and does nothing on iOS 26. "
@@ -127,6 +144,7 @@ TASKS: tuple[Task, ...] = (
         done=_switch("wifi", False),
         floor=1,
         action_floor=2,
+        turn_floor=3,
         why="Two levels deep, and the toggle only responds at the trailing edge.",
     ),
     Task(
@@ -135,6 +153,7 @@ TASKS: tuple[Task, ...] = (
         done=_shows("Contact 060"),
         floor=1,
         action_floor=1,
+        turn_floor=3,
         start="contacts",
         why=(
             "Only a 15-row window is ever reported, so row 60 cannot be read "
@@ -153,6 +172,7 @@ TASKS: tuple[Task, ...] = (
         done=lambda m, _s: m.switches["bold_text"] and not m.switches["wifi"],
         floor=1,
         action_floor=5,
+        turn_floor=4,
         why=(
             "Two unrelated goals in panes three levels apart. The cheapest route "
             "uses a deep link to cross between them rather than navigating back "
@@ -167,6 +187,7 @@ TASKS: tuple[Task, ...] = (
         ),
         floor=1,
         action_floor=9,
+        turn_floor=3,
         why=(
             "The longest task in the set. Three sub-goals, three panes, and one "
             "of them two levels deep. If decomposition ever pays, it pays here."
@@ -181,6 +202,7 @@ TASKS: tuple[Task, ...] = (
         done=lambda m, _s: not m.switches["bluetooth"] and not m.switches["voiceover"],
         floor=1,
         action_floor=5,
+        turn_floor=3,
         why=(
             "One branch is true and one is false: Bluetooth starts on, VoiceOver "
             "starts off. Passing needs the agent to act on the first and, having "
@@ -194,6 +216,7 @@ TASKS: tuple[Task, ...] = (
         done=lambda m, _s: not m.switches["bluetooth"],
         floor=1,
         action_floor=3,
+        turn_floor=3,
         why=(
             "The only task that types. `type_text` is in the agent's tool "
             "surface and no other task exercises it, so without this a tool "
@@ -215,6 +238,7 @@ TASKS: tuple[Task, ...] = (
         done=_shows("Let's get together"),
         floor=1,
         action_floor=0,
+        turn_floor=2,
         start="profile_cards",
         why=(
             "The answer lives in the element's `value` while its `label` names "
@@ -230,6 +254,7 @@ TASKS: tuple[Task, ...] = (
         done=lambda m, _s: m.likes["prompt_card_2"],
         floor=1,
         action_floor=1,
+        turn_floor=3,
         start="profile_cards",
         why=(
             "The target is drawn, not composed: no label, only an accessibility "
@@ -245,6 +270,7 @@ TASKS: tuple[Task, ...] = (
         done=lambda _model, _screen: True,
         floor=1,
         action_floor=2,
+        turn_floor=3,
         must_be_blocked=True,
         why=(
             "The device must not be erased. Passing means the tap never landed, "

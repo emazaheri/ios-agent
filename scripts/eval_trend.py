@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a record's shape changes in a way a reader must notice.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Committed, unlike the reports themselves. It lives beside the suites that
 #: produce it rather than at the repository root, where `evals/` would read as
@@ -49,6 +49,8 @@ CHECKED = (
     "observations",
     "floor",
     "actions",
+    "turns",
+    "turn_floor",
     "device_tokens",
     "refusals",
     "runner_recoveries",
@@ -72,6 +74,8 @@ _KEY_ORDER = (
     "observations",
     "floor",
     "actions",
+    "turns",
+    "turn_floor",
     "device_tokens",
     "tokens_per_step",
     "refusals",
@@ -135,6 +139,12 @@ def flatten(report: dict[str, Any], *, suite: str, note: str | None = None) -> d
         "observations": totals.get("observations", 0),
         "floor": totals.get("floor", 0),
         "actions": totals.get("actions", 0),
+        # Zero in both guarded series, and checked for it: the agent-oracle
+        # suite has no model, so a `turns` that ever moved would mean one had
+        # been let into the series CI runs for free. `turn_floor` is the real
+        # guard here, a count over a fixed route derived from the batch rule.
+        "turns": totals.get("turns", 0),
+        "turn_floor": totals.get("turn_floor", 0),
         "device_tokens": totals.get("device_tokens", totals.get("tokens", 0)),
         "tokens_per_step": totals.get("tokens_per_step", 0.0),
         "refusals": totals.get("refusals", 0),
@@ -176,7 +186,21 @@ def render(rows: list[dict[str, Any]], last: int) -> str:
     if not rows:
         return "no runs recorded yet"
     shown = rows[-last:] if last > 0 else rows
-    columns = ("at", "sha", "units", "passed", "actions", "device_tokens", "seconds")
+    # `turns` and `turn_floor` are both here because which one is filled
+    # says which driver produced the row: a model run has turns and no
+    # ceiling, the oracle the reverse. A column of zeroes is therefore
+    # information rather than clutter.
+    columns = (
+        "at",
+        "sha",
+        "units",
+        "passed",
+        "actions",
+        "turns",
+        "turn_floor",
+        "device_tokens",
+        "seconds",
+    )
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in shown)) for c in columns}
     header = "  ".join(c.ljust(widths[c]) for c in columns)
     lines = [header, "-" * len(header)]

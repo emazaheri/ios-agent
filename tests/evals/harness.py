@@ -24,7 +24,12 @@ from ios_mcp.session import IosSession
 #: Rough characters-per-token, matching the digest's own estimate.
 _CHARS_PER_TOKEN = 4
 #: Bumped when the report shape changes in a way a reader must notice.
-SCHEMA_VERSION = 1
+#: Shared with `tests/evals/agent/measure.py` and read by
+#: `scripts/eval_trend.py`, which rejects any other value. It describes
+#: the history record the two writers feed, so it moves when that record
+#: gains a column even if this suite's own payload did not change. Version
+#: 2 added `turns` and `turn_floor`, which a flow report never has.
+SCHEMA_VERSION = 2
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:

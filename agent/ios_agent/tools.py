@@ -1,6 +1,6 @@
 """The verbs the model is given, and the run they act on.
 
-Eight tools, not the server's thirty. The reason is the same one the server
+Nine tools, not the server's thirty. The reason is the same one the server
 already acts on: a large set of confusable tools measurably degrades tool
 selection. `read_text`, `handle_alert`, `wait_for` and `screenshot` are
 deliberately absent until a task fails without them, so that adding one is a
@@ -47,6 +47,10 @@ class Run:
     backend: Backend
     goal: str
     steps: int = 0
+    #: Model calls made. The cost driver a multi-call turn is meant to
+    #: reduce, and the only counter that batching can move: actions,
+    #: observations and device tokens are all unchanged by grouping.
+    turns: int = 0
     finished: bool = False
     succeeded: bool = False
     summary: str = ""
@@ -216,7 +220,7 @@ def build_tools(run: Run) -> list[BaseTool]:
         run.summary = summary
         return "recorded"
 
-    return [observe, tap, type_text, set_value, scroll, press_button, open_url, done]
+    return [observe, tap, type_text, set_value, scroll, press_button, open_app, open_url, done]
 
 
 def _is_yes(answer: object) -> bool:

@@ -45,6 +45,10 @@ class Outcome:
     #: a halted session, a detected loop, or the step budget running out.
     stopped_because: str | None = None
     steps: int = 0
+    #: Model calls made. Not on `BackendStats`: a turn is the graph's
+    #: unit, not the device's, and `tests/tui/test_cost.py` compares the
+    #: whole of `stats` by equality between a watched and a bare run.
+    turns: int = 0
     #: Times the run paused to ask a human. Zero is the expected value for an
     #: ordinary task; anything else means the policy gate fired.
     approvals_asked: int = 0
