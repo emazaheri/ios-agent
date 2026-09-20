@@ -7,7 +7,7 @@ MCP server, and the library beneath both.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-618%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-673%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -210,13 +210,22 @@ of these numbers exist. Latest measurement, 13 tasks × 3 runs on
 | | |
 |---|---|
 | success | 39/39 |
-| observations | **39, against an oracle floor of 39** |
+| observations | **40, against an oracle floor of 39** |
+| actions | **135, 1.25x a hand-written oracle** |
+| model turns | 238 |
 | refusals, unusable runs | 0, 0 |
-| cost | $2.13 over 10m28s |
+| cost | $2.01 over 8m20s |
 
-Every task sits at the observation floor, including two in an app Apple did
-not write, because every action already folds the screen it produced into
-its response.
+One observation per run, give or take a single one across the whole set,
+including the two tasks in an app Apple did not write. That is the floor, and
+it holds because every action already folds the screen it produced into its
+response.
+
+Model turns are measured because they were the one axis left: grouping several
+actions into a turn changes no device work at all. Invited to do it, the model
+never once did, so [docs/adr/0010](docs/adr/0010-no-multi-action-batching.md)
+rejects the idea and keeps the guard that bounds the path it would have run
+on.
 
 ### Verified on real iOS, including a physical iPhone
 
