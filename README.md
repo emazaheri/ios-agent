@@ -257,7 +257,11 @@ and resolution-tier distribution per flow. A drift from `exact` toward
 `text-fuzzy` is the leading indicator that a flow is about to become flaky.
 Agent tasks additionally declare an **action floor**, the number of actions a
 hand-written oracle needs, asserted against that oracle so it cannot drift into
-an aspiration. Failures are attributed too: a report says which of them were
+an aspiration, and a **turn floor**, the model calls a perfect batcher would
+need for the same route. The turn floor is derived rather than declared:
+`batch.simulate_turns` walks what the oracle actually did and splits it
+wherever the batch guard would stop, so it measures the guard rather than a
+number typed beside it. Failures are attributed too: a report says which of them were
 the device, perception, the model or the policy gate, rather than only that
 something failed.
 

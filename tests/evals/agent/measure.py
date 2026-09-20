@@ -27,6 +27,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from ios_agent.batch import LastAction, simulate_turns
 from screens import DeviceModel
 from tasks import Task
 
@@ -45,7 +46,7 @@ _CHARS_PER_TOKEN = 4
 _USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
 _USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
 #: Bumped when the report shape changes in a way a reader must notice.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
@@ -54,6 +55,25 @@ def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
         for key, count in histogram.items():
             out[key] = out.get(key, 0) + count
     return out
+
+
+def _verb_of(action: str) -> str:
+    """The agent's name for what the session just did.
+
+    `ActionResult.action` is the audit trail's name and not the tool's: typing
+    is recorded as `type`, and launching an app as `launch_app:<bundle id>` so
+    the trail says which app was opened. `batch.py` is written in the agent's
+    verbs, and this is the only place an `ActionResult` becomes a
+    `LastAction`, so the two names are reconciled here.
+
+    A name that fell through unmapped would quietly stop matching
+    `TERMINATES_SEQUENCE`, and the turn floor would silently claim a batch the
+    guard would never allow. `test_agent_evals.py` asserts every verb an
+    oracle produces is one the guard knows.
+    """
+    if action.startswith("launch_app"):
+        return "open_app"
+    return {"type": "type_text"}.get(action, action)
 
 
 @dataclass
@@ -80,6 +100,13 @@ class Meter:
     #: The last screen the agent was shown, rendered. Success predicates read
     #: this rather than re-observing, which would corrupt the count.
     last_screen: str = ""
+    #: Model calls. Set by the agent driver from the run's own counter; the
+    #: oracle makes none, and `turn_floor` is derived from `outcomes` instead.
+    turns: int = 0
+    #: What each action did, in order, for `batch.simulate_turns`. Recording
+    #: it here is what lets a turn floor be derived from the guard rather than
+    #: written down beside the route and left to drift.
+    outcomes: list[LastAction] = field(default_factory=list)
 
     def charge_device(self, payload: Any) -> None:
         self.device_tokens += len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN
@@ -99,6 +126,16 @@ class Meter:
         result = await coro
         self.actions += 1
         self.charge_device(result.to_dict())
+        self.outcomes.append(
+            LastAction(
+                verb=_verb_of(result.action),
+                ok=result.ok,
+                screen_changed=result.screen_changed,
+                alert=result.alert is not None,
+                refused=False,
+                seq=len(self.outcomes) + 1,
+            )
+        )
         if result.digest is not None:
             self.last_screen = result.digest.render()
         return result
@@ -119,6 +156,14 @@ class RunResult:
     refusals: int
     seconds: float
     floor: int
+    #: Model calls this run actually made. Zero for the oracle, which has no
+    #: model: it is the agent's number, and the one batching exists to move.
+    turns: int = 0
+    #: Model calls a perfect batcher would need for the route this run took,
+    #: from `batch.simulate_turns`. Derived from the guard rather than written
+    #: down beside the route, so changing the guard moves the floor and the
+    #: oracle test fails naming the task rather than drifting.
+    turn_floor: int = 0
     failure: str | None = None
     #: Set when the run died for a reason that says nothing about the agent:
     #: no credit, a bad key, a rate limit, a dropped connection. Kept apart
@@ -176,6 +221,8 @@ class RunResult:
             "floor": self.floor,
             "over_floor": round(self.over_floor, 2),
             "actions": self.actions,
+            "turns": self.turns,
+            "turn_floor": self.turn_floor,
             "observation_overhead": round(self.overhead, 2),
             "device_tokens": self.device_tokens,
             "seconds": round(self.seconds, 1),
@@ -250,11 +297,21 @@ class TaskResult:
     def render(self) -> str:
         first = self.runs[0] if self.runs else None
         floor = first.floor if first else 0
+        # A model run has turns and no ceiling; an oracle run has the ceiling
+        # and no model. Showing whichever the driver could measure keeps one
+        # line per task instead of two columns that are always half empty.
+        turns = (
+            f"  {median(r.turns for r in self.runs):>3.0f} turns"
+            if self.runs and any(r.turns for r in self.runs)
+            else f"  ceiling {first.turn_floor:>2}"
+            if first
+            else ""
+        )
         return (
             f"[{self.success_rate:>4.0%}] {self.task:28} "
             f"{self.median_observations:>4.0f} obs (floor {floor})  "
             f"{self.median_overhead:>5.2f} overhead  "
-            f"worst {self.worst_overhead:>5.2f}"
+            f"worst {self.worst_overhead:>5.2f}{turns}"
         )
 
 
@@ -323,6 +380,14 @@ async def run_task(
         passed=passed,
         observations=meter.observations,
         actions=meter.actions,
+        turns=meter.turns,
+        # Only the oracle records outcomes, and only a model run records
+        # turns, so each driver fills one of these and leaves the other at
+        # zero. Without the guard a model run would report a ceiling of two,
+        # computed over the empty list, which is worse than reporting none:
+        # `read_a_card_answer` legitimately takes no actions and its ceiling
+        # really is two, so an empty list cannot be the discriminator.
+        turn_floor=0 if meter.turns else simulate_turns(meter.outcomes),
         device_tokens=meter.device_tokens,
         prompt_tokens=meter.prompt_tokens,
         completion_tokens=meter.completion_tokens,
@@ -476,6 +541,12 @@ def write_report(
             "observations": sum(a.observations for a in attempts),
             "floor": sum(a.floor for a in attempts),
             "actions": sum(a.actions for a in attempts),
+            # Model calls, and the ceiling a perfect batcher would reach on
+            # the same routes. The oracle fills the second and no model, and a
+            # model run fills the first and no ceiling, so a slice report
+            # carries whichever of the two its driver could measure.
+            "turns": sum(a.turns for a in attempts),
+            "turn_floor": sum(a.turn_floor for a in attempts),
             "observation_overhead": round(
                 sum(a.observations for a in attempts) / max(sum(a.actions for a in attempts), 1),
                 2,

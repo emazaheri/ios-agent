@@ -48,9 +48,18 @@ def test_a_clean_navigation_carries_on() -> None:
     assert _continues(_ran("tap")) is None
 
 
-def test_observe_is_neither_guarded_nor_a_terminator() -> None:
-    """It records no outcome, so the freshness check must not fire on it."""
-    assert stop_after("observe", None, 0, finished=False, stopped=None) is None
+def test_observe_ends_a_batch_without_being_judged_as_an_action() -> None:
+    """Two things at once, and they pull in opposite directions.
+
+    It records no outcome, so the freshness rule must not fire on it and
+    report that a call never reached the device. But calling it at all says
+    the screen was unknown, so whatever was queued behind it was chosen
+    without the answer, and that is a batch that should not continue.
+    """
+    reason = stop_after("observe", None, 0, finished=False, stopped=None)
+    assert reason is not None
+    assert "not known" in reason
+    assert "never reached the device" not in reason, "judged as a failed action"
 
 
 def test_an_unknown_tool_name_is_left_alone() -> None:

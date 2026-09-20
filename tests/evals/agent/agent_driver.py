@@ -96,5 +96,10 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     meter.actions = backend.stats.actions
     meter.device_tokens = backend.stats.device_tokens
     meter.refusals = backend.stats.refusals
+    # Turns come off the run rather than the backend: they are model calls,
+    # and the backend never sees one. Nothing sets `meter.outcomes` on this
+    # path, so `turn_floor` stays 0 for a model run; the ceiling is the
+    # oracle's to declare and this column is what gets measured against it.
+    meter.turns = outcome.turns
     meter.charge_model(outcome.prompt_tokens, outcome.completion_tokens)
     meter.last_screen = backend.last_screen

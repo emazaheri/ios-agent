@@ -57,7 +57,7 @@ there is no id at the backend to stamp.
 
 ## What terminates a sequence outright
 
-Three verbs land somewhere that cannot be predicted from the screen the model
+Four verbs land somewhere that cannot be predicted from the screen the model
 was looking at when it planned the batch, so nothing may be chained behind
 them. `open_url` and `press_button` are obvious. `scroll` is the interesting
 one: `scroll(until=...)` loops server-side and stops wherever the content did,
@@ -66,6 +66,11 @@ the next call through, aimed at a screen the model only guessed at.
 
 `open_app` belongs here too and is listed, since the tool became callable again
 in the commit before this one.
+
+`observe` ends a batch as well, for the opposite reason and so handled
+separately: it is not an action and records nothing, but calling it says the
+screen was unknown, and everything queued behind it was therefore chosen
+without the answer.
 """
 
 from __future__ import annotations
@@ -80,8 +85,10 @@ from dataclasses import dataclass
 TERMINATES_SEQUENCE = frozenset({"open_app", "open_url", "press_button", "scroll"})
 
 #: Verbs that touch the device, and so are expected to advance the backend's
-#: record. `observe` is deliberately absent: it is not an action, it records no
-#: outcome, and treating it as one would make the freshness check abort on it.
+#: record. `observe` is deliberately absent: it records no outcome, so the
+#: freshness check would abort on it for the wrong reason. It ends a batch all
+#: the same, handled separately in `stop_after`, because a turn that had to
+#: ask what was on screen did not know it when it chose the rest.
 #: `done` is absent because the run being finished is checked before any of
 #: this. Anything else, including a name the model invented, is left alone; the
 #: graph already answers it and the rest of the batch may still be valid.
@@ -130,6 +137,16 @@ def stop_after(
         return "the run finished when `done` was called."
     if stopped is not None:
         return f"the session stopped: {stopped}."
+    if verb == "observe":
+        # Calling it means the screen was unknown, so anything queued behind
+        # it was chosen without the answer. Cheap to get wrong in both
+        # directions, and the operator prompt already says to observe only
+        # when you genuinely do not know, so the strict reading costs a turn
+        # the model should not have been spending anyway.
+        return (
+            "`observe` was called, so the screen was not known when the rest "
+            "of this turn was chosen."
+        )
     if verb not in DEVICE_VERBS:
         return None
     if last is None or last.seq == before_seq:
