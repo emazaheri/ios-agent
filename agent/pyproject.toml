@@ -1,10 +1,15 @@
 [project]
 name = "ios-agent"
-version = "0.1.0"
+version = "0.2.0"
 description = "A goal-directed agent that drives an iPhone through the ios-mcp library"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+# Not published. `ios-mcp` is the only distribution on PyPI; these two are
+# installed from the workspace. The classifier makes that a refusal rather
+# than a convention: PyPI rejects an upload carrying it, so a broad
+# `uv publish` from the repository root cannot ship this by accident.
+classifiers = ["Private :: Do Not Upload"]
 # Depends on ios-mcp, never the reverse. That direction is the whole point of
 # the split: the server must stay usable by any agent, so it cannot carry a
 # dependency on this one or on a model provider.

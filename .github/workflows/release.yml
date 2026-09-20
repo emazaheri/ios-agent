@@ -1,0 +1,71 @@
+name: Release
+
+# Tags only. A release is a deliberate act, so nothing here is reachable from
+# an ordinary push, and the tag is what names the artifact.
+on:
+  push:
+    tags: ["v*"]
+
+# No token lives anywhere. PyPI Trusted Publishing mints a short-lived OIDC
+# credential for this workflow in this repository, which is the difference
+# between a secret that can leak and one that does not exist.
+permissions:
+  contents: read
+
+jobs:
+  # The tag says 0.2.0 and every file has to agree. `test_version.py` checks
+  # the files against each other; only this can check them against the tag,
+  # because only here is the tag a fact.
+  verify:
+    name: gates and version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - name: the tag matches the packages
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          have=$(uv run python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "tag=$tag  pyproject=$have"
+          test "$tag" = "$have"
+
+      - name: lint and types
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy ios_mcp agent/ios_agent tui/ios_tui
+
+      - name: offline tests
+        run: uv run pytest tests/unit tests/tui -q
+
+      # The same free series CI guards, so a release cannot ship a route whose
+      # cost moved without someone recording it.
+      - name: eval floors
+        run: |
+          uv run pytest tests/evals/agent -m "agent and not model" -q
+          uv run python scripts/eval_trend.py check .artifacts/evals/agent.json --suite agent-oracle
+
+  publish:
+    name: build and publish ios-mcp
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # the OIDC credential, and nothing else
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The root distribution only. `ios-agent` and `ios-tui` carry
+      # `Private :: Do Not Upload`, so PyPI would refuse them anyway, but
+      # naming the package keeps the intent in the workflow rather than in a
+      # classifier someone has to go and read.
+      - run: uv build --package ios-mcp
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

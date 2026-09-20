@@ -1,10 +1,15 @@
 [project]
 name = "ios-tui"
-version = "0.1.0"
+version = "0.2.0"
 description = "A terminal front end for the ios-agent goal-directed iPhone agent"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+# Not published. `ios-mcp` is the only distribution on PyPI; these two are
+# installed from the workspace. The classifier makes that a refusal rather
+# than a convention: PyPI rejects an upload carrying it, so a broad
+# `uv publish` from the repository root cannot ship this by accident.
+classifiers = ["Private :: Do Not Upload"]
 # A third consumer, not a third layer. `ios-mcp` is the library, `ios-agent`
 # is one consumer of it, and this is another: it drives the agent and reads
 # the library's device discovery directly. Nothing points back the other way.

@@ -100,6 +100,53 @@ Deliberately out, with reasons in [CLAUDE.md](CLAUDE.md#scope): a consumer macOS
 app, automating your signing flow, a cloud device farm, Android. If a change
 only makes sense for one of those, it does not belong here.
 
+## Releases
+
+One version for all three distributions, one tag, one release. They were
+numbered independently once and drifted within a single release: `ios-mcp` sat
+at 0.1.1 with the other two on 0.1.0, under a repository-level tag that
+therefore named none of them. Only `ios-mcp` is published, so separate numbers
+bought nothing.
+
+The version appears in five places. `tests/unit/test_version.py` checks four
+of them against each other, and the release workflow checks them against the
+tag, which is the one fact a test cannot see. `server.json` is the sharp edge:
+it states the version twice, for the server entry and for the PyPI package it
+points at, and a registry entry naming a version PyPI does not have is what
+cost 0.1.1 in the first place.
+
+```bash
+# 1. gates, exactly what CI runs
+uv run pytest tests/unit tests/tui -q
+uv run ruff check . && uv run ruff format --check .
+uv run mypy ios_mcp agent/ios_agent tui/ios_tui
+uv run python scripts/eval_trend.py check .artifacts/evals/agent.json --suite agent-oracle
+
+# 2. bump all three pyprojects and both server.json fields, then
+uv sync                       # refreshes uv.lock; commit it with the bump
+
+# 3. one commit, one annotated tag
+git commit -am "Release 0.2.0"
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin main --follow-tags
+```
+
+Pushing the tag runs `.github/workflows/release.yml`, which re-runs the gates,
+refuses a tag that disagrees with `pyproject.toml`, and publishes `ios-mcp` to
+PyPI through Trusted Publishing. There is no API token: the workflow mints a
+short-lived OIDC credential, which is the difference between a secret that can
+leak and one that does not exist. It needs a `pypi` environment on the
+repository and a trusted publisher configured on PyPI for this workflow.
+
+`ios-agent` and `ios-tui` carry `Private :: Do Not Upload`, so PyPI refuses
+them even if a broad `uv publish` is run from the root.
+
+Bump the minor while the project is 0.x whenever public API, agent behaviour
+or a user-visible default changes; the patch is for fixes that change none of
+those. Release notes come from the commit messages and the ADRs, which is why
+both are written the way they are; there is no separate changelog to fall out
+of date.
+
 ## Licence
 
 By contributing you agree your work is licensed under the [MIT License](LICENSE).
