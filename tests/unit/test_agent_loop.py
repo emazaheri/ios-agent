@@ -335,6 +335,55 @@ async def test_an_unknown_tool_is_reported_rather_than_raised() -> None:
     assert "observe" in reply, "the model should be told what it could have called"
 
 
+# -- the tool surface -------------------------------------------------------
+
+
+def test_every_backend_verb_is_a_tool_the_model_can_call() -> None:
+    """The list `build_tools` returns is the whole of what the model has.
+
+    `open_app` was defined, wired to both backends and named in the operator
+    prompt, and then left out of the returned list for the entire life of the
+    commit that added it ("Give the agent a ninth verb", a981e3d). The model
+    was told to call it and got `no such tool 'open_app'` back. Nothing caught
+    it, because every test either drove the backend directly or scripted a
+    model that only called tools that happened to be present.
+
+    Deriving the expectation from the `Backend` protocol rather than listing
+    names means the next verb cannot be half-added the same way.
+    """
+    from ios_agent.backend import Backend
+    from ios_agent.tools import Run, build_tools
+
+    not_verbs = {"approve", "stop_reason", "stats", "last_screen"}
+    verbs = set(Backend.__protocol_attrs__) - not_verbs
+
+    tools = build_tools(Run(backend=None, goal="anything"))  # type: ignore[arg-type]
+    names = {t.name for t in tools}
+
+    assert verbs <= names, f"backend verbs the model cannot call: {sorted(verbs - names)}"
+    assert names == verbs | {"done"}, f"unexpected tools: {sorted(names - verbs - {'done'})}"
+
+
+def test_the_prompt_only_names_tools_the_model_has() -> None:
+    """The prompt told the model to use `open_app` while it did not exist.
+
+    A prompt naming an absent tool is worse than silence: it spends the
+    model's turns on a call that can only fail, which is the shape of the
+    screenshot incident recorded in CLAUDE.md.
+    """
+    from ios_agent.loop import operator_prompt
+    from ios_agent.tools import Run, build_tools
+
+    prompt = operator_prompt()
+    names = {t.name for t in build_tools(Run(backend=None, goal="anything"))}  # type: ignore[arg-type]
+
+    for quoted in ("open_app", "open_url", "done", "observe"):
+        if f"`{quoted}`" in prompt:
+            assert quoted in names, (
+                f"the prompt tells the model to call `{quoted}`, which is absent"
+            )
+
+
 def test_the_prompt_ships_with_the_package() -> None:
     """A prompt that does not get packaged fails only once it is installed."""
     from ios_agent.loop import operator_prompt

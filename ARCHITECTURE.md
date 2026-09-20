@@ -162,7 +162,7 @@ the reverse. It is a second consumer of `IosSession`, not a seventh layer: the
 policy gate is constructed inside the session, so an agent passes through it on
 the same code path the server does.
 
-The loop is one model node, one tool node, and an edge back. Eight tools rather
+The loop is one model node, one tool node, and an edge back. Nine tools rather
 than the server's thirty, because a large confusable set degrades tool
 selection. The provider is chosen through `init_chat_model`, so the package
 commits to no vendor.

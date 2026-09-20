@@ -2,7 +2,7 @@
 
 Manual mode exists so a person can debug perception on an app nobody has
 pointed this at before, without a model turn between each attempt. What makes
-that worth anything is that it is the *same* eight verbs producing the *same*
+that worth anything is that it is the *same* nine verbs producing the *same*
 events and the same counters, so what you learn by hand transfers to what the
 agent will do.
 """
