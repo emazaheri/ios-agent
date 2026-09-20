@@ -25,6 +25,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from ios_agent.batch import LastAction
 from ios_agent.verify import Attempt, Verifier, attempt_key
 from ios_mcp.actions.result import ActionResult
 from ios_mcp.session import IosSession
@@ -69,6 +70,10 @@ class Backend(Protocol):
 
     stats: BackendStats
     last_screen: str
+    #: What the last action recorded, for the guard that decides whether the
+    #: rest of a multi-call turn still makes sense. `None` until one has run.
+    #: The graph reads it; nothing below the graph does. See `batch.py`.
+    last_action: LastAction | None
 
     async def observe(self) -> str: ...
     async def tap(self, target: str, *, idem_key: str) -> str: ...
@@ -91,6 +96,8 @@ class SessionBackend:
         self.session = session
         self.stats = BackendStats()
         self.last_screen = ""
+        self.last_action: LastAction | None = None
+        self._seq = 0
         #: Judges each action from the screen it returned. Never re-reads the
         #: screen; a test asserts that.
         self.verifier = verifier or Verifier()
@@ -186,16 +193,51 @@ class SessionBackend:
         refusal = self.verifier.check(key)
         if refusal is not None:
             self.stats.refusals += 1
+            self._record(key[0], ok=False, screen_changed=False, alert=False, refused=True)
             return str(refusal.note)
 
         result = await call()
-        self.stats.actions += 1
+        # A replay from the idempotency cache did not touch the device, so it
+        # is not another action. It is counted anyway when a resumed node
+        # re-runs every call in the turn it was interrupted from, which is the
+        # one place this happens and the one place the inflated count would be
+        # read as the agent having done more work than it did. Device tokens
+        # are still charged below: the payload really does enter the context.
+        if not result.from_cache:
+            self.stats.actions += 1
         payload = result.to_dict()
         self._charge(payload)
+        self._record(
+            key[0],
+            ok=result.ok,
+            screen_changed=result.screen_changed,
+            alert=result.alert is not None,
+            refused=False,
+        )
 
         verdict = self.verifier.record(key, result)
         rendered = self._render(result, payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
+
+    def _record(
+        self, verb: str, *, ok: bool, screen_changed: bool, alert: bool, refused: bool
+    ) -> None:
+        """Note what just happened, for the batch guard above the graph.
+
+        The sequence number is the point. Three paths return a string without
+        reaching here at all, and a guard that could not tell a fresh record
+        from a stale one would read the previous action's success and let the
+        rest of the turn run. `batch.py` explains it at length.
+        """
+        self._seq += 1
+        self.last_action = LastAction(
+            verb=verb,
+            ok=ok,
+            screen_changed=screen_changed,
+            alert=alert,
+            refused=refused,
+            seq=self._seq,
+        )
 
     def _render(self, result: ActionResult, payload: dict[str, object]) -> str:
         """Hand back the screen the action produced, not just whether it worked.

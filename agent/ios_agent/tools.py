@@ -47,6 +47,10 @@ class Run:
     backend: Backend
     goal: str
     steps: int = 0
+    #: Model calls made. The cost driver a multi-call turn is meant to
+    #: reduce, and the only counter that batching can move: actions,
+    #: observations and device tokens are all unchanged by grouping.
+    turns: int = 0
     finished: bool = False
     succeeded: bool = False
     summary: str = ""

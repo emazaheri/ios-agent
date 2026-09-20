@@ -163,6 +163,7 @@ async def run_goal(
         summary=run.summary,
         stopped_because=None if run.finished else (run.summary or "the model stopped early"),
         steps=run.steps,
+        turns=run.turns,
         approvals_asked=run.approvals_asked,
         stats=run.backend.stats,
         prompt_tokens=prompt_tokens,

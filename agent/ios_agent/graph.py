@@ -1,6 +1,7 @@
 """The loop. Deliberately the stupidest thing that can finish a task.
 
-One model node, one tool node, an edge back. No plan, no memory, no subagents; verification
+One model node, one tool node, and an edge back that ends the run instead
+when the tools already did. No plan, no memory, no subagents; verification
 lives outside the model, in `verify.py`, because it costs nothing there.
 
 The one thing the shape does carry is an interrupt. A destructive action pauses
@@ -46,10 +47,16 @@ def build_graph(
 ) -> Any:
     """Wire one goal into a graph. One run, one graph; they share no state."""
     by_name = {t.name: t for t in tools}
-    turns = 0
 
     async def agent(state: AgentState) -> dict[str, list[AnyMessage]]:
         reply = await call_model(state["messages"])
+        # Counted here rather than in `next_step` so the number is model calls,
+        # which is what a turn costs. `next_step` returns END before its own
+        # checks when the model called `done`, so counting there silently
+        # dropped the finishing turn. The budget below is unaffected: it can
+        # only fire on a turn that did not finish, and on those two turns the
+        # counter has the same value at the same point it always did.
+        run.turns += 1
         return {"messages": [reply]}
 
     async def act(state: AgentState) -> dict[str, list[AnyMessage]]:
@@ -80,16 +87,30 @@ def build_graph(
             )
         return {"messages": out}
 
-    def next_step(state: AgentState) -> str:
-        nonlocal turns
+    def ending() -> bool:
+        """Whether the run must stop, asked without spending a model call.
+
+        Both edges ask, which is the point. Asking only after the model node
+        meant a finished run still paid for one more call: `done` sets
+        `run.finished` inside `act`, the unconditional edge went back to
+        `agent`, and a whole turn was spent on a transcript whose last word
+        was "recorded" before the reply was discarded. Every run paid it.
+        """
         if run.finished:
-            return END
+            return True
         stop = run.backend.stop_reason()
         if stop is not None:
             run.summary = run.summary or f"stopped: {stop}"
+            return True
+        return False
+
+    def after_act(_state: AgentState) -> str:
+        return END if ending() else "agent"
+
+    def next_step(state: AgentState) -> str:
+        if ending():
             return END
-        turns += 1
-        if turns > max_steps:
+        if run.turns > max_steps:
             run.summary = run.summary or f"gave up after {max_steps} turns"
             return END
         last = state["messages"][-1]
@@ -108,7 +129,7 @@ def build_graph(
     builder.add_node("act", act)
     builder.add_edge(START, "agent")
     builder.add_conditional_edges("agent", next_step, ["act", END])
-    builder.add_edge("act", "agent")
+    builder.add_conditional_edges("act", after_act, ["agent", END])
     # A checkpointer is what makes `interrupt()` work: the state has to survive
     # the pause. In memory, because durable execution is out of scope for this
     # project and LangGraph checkpoints persist data rather than execution, so

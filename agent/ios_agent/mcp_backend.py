@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+from ios_agent.batch import LastAction
 from ios_agent.verify import Attempt, Verifier
 from ios_mcp.devices.base import AppInfo, best_app_match
 
@@ -69,6 +70,8 @@ class McpBackend:
         self.client = client
         self.stats = _Stats()
         self.last_screen = ""
+        self.last_action: LastAction | None = None
+        self._seq = 0
         self.verifier = verifier or Verifier()
         #: Signatures a human has approved, replayed on the retry. The direct
         #: backend hands these to the session object; over MCP they travel as
@@ -173,15 +176,47 @@ class McpBackend:
         refusal = self.verifier.check(key)
         if refusal is not None:
             self.stats.refusals += 1
+            self._record(key[0], ok=False, screen_changed=False, alert=False, refused=True)
             return str(refusal.note)
 
         payload = await self._call(tool, args)
-        self.stats.actions += 1
+        # Not another action if the server replayed it from the idempotency
+        # cache; the direct backend skips it on the same condition, and the
+        # two counts have to stay comparable or the transport comparison is
+        # measuring the counter.
+        if not payload.get("from_cache"):
+            self.stats.actions += 1
         self._charge(payload)
+        self._record(
+            key[0],
+            ok=bool(payload.get("ok")),
+            screen_changed=bool(payload.get("screen_changed")),
+            alert=payload.get("alert") is not None,
+            refused=False,
+        )
 
         verdict = self.verifier.record(key, _AsResult(payload))
         rendered = self._render(payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
+
+    def _record(
+        self, verb: str, *, ok: bool, screen_changed: bool, alert: bool, refused: bool
+    ) -> None:
+        """The same record `SessionBackend` keeps, from the wire payload.
+
+        Built here rather than shared, because one side has an `ActionResult`
+        and the other a dict and neither conversion is worth a protocol. A
+        test asserts the two produce the same record for the same action.
+        """
+        self._seq += 1
+        self.last_action = LastAction(
+            verb=verb,
+            ok=ok,
+            screen_changed=screen_changed,
+            alert=alert,
+            refused=refused,
+            seq=self._seq,
+        )
 
     async def _call(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
         """One protocol round trip, with a structured error re-raised.

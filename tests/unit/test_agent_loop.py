@@ -93,6 +93,35 @@ async def test_the_loop_drives_a_task_to_completion() -> None:
     assert outcome.finished_cleanly
     assert outcome.stats.observations == 1
     assert outcome.stats.actions == 3
+    # Five model calls: observe, three actions, done. The counter has to agree
+    # with `ScriptedModel`, because turns are what a multi-call turn is meant
+    # to reduce and a number that quietly drops the finishing turn would make
+    # any batching measurement look better than it was.
+    assert outcome.turns == scripted.turns == 5
+
+
+async def test_finishing_does_not_cost_one_more_model_call() -> None:
+    """`done` ends the run at the tool node, not one turn later.
+
+    The edge out of `act` used to go straight back to `agent`, and only the
+    check after the model node noticed the run was over. So every run ever
+    measured spent a whole extra call on a transcript whose last word was
+    "recorded", and then threw the reply away. Counting turns is what made it
+    visible; nothing else in the run changes when it is removed.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("tap", {"target": "Accessibility"})],
+            [("done", {"succeeded": True, "summary": "opened"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Open Accessibility.", model=scripted)
+
+    assert outcome.turns == 2, "a call was spent after the run was already over"
+    assert scripted.turns == 2, "the model was asked for a reply nobody would read"
 
 
 async def test_an_action_hands_back_the_screen_it_produced() -> None:
@@ -253,11 +282,19 @@ async def test_resuming_does_not_replay_earlier_actions_onto_the_device() -> Non
     async def yes(_request: dict[str, object]) -> bool:
         return True
 
-    await run_goal(session, "Reset the network, then erase.", model=scripted, approve=yes)
+    outcome = await run_goal(session, "Reset the network, then erase.", model=scripted, approve=yes)
 
     assert len(fake.taps()) == 2, (
         f"expected one tap each, got {len(fake.taps())}: the node re-ran and "
         "the harmless tap was replayed onto the device"
+    )
+    # The device was already asserted; this is the counter, which was wrong.
+    # The replayed tap came back from the cache without touching the phone and
+    # was still counted as an action, so a resumed run reported more work than
+    # it did against an eval floor asserted by equality.
+    assert outcome.stats.actions == 2, (
+        f"two taps were requested and {outcome.stats.actions} counted: a cache "
+        "replay is not another action"
     )
 
 
@@ -354,7 +391,7 @@ def test_every_backend_verb_is_a_tool_the_model_can_call() -> None:
     from ios_agent.backend import Backend
     from ios_agent.tools import Run, build_tools
 
-    not_verbs = {"approve", "stop_reason", "stats", "last_screen"}
+    not_verbs = {"approve", "stop_reason", "stats", "last_screen", "last_action"}
     verbs = set(Backend.__protocol_attrs__) - not_verbs
 
     tools = build_tools(Run(backend=None, goal="anything"))  # type: ignore[arg-type]

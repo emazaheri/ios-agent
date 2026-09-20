@@ -196,6 +196,61 @@ async def test_both_backends_report_comparable_numbers(served: Any) -> None:
     assert 0.5 < over_mcp.stats.device_tokens / direct.stats.device_tokens < 2.0
 
 
+async def test_both_backends_record_the_same_thing_about_the_same_action(served) -> None:
+    """The batch guard reads this record, so the two paths must agree.
+
+    Verification is shared between the backends precisely so a comparison
+    between them is not measuring the verifier. The batch record is built
+    separately on each side, from an `ActionResult` here and a JSON payload
+    there, so it needs the guarantee asserted rather than assumed.
+    """
+    client, _model, session, _fake = served
+    over_mcp = McpBackend(client)
+    direct = SessionBackend(session)
+
+    await over_mcp.tap("Accessibility", idem_key="m1")
+    await direct.tap("Back", idem_key="d1")
+
+    assert over_mcp.last_action is not None and direct.last_action is not None
+    for field in ("verb", "ok", "refused", "seq"):
+        assert getattr(over_mcp.last_action, field) == getattr(direct.last_action, field), field
+    # Both navigated, so both moved the screen. The targets differ because the
+    # two backends are looking at different panes by this point.
+    assert over_mcp.last_action.screen_changed is direct.last_action.screen_changed is True
+
+
+async def test_the_record_marks_a_refusal_without_touching_the_device(served) -> None:
+    """A refusal returns before any result exists, and must still be recorded.
+
+    Otherwise it is indistinguishable from the stale case, where the backend
+    was never reached at all. Both abort the batch, so nothing unsafe happens
+    either way, but the sentence handed to the skipped calls would be wrong.
+    """
+    client, _model, _session, _fake = served
+    backend = McpBackend(client)
+
+    for i in range(5):
+        await backend.set_value("on", "Airplane Mode", idem_key=f"k{i}")
+
+    assert backend.stats.refusals > 0, "the verifier never refused, so this proves nothing"
+    assert backend.last_action is not None
+    assert backend.last_action.refused is True
+    assert backend.last_action.verb == "set_value"
+
+
+@pytest.mark.device_state(injections=frozenset({Injection.DEAD_SWITCH}))
+async def test_a_dead_switch_is_recorded_as_a_screen_that_did_not_change(served) -> None:
+    """The signal the batch guard stops on, from the injection that models it."""
+    client, _model, _session, _fake = served
+    backend = McpBackend(client)
+
+    await backend.set_value("on", "Airplane Mode", idem_key="k0")
+
+    assert backend.last_action is not None
+    assert backend.last_action.ok is True, "the device claimed success, which is the whole trap"
+    assert backend.last_action.screen_changed is False
+
+
 def test_the_backend_reaches_the_server_only_as_a_client() -> None:
     """The constraint that shaped this design, checked on imports.
 
