@@ -91,18 +91,32 @@ def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
     return factory
 
 
-async def _installed_apps(session: IosSession) -> list[str]:
-    """The names of the apps on this device, for the opening turn.
+async def _device_context(session: IosSession) -> tuple[list[str], str | None]:
+    """What is installed, and which of it is in front, for the opening turn.
 
-    Best effort on purpose. A device that will not enumerate its apps is still
-    a device the agent can drive, and failing a run over a nicety would be a
+    Both are best effort. A device that will not enumerate its apps is still a
+    device the agent can drive, and failing a run over a nicety would be a
     worse trade than starting without the list.
+
+    The second half exists because the first half caused a regression. Once
+    the agent could see an app list it opened an app on its very first move,
+    every run, including the runs already inside that app: measured at one
+    wasted device action per run across the whole task set, which pushed
+    actions from 1.29x the oracle floor to 1.52x. Naming what exists without
+    naming where you are is an invitation to guess, and the guess costs a
+    round trip to the device to learn nothing.
     """
     try:
         apps = await session.lease.adapter.list_apps("all")
     except Exception:
-        return []
-    return sorted({a.name for a in apps if a.name})
+        apps = []
+    names = sorted({a.name for a in apps if a.name})
+    try:
+        active = await session.foreground_app()
+    except Exception:
+        active = None
+    current = next((a.name for a in apps if a.bundle_id == active and a.name), None)
+    return names, current
 
 
 async def run_goal(
@@ -144,8 +158,8 @@ async def run_goal(
     # runs would resume someone else's conversation.
     config = {"configurable": {"thread_id": f"{id(run):x}"}}
 
-    apps = await _installed_apps(session)
-    step: Any = {"messages": opening_messages(operator_prompt(), goal, apps)}
+    apps, current = await _device_context(session)
+    step: Any = {"messages": opening_messages(operator_prompt(), goal, apps, current)}
     while True:
         result = await graph.ainvoke(step, config=config)
         pending = result.get("__interrupt__") if isinstance(result, dict) else None

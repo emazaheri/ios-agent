@@ -178,7 +178,7 @@ async def test_an_app_that_is_not_installed_is_a_message_not_a_crash() -> None:
 async def test_the_opening_turn_names_the_apps_the_device_has() -> None:
     """The fake used to claim the device had none, because the call raised.
 
-    `loop._installed_apps` is best-effort and swallows anything, so the
+    `loop._device_context` is best-effort and swallows anything, so the
     missing method degraded silently into an empty list. Every scripted run
     therefore opened with a transcript a real device would never produce.
     """
@@ -672,6 +672,41 @@ def test_the_installed_apps_ride_in_the_goal_turn() -> None:
     human = messages[1].content
     assert human.startswith("Open Maps.")
     assert "Maps, Safari, Settings" in human
+
+
+def test_the_opening_turn_says_which_app_is_already_open() -> None:
+    """Naming what exists without naming where you are invites a guess.
+
+    With the app list and nothing else, the model opened an app as its first
+    move on every run, including runs already inside that app: one wasted
+    device action each, which took actions from 1.29x the oracle floor to
+    1.52x while the observation count it displaced made the headline metric
+    look better.
+    """
+    messages = opening_messages("SYSTEM", "Turn on Bold Text.", ["Maps", "Settings"], "Settings")
+    human = str(messages[1].content)
+
+    assert "Maps, Settings" in human
+    assert "Settings is already open." in human
+
+
+def test_nothing_is_claimed_open_when_the_device_will_not_say() -> None:
+    """`foreground_app` is best effort, and silence must stay silent."""
+    human = str(opening_messages("SYSTEM", "Goal.", ["Maps"], None)[1].content)
+
+    assert "already open" not in human
+
+
+async def test_the_agent_is_told_where_it_is_before_it_acts() -> None:
+    """End to end: the real session resolves the foreground app to a name."""
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel([[("done", {"succeeded": True, "summary": "nothing to do"})]])
+
+    await run_goal(session, "Do nothing.", model=scripted)
+
+    opening = str(scripted.seen[0][1].content)
+    assert "is already open." in opening, opening
 
 
 def test_the_system_prompt_never_carries_the_app_list() -> None:

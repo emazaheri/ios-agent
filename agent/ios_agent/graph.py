@@ -179,7 +179,12 @@ def build_graph(
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
 
 
-def opening_messages(system_prompt: str, goal: str, apps: Sequence[str] = ()) -> list[AnyMessage]:
+def opening_messages(
+    system_prompt: str,
+    goal: str,
+    apps: Sequence[str] = (),
+    current: str | None = None,
+) -> list[AnyMessage]:
     """The transcript the loop starts from.
 
     The goal arrives as a user turn rather than being folded into the system
@@ -191,6 +196,17 @@ def opening_messages(system_prompt: str, goal: str, apps: Sequence[str] = ()) ->
     of icons, and an app on page three or in a folder is invisible. Naming them
     up front costs about a hundred tokens once, against a whole turn for a
     `list_apps` call that only happens after the agent notices it is stuck.
+
+    `current` is the app already in front, and it is here because the app list
+    alone made things worse. Told what exists and not where it was, the model
+    opened an app as its first move on every run, including the runs already
+    inside that app. One wasted device action each time, and it displaced the
+    `observe` that used to start a run, so the headline observation count fell
+    while the metric that actually governs went up.
     """
-    human = goal if not apps else f"{goal}\n\nApps on this device: {', '.join(apps)}."
+    human = goal
+    if apps:
+        human += f"\n\nApps on this device: {', '.join(apps)}."
+    if current:
+        human += f" {current} is already open."
     return [SystemMessage(content=system_prompt), HumanMessage(content=human)]
