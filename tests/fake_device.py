@@ -14,7 +14,7 @@ from typing import Any
 from fake_wda import FakeWda
 
 from ios_mcp.config import Settings
-from ios_mcp.devices.base import DeviceInfo
+from ios_mcp.devices.base import AppInfo, DeviceInfo
 from ios_mcp.devices.pool import Lease
 from ios_mcp.session import IosSession
 from ios_mcp.wda.client import WdaClient
@@ -58,16 +58,45 @@ class ScriptedWda(FakeWda):
         )
 
 
+#: What a bare simulator has on it, near enough. Small on purpose: this list
+#: reaches the model in every opening turn, so a realistic thirty would be
+#: thirty apps of context per run bought for nothing.
+DEFAULT_APPS: tuple[AppInfo, ...] = (
+    AppInfo(bundle_id="com.apple.Preferences", name="Settings", kind="system"),
+    AppInfo(bundle_id="com.apple.mobilesafari", name="Safari", kind="system"),
+    AppInfo(bundle_id="com.apple.Maps", name="Maps", kind="system"),
+    AppInfo(bundle_id="com.apple.mobileslideshow", name="Photos", kind="system"),
+)
+
+
 class FakeAdapter:
     """Minimal DeviceAdapter stand-in."""
 
-    def __init__(self, info: DeviceInfo) -> None:
+    def __init__(self, info: DeviceInfo, apps: tuple[AppInfo, ...] = DEFAULT_APPS) -> None:
         self.info = info
+        self.apps = apps
         self.urls_opened: list[str] = []
         self.permissions: list[tuple[str, str, bool]] = []
         self.torn_down = False
 
     async def ensure_booted(self) -> None: ...
+
+    async def list_apps(self, kind: str = "user") -> list[AppInfo]:
+        """The method whose absence made `open_app` unusable against the fake.
+
+        `open_app` resolves a name against this list before launching, so an
+        adapter without it raised `AttributeError` out of the tool, past
+        `guarded` (which converts only typed errors), and killed the run. That
+        went unnoticed for as long as the tool was missing from the list
+        `build_tools` returns, which was its whole life until now.
+
+        `loop._installed_apps` calls it too, best-effort, so before this the
+        opening turn of every scripted run claimed the device had no apps
+        while a real one names them.
+        """
+        if kind == "all":
+            return list(self.apps)
+        return [a for a in self.apps if a.kind == kind]
 
     async def ensure_runner(self):  # type: ignore[no-untyped-def]
         from ios_mcp.devices.base import WdaEndpoint

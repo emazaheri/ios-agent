@@ -124,6 +124,75 @@ async def test_finishing_does_not_cost_one_more_model_call() -> None:
     assert scripted.turns == 2, "the model was asked for a reply nobody would read"
 
 
+async def test_the_agent_can_actually_open_an_app_by_name() -> None:
+    """Being in the tool list is not the same as working.
+
+    The commit that put `open_app` back in front of the model asserted only
+    that it was there, and that the prompt does not name an absent tool.
+    Neither runs it. It turned out `FakeAdapter` had no `list_apps`, which
+    `session.open_app` calls to resolve a name, so every run in which the
+    model chose this verb died on an `AttributeError` that `guarded` does not
+    convert. Sixteen of thirty-nine runs in the first model baseline, and no
+    offline test could see it.
+    """
+    model = DeviceModel()
+    session, fake, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("open_app", {"name": "Settings"})],
+            [("done", {"succeeded": True, "summary": "opened"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Open Settings.", model=scripted)
+
+    assert outcome.stats.actions == 1, "the tool never reached the device"
+    assert fake.app_states["com.apple.Preferences"] == 4, (
+        f"Settings was not launched: {fake.app_states}"
+    )
+    assert outcome.finished_cleanly
+
+
+async def test_an_app_that_is_not_installed_is_a_message_not_a_crash() -> None:
+    """The other half: a miss must stay recoverable.
+
+    `AppNotFound` is an `IosAutomationError`, so `guarded` turns it into a
+    reply the model can act on. Anything untyped escaping here is what killed
+    the baseline.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("open_app", {"name": "Bumble"})],
+            [("done", {"succeeded": False, "summary": "not installed"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Open Bumble.", model=scripted)
+
+    assert "open_app failed" in tool_replies(scripted)
+    assert outcome.finished_cleanly, "an uninstalled app ended the run"
+
+
+async def test_the_opening_turn_names_the_apps_the_device_has() -> None:
+    """The fake used to claim the device had none, because the call raised.
+
+    `loop._installed_apps` is best-effort and swallows anything, so the
+    missing method degraded silently into an empty list. Every scripted run
+    therefore opened with a transcript a real device would never produce.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel([[("done", {"succeeded": True, "summary": "nothing to do"})]])
+
+    await run_goal(session, "Do nothing.", model=scripted)
+
+    opening = str(scripted.seen[0][1].content)
+    assert "Apps on this device:" in opening, opening
+    assert "Settings" in opening
+
+
 # -- several actions in one turn --------------------------------------------
 
 
