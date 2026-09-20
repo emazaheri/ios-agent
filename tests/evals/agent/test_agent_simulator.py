@@ -221,6 +221,50 @@ async def test_the_verifier_does_not_misfire_on_real_timing(session: IosSession)
     )
 
 
+async def test_a_real_navigation_lets_a_batch_continue(session: IosSession) -> None:
+    """The batch guard's assumption, in the direction nothing else covers.
+
+    The verifier needs a real no-op to report `screen_changed=False`, and the
+    test above proves it does. The batch guard needs the converse and is
+    broken by the converse failure: if a real navigation ever reports `False`
+    because a snapshot landed while the push animation was still running, the
+    guard truncates a chain that was working. Batching would then look fine on
+    the fake, where every action settles instantly, and quietly buy nothing on
+    hardware.
+
+    Driven through the session rather than the agent on purpose. It costs no
+    model tokens, and it isolates the signal from whatever a model would have
+    chosen to do with it.
+    """
+    from ios_agent.batch import LastAction, stop_after
+
+    for step, target in enumerate(("Accessibility", "Display & Text Size")):
+        result = await session.tap(target=target)
+
+        assert result.screen_changed is True, (
+            f"real navigation to {target!r} reported no change, so the guard "
+            "would cut a legitimate chain short on a device"
+        )
+        reason = stop_after(
+            "tap",
+            LastAction(
+                verb="tap",
+                ok=result.ok,
+                screen_changed=result.screen_changed,
+                alert=result.alert is not None,
+                refused=False,
+                seq=step + 1,
+            ),
+            step,
+            finished=False,
+            stopped=None,
+        )
+        assert reason is None, f"the guard would have stopped the batch at {target!r}: {reason}"
+
+    screen = await session.observe()
+    assert "Bold Text" in screen.render(), f"the chain did not arrive: ended on {screen.title!r}"
+
+
 def test_write_the_tier2_report() -> None:
     if not _measured:
         pytest.skip("nothing ran")
