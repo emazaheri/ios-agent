@@ -25,12 +25,20 @@ from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessag
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from ios_agent.batch import stop_after
 from ios_agent.state import AgentState
 from ios_agent.tools import Run
 
 #: A model that has taken this many turns without finishing has lost the
 #: thread. Recovering from that is a planning problem, which is slice 3.
 DEFAULT_MAX_STEPS = 24
+
+#: And this many things done to a stranger's phone is enough, whatever the
+#: turn count says. Until a turn could carry several calls, the turn budget
+#: bounded both: one action per turn meant at most `DEFAULT_MAX_STEPS` of
+#: them. Batching breaks that link and would leave the device side unbounded,
+#: so the same guarantee is now stated directly rather than implied.
+DEFAULT_MAX_ACTIONS = 24
 
 #: What the loop is invoked with. Kept as a callable so a test can drive the
 #: graph with a scripted model and no network.
@@ -43,6 +51,7 @@ def build_graph(
     tools: list[Any],
     *,
     max_steps: int = DEFAULT_MAX_STEPS,
+    max_actions: int = DEFAULT_MAX_ACTIONS,
     checkpointer: Any | None = None,
 ) -> Any:
     """Wire one goal into a graph. One run, one graph; they share no state."""
@@ -63,7 +72,8 @@ def build_graph(
         last = state["messages"][-1]
         assert isinstance(last, AIMessage)
         out: list[AnyMessage] = []
-        for call in last.tool_calls:
+        calls = list(last.tool_calls)
+        for i, call in enumerate(calls):
             chosen = by_name.get(call["name"])
             if chosen is None:
                 # Better to tell the model than to crash the graph: an unknown
@@ -76,6 +86,7 @@ def build_graph(
                     )
                 )
                 continue
+            before = run.backend.last_action
             # The whole ToolCall, not just its args: the action tools take
             # their idempotency key from the call id, and LangChain only
             # injects it when handed the full call. Passing args alone raises.
@@ -85,6 +96,34 @@ def build_graph(
                 if isinstance(result, ToolMessage)
                 else ToolMessage(content=str(result), tool_call_id=call["id"] or "")
             )
+
+            remaining = calls[i + 1 :]
+            if not remaining:
+                break
+            reason = stop_after(
+                call["name"],
+                run.backend.last_action,
+                before.seq if before else 0,
+                finished=run.finished,
+                stopped=run.backend.stop_reason(),
+            )
+            if reason is None:
+                continue
+            # Every skipped call still needs a reply. LangChain requires one
+            # `ToolMessage` per tool call id, and a turn that answered two of
+            # three calls would fail on the next model invocation rather than
+            # here, which is a long way from the cause.
+            out.extend(
+                ToolMessage(
+                    content=(
+                        f"not run: {reason} Re-issue it if the screen above is "
+                        "still where you expected to be."
+                    ),
+                    tool_call_id=skipped["id"] or "",
+                )
+                for skipped in remaining
+            )
+            break
         return {"messages": out}
 
     def ending() -> bool:
@@ -112,6 +151,9 @@ def build_graph(
             return END
         if run.turns > max_steps:
             run.summary = run.summary or f"gave up after {max_steps} turns"
+            return END
+        if run.steps >= max_actions:
+            run.summary = run.summary or f"gave up after {max_actions} actions"
             return END
         last = state["messages"][-1]
         if isinstance(last, AIMessage) and last.tool_calls:

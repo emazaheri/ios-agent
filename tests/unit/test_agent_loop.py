@@ -124,6 +124,151 @@ async def test_finishing_does_not_cost_one_more_model_call() -> None:
     assert scripted.turns == 2, "the model was asked for a reply nobody would read"
 
 
+# -- several actions in one turn --------------------------------------------
+
+
+def _tool_messages(scripted: ScriptedModel) -> list[AnyMessage]:
+    """Every tool reply from the last transcript the model was handed."""
+    return [m for m in scripted.seen[-1] if getattr(m, "type", "") == "tool"]
+
+
+async def test_a_navigational_chain_runs_every_call_in_the_turn() -> None:
+    """The batch the whole guard is shaped around.
+
+    Each target exists only because the previous action changed the screen.
+    browser-use aborts on exactly this, because on the web a navigation means
+    the queue is stale; here it is the queue working.
+    """
+    model = DeviceModel()
+    session, fake, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [
+                ("tap", {"target": "Accessibility"}),
+                ("tap", {"target": "Display & Text Size"}),
+                ("set_value", {"value": "on", "target": "Bold Text"}),
+            ],
+            [("done", {"succeeded": True, "summary": "Bold Text is on"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Bold Text.", model=scripted)
+
+    assert model.switches["bold_text"] is True, "the chain did not reach the switch"
+    assert outcome.stats.actions == 3
+    assert len(fake.taps()) == 3, "the fake toggles a switch by tapping it, so three"
+    # Two model calls for what costs five one at a time. This is the saving.
+    assert outcome.turns == 2
+
+
+async def test_a_link_that_did_not_move_skips_the_rest_of_the_turn() -> None:
+    """A dead switch means every later call is aimed at a screen that never came."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [
+                ("set_value", {"value": "on", "target": "Airplane Mode"}),
+                ("tap", {"target": "Accessibility"}),
+                ("tap", {"target": "Display & Text Size"}),
+            ],
+            [("done", {"succeeded": False, "summary": "the switch would not move"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    assert outcome.stats.actions == 1, "the guard let a later call run"
+    replies = _tool_messages(scripted)
+    assert sum("not run:" in str(m.content) for m in replies) == 2
+    assert "never arrived" in "\n".join(str(m.content) for m in replies)
+
+
+async def test_every_call_in_a_turn_is_answered_even_when_skipped() -> None:
+    """LangChain requires one reply per tool call id, and a missing one fails
+    on the *next* model call rather than here, a long way from the cause."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [
+                ("set_value", {"value": "on", "target": "Airplane Mode"}),
+                ("tap", {"target": "Accessibility"}),
+                ("tap", {"target": "Wi-Fi"}),
+            ],
+            [("done", {"succeeded": False, "summary": "stopped"})],
+        ]
+    )
+
+    await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    answered = [m.tool_call_id for m in _tool_messages(scripted)]  # type: ignore[attr-defined]
+    assert sorted(answered) == ["call-0-0", "call-0-1", "call-0-2"], (
+        f"one reply per call id, got {answered}"
+    )
+
+
+async def test_done_in_the_middle_of_a_turn_stops_what_follows_it() -> None:
+    """Latent since the loop was written, and only reachable by batching."""
+    model = DeviceModel()
+    session, fake, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [
+                ("done", {"succeeded": True, "summary": "already done"}),
+                ("tap", {"target": "Accessibility"}),
+                ("tap", {"target": "Wi-Fi"}),
+            ]
+        ]
+    )
+
+    outcome = await run_goal(session, "Do nothing.", model=scripted)
+
+    assert fake.taps() == [], "a call after `done` reached the device"
+    assert outcome.succeeded is True
+    assert outcome.stats.actions == 0
+
+
+async def test_a_scroll_ends_the_turn_even_though_the_screen_moved() -> None:
+    """The case the no-change rule cannot catch.
+
+    `scroll(until=...)` loops server-side and stops wherever the content did,
+    so it moves the fingerprint and every other rule would wave the next call
+    through, aimed at a screen the model only guessed at.
+    """
+    model = DeviceModel(screen="contacts")
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [
+                ("scroll", {"direction": "down", "until": "Contact 060"}),
+                ("tap", {"target": "Contact 060"}),
+            ],
+            [("done", {"succeeded": True, "summary": "found it"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Find Contact 060.", model=scripted)
+
+    assert outcome.stats.actions == 1, "a call was chained behind a scroll"
+    assert any("cannot be predicted" in str(m.content) for m in _tool_messages(scripted))
+
+
+async def test_the_action_budget_bounds_a_turn_that_asks_for_everything() -> None:
+    """The turn budget used to bound both, one action per turn. Batching
+    breaks that link, and the device side must stay bounded on its own."""
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    # Alternating taps that each move the screen, so the guard never stops it.
+    pair = [("tap", {"target": "Accessibility"}), ("tap", {"target": "Back"})]
+    scripted = ScriptedModel([pair * 4] * 10)
+
+    outcome = await run_goal(session, "Wander forever.", model=scripted)
+
+    assert outcome.finished_cleanly is False
+    assert "actions" in (outcome.stopped_because or ""), outcome.stopped_because
+
+
 async def test_an_action_hands_back_the_screen_it_produced() -> None:
     """The lever the whole design rests on, asserted rather than assumed.
 
@@ -267,12 +412,17 @@ async def test_resuming_does_not_replay_earlier_actions_onto_the_device() -> Non
     missed the cache. The key is now the tool call id, which LangGraph replays
     unchanged.
     """
-    model = DeviceModel(screen="reset")
+    model = DeviceModel(screen="general")
     session, fake, _ = build_session(model, _settings(confirm_destructive=True))
     scripted = ScriptedModel(
         [
+            # The first call has to be one the batch guard allows through, or
+            # the second never runs and there is no interrupt to resume from.
+            # Tapping Reset navigates; tapping "Reset Network Settings", which
+            # this used to open with, goes nowhere in the model and is now
+            # correctly read as a screen that never arrived.
             [
-                ("tap", {"target": "Reset Network Settings"}),
+                ("tap", {"target": "Reset"}),
                 ("tap", {"target": "Erase All Content and Settings"}),
             ],
             [("done", {"succeeded": True, "summary": "done"})],
