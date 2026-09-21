@@ -75,3 +75,47 @@ def test_only_the_published_distribution_is_publishable() -> None:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         published = tomllib.load(handle)["project"].get("classifiers", [])
     assert "Private :: Do Not Upload" not in published, "ios-mcp is the one that ships"
+
+
+def test_the_lockfile_agrees_with_every_workspace_member() -> None:
+    """The file the release checklist forgot.
+
+    0.3.0 moved the version in the four files above and left `uv.lock` behind,
+    where all three workspace members still said 0.2.0. The committed tree then
+    failed `uv sync --locked`, and nothing said so: both workflows run a plain
+    `uv sync`, which rewrites the lock in place and carries on, so every job
+    went green against a lockfile it had silently corrected.
+
+    This assertion alone is not the guard, and finding that out took deliberately
+    breaking it. Run through `uv run pytest`, as CI does, it can never fail: `uv
+    run` re-locks before pytest starts, so the stale lock is repaired behind the
+    test and five tests pass against a file that was wrong a moment earlier. Only
+    a direct `.venv/bin/python -m pytest` sees it. The guard that actually fires
+    is `uv sync --locked` in both workflows; this exists for the message, which
+    names the file and the fix rather than saying a lockfile needs updating.
+
+    Derived from the lock's own `editable` paths rather than a list of names,
+    so a fourth distribution is covered the day it is added rather than the day
+    someone remembers this test exists.
+    """
+    with (ROOT / "uv.lock").open("rb") as handle:
+        locked = tomllib.load(handle)["package"]
+
+    members = {
+        package["name"]: (package["source"]["editable"], package["version"])
+        for package in locked
+        if "editable" in package.get("source", {})
+    }
+    assert members, "no workspace members in uv.lock; the lock shape changed"
+
+    for name, (directory, version) in sorted(members.items()):
+        rel = "pyproject.toml" if directory == "." else f"{directory}/pyproject.toml"
+        assert rel in PYPROJECTS, f"uv.lock has a workspace member this test does not know: {rel}"
+        assert version == _version(rel), (
+            f"uv.lock says {name} is {version!r} and {rel} says {_version(rel)!r}. "
+            "Run `uv lock` and commit it with the version bump."
+        )
+
+    assert len(members) == len(PYPROJECTS), (
+        f"uv.lock locks {sorted(members)} but the release moves {list(PYPROJECTS)}"
+    )

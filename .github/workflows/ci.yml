@@ -29,7 +29,10 @@ jobs:
       # The dev group already pulls ios-agent with both provider extras, which
       # is what the eval suite needs; the root package defines no extras of its
       # own, so naming them here fails outright.
-      - run: uv sync
+      # `--locked` because a plain sync silently rewrites the lock and carries
+      # on, which is how a stale one reached main: every job went green against
+      # a lockfile it had just corrected. See tests/unit/test_version.py.
+      - run: uv sync --locked
 
       - name: ruff
         run: |
@@ -81,7 +84,10 @@ jobs:
       # The dev group already pulls ios-agent with both provider extras, which
       # is what the eval suite needs; the root package defines no extras of its
       # own, so naming them here fails outright.
-      - run: uv sync
+      # `--locked` because a plain sync silently rewrites the lock and carries
+      # on, which is how a stale one reached main: every job went green against
+      # a lockfile it had just corrected. See tests/unit/test_version.py.
+      - run: uv sync --locked
 
       - run: uv run pytest tests/unit tests/tui -q
 
