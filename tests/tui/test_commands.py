@@ -435,12 +435,18 @@ async def test_the_notice_goes_away_on_its_own(monkeypatch: pytest.MonkeyPatch) 
     async with app.run_test(size=(100, 30)) as pilot:
         await _ready(app)
         bar = app.query_one(StatsBar)
-        # Long enough that the assertion below is not racing the timer: a
-        # pause can outlast a very short window on a loaded machine.
+        # Asserted before any await, because there is no window short enough to
+        # be a fast test and long enough to survive a loaded CI runner. Widening
+        # it from a very short value was tried and still failed in CI: a
+        # `pause()` outlasted 0.4s and the timer cleared the notice before the
+        # assertion read it. Not awaiting at all is the only version of this
+        # half that cannot race, and it loses nothing: `flash` sets the reactive
+        # synchronously.
         bar.flash("copied 2 lines", seconds=0.4)
-        await pilot.pause()
         assert bar.notice
 
+        # The other half is safe in the other direction. Sleeping past the
+        # window can only make the timer more likely to have fired, never less.
         await asyncio.sleep(0.6)
         await pilot.pause()
         assert bar.notice == ""
@@ -459,7 +465,12 @@ async def test_a_second_copy_is_not_cut_short_by_the_first_timer(
         bar = app.query_one(StatsBar)
         bar.flash("copied 1 line", seconds=0.15)
         await asyncio.sleep(0.1)
-        bar.flash("copied 9 lines", seconds=0.5)
+        # Deliberately far longer than anything this test waits for. The point
+        # is whether the *first* timer clears the second message, so the second
+        # window only has to outlive the assertion, and a value that a stalled
+        # runner could reach would make a pass mean nothing. Nothing waits for
+        # it to expire, so the generous number costs no time.
+        bar.flash("copied 9 lines", seconds=30.0)
 
         await asyncio.sleep(0.15)  # the first timer fires in here
         await pilot.pause()
