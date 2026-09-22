@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 
 from trees import (
+    compound_controls_screen,
     custom_header_screen,
     drawn_controls_screen,
     form_screen,
     list_screen,
     node,
     opaque_canvas_screen,
+    picker_screen,
     settings_screen,
     third_party_card_screen,
     webview_screen,
@@ -407,3 +409,76 @@ def test_a_navigation_bar_title_is_still_reported_only_once() -> None:
 
     assert d.title == "Settings"
     assert not any(n.text == "Settings" for n in d.nodes)
+
+
+def test_every_wheel_of_a_picker_keeps_its_selected_value() -> None:
+    """A wheel's value is the only state it has, and a merge was eating it.
+
+    UIKit wraps the wheels in a `Picker` whose rect is the union of all of
+    them, so the container's centre lands inside whichever wheel sits in the
+    middle. `_dedupe_colocated` read that as one thing reported twice and kept
+    the container, which carries an accessibility id and no value.
+
+    The visible effect, on a real Clock alarm sheet, was a time picker whose
+    minutes column was simply absent while the hours and the meridiem beside it
+    read `=5 o\u2019clock` and `=PM`. The agent could see two thirds of the
+    selection and had no way to learn the third, or to tell that it had changed
+    after a drag.
+
+    Apple wraps the picker twice, in a `Cell` and then a `Picker` of the same
+    rect, so both wrappers have to lose to the wheels: one by collapsing as a
+    container, the other on precedence.
+    """
+    d = digest_of(picker_screen())
+
+    wheels = [n for n in d.nodes if n.role == "picker"]
+    assert [n.value for n in wheels] == ["5 o\u2019clock", "36 minutes", "PM"], d.render()
+    assert all(n.scrollable for n in wheels)
+    # The `Cell` Apple wraps the picker in must not survive as a phantom
+    # alongside them. It is what ate the middle column on real hardware: it is
+    # mutually centred with that wheel, neither carries a label or an id, and
+    # the tie went to whichever role was in `ROLE_PRECEDENCE`.
+    assert not any(n.role == "cell" for n in d.nodes), d.render()
+
+
+def test_a_stepper_keeps_both_of_its_buttons() -> None:
+    """The parts are the targets, and the container was deleting them.
+
+    A `Stepper`'s rect is exactly its two buttons side by side, so its centre
+    falls on the boundary they share and `Rect.contains` is inclusive at the
+    edge. Both children were therefore mutually centred with the container,
+    both lost the merge to it, and the digest showed one `stepper` node with
+    an accessibility id and nothing to tap.
+
+    Tapping that node's centre happens to hit Increment, which is the worst
+    possible version of the bug: increasing a value looks like it works and
+    decreasing one is unreachable at any price.
+    """
+    d = digest_of(compound_controls_screen())
+
+    labels = [n.label for n in d.nodes if n.role == "button"]
+    assert "Increment" in labels, d.render()
+    assert "Decrement" in labels, d.render()
+
+
+def test_a_segmented_control_is_reported_as_its_segments() -> None:
+    """The case that was already right, kept as the proof that it is.
+
+    The container collapses into the segment at its centre and the three
+    buttons survive with their labels and the selected flag, which is exactly
+    what an agent needs: it taps "Weekly" by name. Nothing here expands a
+    compound control that iOS has already expanded.
+    """
+    d = digest_of(compound_controls_screen())
+
+    segments = [n for n in d.nodes if n.label in ("Daily", "Weekly", "Monthly")]
+    assert len(segments) == 3, d.render()
+    assert [n.label for n in segments if n.selected] == ["Weekly"]
+    assert not any(n.role == "segmented" for n in d.nodes)
+
+
+def test_a_slider_reports_its_value() -> None:
+    d = digest_of(compound_controls_screen())
+
+    slider = next(n for n in d.nodes if n.role == "slider")
+    assert slider.value == "40%"

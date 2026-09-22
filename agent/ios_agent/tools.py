@@ -184,10 +184,14 @@ def build_tools(run: Run) -> list[BaseTool]:
     async def set_value(
         value: str, target: str, tool_call_id: Annotated[str, InjectedToolCallId]
     ) -> str:
-        """Set a switch, slider or picker. Use "on" or "off" for a switch.
+        """Set a switch, slider or picker wheel. Use "on"/"off" for a switch,
+        a percentage like "40%" for a slider, and the option's own spelling for
+        a picker wheel.
 
         Prefer this over tapping a switch: it is state-aware, so asking for a
         state the control is already in does nothing rather than toggling it.
+        Steppers and segmented controls are not set this way; tap their parts,
+        "Increment" or the segment's label, which the screen already lists.
         """
         run.count()
         key = tool_call_id

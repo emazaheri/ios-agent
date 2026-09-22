@@ -407,3 +407,142 @@ def opaque_canvas_screen() -> dict[str, Any]:
             ),
         ],
     )
+
+
+def picker_screen() -> dict[str, Any]:
+    """A wheel-style time picker, captured from a real Clock alarm sheet.
+
+    The geometry and the spellings are measured, not invented, on an iPhone 17
+    Pro Max running iOS 26.6.1. The first version of this fixture was invented
+    and it hid two bugs that hardware found in one run:
+
+    * **A picker is wrapped twice.** Apple puts the `Picker` inside an
+      unlabelled `Cell` of exactly the same rect. Collapsing the `Picker` is
+      not enough: the `Cell` is mutually centred with the middle wheel too, and
+      with `picker` missing from `ROLE_PRECEDENCE` the cell won and the minutes
+      column vanished from the digest while hours and meridiem survived.
+    * **A wheel's value is a spoken phrase.** It reads `5 o'clock`, not `5`,
+      with a typographic apostrophe, and `36 minutes`, and `PM`. An agent
+      asking for `"7"` gets nothing, which is why `set_value` lists what it saw.
+
+    Note also that the wheels *overhang* their picker vertically, 98 to 390
+    against 136 to 352. Real rects do not nest.
+    """
+    return node(
+        "Application",
+        label="Clock",
+        name="Clock",
+        w=440,
+        h=956,
+        children=[
+            node(
+                "Window",
+                w=440,
+                h=956,
+                children=[
+                    node("Button", label="Cancel", x=20, y=92, w=60, h=24),
+                    node("Button", label="Done", name="Save", x=370, y=92, w=56, h=24),
+                    node("StaticText", label="Add Alarm", x=180, y=92, w=100, h=24),
+                    node(
+                        "Cell",
+                        x=20,
+                        y=136,
+                        w=400,
+                        h=216,
+                        children=[
+                            node(
+                                "Picker",
+                                x=20,
+                                y=136,
+                                w=400,
+                                h=216,
+                                children=[
+                                    node(
+                                        "PickerWheel",
+                                        value="5 o\u2019clock",
+                                        x=130,
+                                        y=98,
+                                        w=55,
+                                        h=292,
+                                    ),
+                                    node(
+                                        "PickerWheel",
+                                        value="36 minutes",
+                                        x=190,
+                                        y=98,
+                                        w=50,
+                                        h=292,
+                                    ),
+                                    node("PickerWheel", value="PM", x=245, y=98, w=65, h=292),
+                                ],
+                            )
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def compound_controls_screen() -> dict[str, Any]:
+    """A stepper, a segmented control and a slider, each built out of parts.
+
+    All three are what browser-use calls compound: the control the agent names
+    and the sub-elements that actually take the tap are different nodes. iOS
+    reports the parts, unlike the HTML controls their serializer has to
+    synthesise children for, so the question here is whether the digest keeps
+    them rather than whether it can invent them.
+
+    The stepper's two buttons sit either side of its centre, the segmented
+    control's middle segment sits *on* its centre, and the slider has no parts
+    at all, only a value. Three different outcomes from one merge rule.
+    """
+    return node(
+        "Application",
+        label="Reminders",
+        name="Reminders",
+        h=852,
+        children=[
+            node(
+                "Window",
+                h=852,
+                children=[
+                    node(
+                        "NavigationBar",
+                        name="Repeat",
+                        y=44,
+                        h=52,
+                        children=[node("StaticText", label="Repeat", x=160, y=56, w=80, h=28)],
+                    ),
+                    node(
+                        "SegmentedControl",
+                        name="frequency",
+                        x=16,
+                        y=120,
+                        w=361,
+                        h=32,
+                        children=[
+                            node("Button", label="Daily", x=18, y=122, w=119, h=28),
+                            node("Button", label="Weekly", value="1", x=137, y=122, w=119, h=28),
+                            node("Button", label="Monthly", x=256, y=122, w=119, h=28),
+                        ],
+                    ),
+                    node("StaticText", label="Every", x=16, y=200, w=60, h=28),
+                    node(
+                        "Stepper",
+                        name="interval_stepper",
+                        x=289,
+                        y=196,
+                        w=94,
+                        h=32,
+                        children=[
+                            node("Button", label="Decrement", x=289, y=196, w=47, h=32),
+                            node("Button", label="Increment", x=336, y=196, w=47, h=32),
+                        ],
+                    ),
+                    node("StaticText", label="2 weeks", x=200, y=200, w=80, h=28),
+                    node("Slider", name="volume", value="40%", x=60, y=300, w=270, h=32),
+                ],
+            ),
+        ],
+    )

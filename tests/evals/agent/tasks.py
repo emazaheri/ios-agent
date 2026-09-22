@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from screens import DeviceModel, Injection
+from screens import PANES, DeviceModel, Injection
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +82,22 @@ def _switch(name: str, on: bool) -> Callable[[DeviceModel, str], bool]:
 
 def _reached(screen: str) -> Callable[[DeviceModel, str], bool]:
     return lambda model, _screen: model.screen == screen
+
+
+def _wheel(key: str, option: str) -> Callable[[DeviceModel, str], bool]:
+    """Read the wheel's own index, never the value the agent reported.
+
+    A wheel that accepts a drag and does not turn is the dead-switch failure
+    in another shape, and an agent that reads its own last output back would
+    pass through it.
+    """
+
+    def done(model: DeviceModel, _screen: str) -> bool:
+        wheel = PANES["date_time"].wheel
+        assert wheel is not None
+        return wheel.options[model.wheels[key]] == option
+
+    return done
 
 
 def _shows(text: str) -> Callable[[DeviceModel, str], bool]:
@@ -232,6 +248,20 @@ TASKS: tuple[Task, ...] = (
     # flows for exactly that reason, and surfaced the first time the agent was
     # pointed at a third-party screen. These two are the guard: the shapes are
     # real, the content is invented.
+    Task(
+        name="set_a_picker_wheel",
+        goal="In Settings, set the hour on the Date & Time screen to 9.",
+        done=_wheel("hour", "9"),
+        floor=1,
+        action_floor=3,
+        turn_floor=3,
+        why=(
+            "The only control here that is not a tap. A wheel hides every "
+            "option but the one it is showing, so the value asked for is not "
+            "in the digest until the wheel has been turned to it, and the "
+            "turning happens server-side inside one action."
+        ),
+    ),
     Task(
         name="read_a_card_answer",
         goal="What did they answer to the date prompt?",

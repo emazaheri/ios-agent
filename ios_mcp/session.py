@@ -29,6 +29,7 @@ from ios_mcp.errors import (
     ActionRejectedByPolicy,
     ActionRequiresApproval,
     AppNotFound,
+    ElementNotFound,
     ElementNotInteractable,
     ErrorCode,
     InvalidArgument,
@@ -57,6 +58,30 @@ ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool]]
 _SCROLL_FRACTION = 0.6
 #: Below this identity overlap the screen is a new one, so send a full digest.
 _DELTA_OVERLAP_THRESHOLD = 0.5
+#: How far above or below the middle of a picker wheel to tap to move it by one
+#: row, in points. A tap, not a drag: measured on a real Clock alarm wheel on
+#: an iPhone 17 Pro Max, taps at 30, 40 and 44 points each moved the selection
+#: by exactly one row, twice out of two, and 55 points moved it by two. So the
+#: rows are about 30 points tall, the band that selects the neighbouring row
+#: ends around 45, and 30 sits in the middle of it.
+#:
+#: Drags were tried first and cannot do this at all. A drag of a fifth of the
+#: wheel's height over 0.2s moved four rows; slowing it to 1.6s and shortening
+#: it to a tenth still moved three, and the count varied run to run, because
+#: UIPickerView decelerates a flick through however many rows the momentum
+#: carries. Since an hour wheel wraps, a nondeterministic multi-row step is not
+#: merely imprecise, it is unable to reach two thirds of the options: stepping
+#: by four from 5 o'clock reaches 1 and 9 and nothing else, forever.
+_PICKER_ROW_PX = 30.0
+#: Never tap further out than this share of the wheel, so a short wheel is
+#: nudged by a proportion rather than off its own end.
+_PICKER_MAX_ROW_SHARE = 0.25
+#: Steps allowed per direction before a wheel is declared not to hold the
+#: option. Generous because the real terminator is revisiting a value already
+#: seen; this only bounds a wheel long enough to walk for a minute.
+_PICKER_MAX_NUDGES = 30
+#: Sliders quantise, so a request already this close is already satisfied.
+_SLIDER_TOLERANCE = 0.02
 #: Error details worth keeping in the trail. Everything else, notably the
 #: whole-screen ``visible`` summary, is dropped before recording.
 _AUDITED_DETAIL_KEYS = frozenset(
@@ -288,7 +313,19 @@ class IosSession:
         target: str | None = None,
         idem_key: str | None = None,
     ) -> ActionResult:
-        """Set a switch, slider, stepper, or picker rather than tapping at it."""
+        """Set a switch, slider, or picker wheel rather than tapping at it.
+
+        Every route here is a gesture at a coordinate, because that is all
+        layer 2 speaks and adding an element-identity scheme beside `RefTable`
+        to reach WDA's element endpoints would buy one round trip at the cost
+        of a second way to name an element.
+
+        Each route also verifies itself. The version this replaced sent every
+        non-switch role to `send_keys`, which posts to `/wda/keys` and types
+        into whatever holds keyboard focus. A picker wheel holds none, so the
+        call succeeded, changed nothing, and reported success, which is the
+        failure shape this whole project is written against.
+        """
 
         async def do(resolved: Target) -> None:
             if resolved.role == "switch":
@@ -299,12 +336,31 @@ class IosSession:
                 x, y = resolved.point
                 await self.wda.tap(x, y)
                 return
-            if resolved.role not in ("slider", "stepper", "picker", "segmented"):
+            if resolved.role == "slider":
+                await self._set_slider(resolved, value)
+                return
+            if resolved.role == "picker":
+                await self._set_picker(resolved, value)
+                return
+            if resolved.role in ("stepper", "segmented"):
+                # Both are containers the digest normally dissolves into the
+                # parts iOS already reports: a stepper into "Increment" and
+                # "Decrement", a segmented control into its segments. Reaching
+                # this line means the app drew one instead of composing it, so
+                # there is nothing here to nudge and nothing to read back.
                 raise ElementNotInteractable(
-                    f"Cannot set a value on a {resolved.role}",
-                    hint="Use ios_tap for buttons and cells, or ios_type for text fields.",
+                    f"A {resolved.role} is set by tapping its parts, not by naming a value",
+                    hint=(
+                        "Call ios_observe and tap the part by name: 'Increment' or "
+                        "'Decrement' for a stepper, the segment's own label for a "
+                        "segmented control."
+                    ),
+                    details={"ref": resolved.ref},
                 )
-            await self.wda.send_keys(value)
+            raise ElementNotInteractable(
+                f"Cannot set a value on a {resolved.role}",
+                hint="Use ios_tap for buttons and cells, or ios_type for text fields.",
+            )
 
         return await self._act(
             "set_value",
@@ -895,6 +951,118 @@ class IosSession:
         x1, y1, x2, y2 = deltas[direction]
         await self.wda.drag(x1, y1, x2, y2, 0.4)
 
+    async def _set_slider(self, resolved: Target, value: str) -> None:
+        """Drag the thumb to a fraction of the track.
+
+        A slider reports its position as a percentage string, so where it is
+        now is readable and the drag can start from the thumb rather than from
+        the middle of the track, which is what makes this work on a slider that
+        is already near one end.
+
+        No exception when it refuses to move. A control that accepts a gesture
+        and does nothing is the dead-switch shape, and `_finish` already says
+        so with `screen_changed=False`; raising here would hide the honest
+        report behind a guess about why.
+        """
+        fraction = _fraction_of(value)
+        if fraction is None:
+            raise InvalidArgument(
+                f"{value!r} is not a slider position",
+                hint="Pass a percentage such as '40%' or a fraction such as 0.4.",
+            )
+        rect = resolved.rect
+        current = _fraction_of(await self._control_value(resolved) or "")
+        if current is not None and abs(current - fraction) <= _SLIDER_TOLERANCE:
+            return
+        _, y = rect.center
+        start_x = rect.x + (current if current is not None else 0.5) * rect.width
+        await self.wda.drag(start_x, y, rect.x + fraction * rect.width, y, 0.4)
+
+    async def _set_picker(self, resolved: Target, value: str) -> None:
+        """Step a wheel one row at a time until it reads the option asked for.
+
+        The options a wheel is *not* showing are not in the accessibility tree
+        at any price: a `PickerWheel` reports only its selection. So there is
+        nothing to look the answer up in and no way to compute how far to
+        travel, which leaves moving it and reading it, the way a person would.
+
+        Two things make that terminate. Each step is a tap on the neighbouring
+        row, which moves the selection by exactly one (`_PICKER_ROW_PX`), and
+        the loop stops as soon as it sees a value it has already seen. The
+        second is what a real hour wheel taught: it *wraps*, so waiting for the
+        value to stop changing waits forever. Revisiting covers both that and a
+        finite wheel run onto its own end.
+
+        Failing lists every option it saw, in order, which is the only record
+        of what the wheel contained and the only way a caller can learn that
+        the hour it wants is spelled `7 o'clock` rather than `7`. Measured on
+        an iPhone 17 Pro Max: asking a twelve-hour wheel for `7` walks it once
+        round in 12 steps and 30.7s, notices it is back where it started, and
+        reports all twelve spellings. Asking for a neighbour costs 9.6s.
+        """
+        wanted = value.strip().casefold()
+        current = await self._control_value(resolved)
+        started_at = current
+        seen: list[str] = []
+
+        def matches() -> bool:
+            return current is not None and current.strip().casefold() == wanted
+
+        for direction in (1, -1):
+            visited: list[str] = []
+            for _ in range(_PICKER_MAX_NUDGES):
+                if matches():
+                    return
+                if current in visited:
+                    break  # round the loop, or stuck: this direction is spent
+                if current is not None:
+                    visited.append(current)
+                    if current not in seen:
+                        seen.append(current)
+                await self._nudge_wheel(resolved, direction)
+                current = await self._control_value(resolved)
+            if matches():
+                return
+            # Back where it started means the wheel wrapped, so every option
+            # it has is already in `seen` and going the other way would walk
+            # the same values again at a snapshot apiece. A wheel that ran
+            # onto an end instead stopped somewhere else, and the reverse pass
+            # is the only way back past where it began.
+            if current is not None and current == started_at and len(visited) > 1:
+                break
+
+        raise ElementNotFound(
+            f"No option {value!r} on this picker",
+            hint="Pass one of the options listed in `seen`, spelled the way the wheel spells it.",
+            details={"ref": resolved.ref, "seen": seen},
+        )
+
+    async def _nudge_wheel(self, resolved: Target, direction: int) -> None:
+        """Move a wheel by exactly one row, by tapping the row next to it.
+
+        A `UIPickerView` selects whatever row is tapped, which makes a tap the
+        only gesture that moves it by a known amount. See `_PICKER_ROW_PX` for
+        what happened to the drag this replaced.
+        """
+        cx, cy = resolved.rect.center
+        offset = min(_PICKER_ROW_PX, resolved.rect.height * _PICKER_MAX_ROW_SHARE)
+        await self.wda.tap(cx, cy - offset * direction)
+
+    async def _control_value(self, resolved: Target) -> str | None:
+        """Re-read one control's value from the screen as it is now.
+
+        Nearest-by-rect rather than by ref, because a wheel mid-turn is the
+        same control at the same coordinates with different contents, and
+        because `snapshot` deliberately does not touch the ref table: reading
+        a value here must not count as an observation the agent was shown.
+        """
+        digest = await self.snapshot()
+        candidates = [n for n in digest.nodes if n.role == resolved.role]
+        if not candidates:
+            return None
+        nearest = min(candidates, key=lambda n: n.rect.distance_to(resolved.rect))
+        return nearest.value
+
     async def foreground_app(self) -> str | None:
         """The bundle id of whatever is in front, or None if it cannot be read.
 
@@ -992,3 +1160,26 @@ def _camel(name: str) -> str:
         "volume_down": "volumeDown",
         "siri": "siri",
     }.get(name, name)
+
+
+def _fraction_of(value: str) -> float | None:
+    """Read a slider position from the shapes a caller or WDA might use.
+
+    WDA reports a slider as `"40%"` and accepts a fraction. An agent asked to
+    set one says "40%", "0.4" or "40", and the last is ambiguous only in
+    theory: nothing means four thousand percent, so anything above 1 is a
+    percentage. Out of range is an error rather than a clamp, because a caller
+    that asked for 140 misunderstood the control.
+    """
+    text = value.strip().rstrip("%").strip()
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if number > 1:
+        number /= 100
+    if not 0.0 <= number <= 1.0:
+        return None
+    return number
