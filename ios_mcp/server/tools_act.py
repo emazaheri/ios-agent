@@ -125,11 +125,20 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         approve: ApproveArg = None,
         idem_key: IdemArg = None,
     ) -> dict[str, Any]:
-        """Set a switch, slider, stepper, or picker to a value.
+        """Set a switch, slider, or picker wheel to a value.
+
+        'on' or 'off' for a switch, a percentage such as '40%' or a fraction
+        for a slider, and the option spelled the way the wheel spells it for a
+        picker. A wheel is turned a row at a time and read back after each
+        one, so an option it does not contain fails listing what it does.
 
         Prefer this over tapping a switch: it checks the current state first,
         so asking for 'on' when it is already on does nothing rather than
         turning it off.
+
+        Steppers and segmented controls are not set this way. iOS reports
+        their parts and the digest shows them, so tap 'Increment',
+        'Decrement', or the segment by its own label.
         """
         session = ctx.require()
         _approve(approve)

@@ -48,6 +48,9 @@ CONTACTS_TOTAL = 200
 CONTACTS_WINDOW = 15
 #: Cards stack instead of tiling into rows, and the tap target that likes one
 #: sits at its trailing edge the way a heart icon does.
+#: A picker wheel, sized the way UIKit sizes one. Rows are about 30 points, so
+#: the row either side of the middle is what a nudge taps.
+_WHEEL_RECT = (140.0, 520.0, 110.0, 216.0)
 _CARD_TOP = 100.0
 _CARD_HEIGHT = 160.0
 _CARD_X = 16.0
@@ -116,6 +119,22 @@ class Card:
 
 
 @dataclass(frozen=True, slots=True)
+class Wheel:
+    """A picker wheel, which shows one option and hides the rest.
+
+    The point of modelling it at all is that `options` is *not* in the tree.
+    A real `PickerWheel` reports its selection and nothing else, so an agent
+    cannot read the list, cannot know how far the option it wants is, and has
+    to turn the wheel and look. A fake that served all the options would make
+    the task pass without ever exercising that.
+    """
+
+    key: str
+    options: tuple[str, ...]
+    identifier: str
+
+
+@dataclass(frozen=True, slots=True)
 class Pane:
     title: str
     rows: tuple[Row, ...]
@@ -123,6 +142,8 @@ class Pane:
     back_to: str | None = None
     #: A pane is either a table of rows or a stack of cards, never both.
     cards: tuple[Card, ...] = ()
+    #: A wheel sits below the rows, the way a date picker sits below its row.
+    wheel: Wheel | None = None
 
 
 #: A cut-down Settings, deep enough that reaching Bold Text takes real
@@ -158,7 +179,21 @@ PANES: dict[str, Pane] = {
         rows=(
             Row("About", identifier="about_cell"),
             Row("Software Update", identifier="update_cell"),
+            Row("Date & Time", to="date_time", identifier="date_time_cell"),
             Row("Reset", to="reset", identifier="reset_cell"),
+        ),
+    ),
+    # The only screen here whose control is not a tap. A wheel has to be turned
+    # and read, one row at a time, because the option asked for does not exist
+    # in the tree until it is showing.
+    "date_time": Pane(
+        title="Date & Time",
+        back_to="general",
+        rows=(),
+        wheel=Wheel(
+            key="hour",
+            options=("5", "6", "7", "8", "9", "10", "11", "12"),
+            identifier="hour_wheel",
         ),
     ),
     "reset": Pane(
@@ -264,6 +299,8 @@ class DeviceModel:
     visited: list[str] = field(default_factory=list)
     #: Index of the first contact row on screen. Only the contacts list scrolls.
     scroll_offset: int = 0
+    #: Selected index per picker wheel, keyed by `Wheel.key`.
+    wheels: dict[str, int] = field(default_factory=lambda: {"hour": 0})
     #: What has been typed into the Settings search field. Filters the root
     #: pane's rows, so typing has a visible consequence rather than being
     #: accepted and ignored.
@@ -298,6 +335,35 @@ class DeviceModel:
         if pane.cards:
             return self._cards_tree(pane)
         return self._pane_tree(pane)
+
+    def _wheel_node(self, wheel: Wheel) -> dict[str, Any]:
+        """The wheel, wrapped in the `Picker` UIKit always wraps it in.
+
+        The wrapper is not decoration here. Its rect is the union of the
+        wheels, so it is concentric with the one in the middle, and a digest
+        that reads that pair as one control keeps the container and loses the
+        selection. Serving a bare wheel would let that bug pass unnoticed.
+        """
+        x, y, w, h = _WHEEL_RECT
+        return node(
+            "Picker",
+            name=f"{wheel.identifier}_group",
+            x=x,
+            y=y,
+            w=w,
+            h=h,
+            children=[
+                node(
+                    "PickerWheel",
+                    name=wheel.identifier,
+                    value=wheel.options[self.wheels[wheel.key]],
+                    x=x,
+                    y=y,
+                    w=w,
+                    h=h,
+                )
+            ],
+        )
 
     def _contacts_tree(self) -> dict[str, Any]:
         """Only the rows currently on screen exist.
@@ -455,6 +521,9 @@ class DeviceModel:
 
         rows = self._visible_rows(pane)
         cells = [self._row_node(row, index) for index, row in enumerate(rows)]
+        body = [node("Table", y=96, h=700, children=cells)]
+        if pane.wheel is not None:
+            body.append(self._wheel_node(pane.wheel))
         return node(
             "Application",
             label="Settings",
@@ -466,7 +535,7 @@ class DeviceModel:
                     h=852,
                     children=[
                         node("NavigationBar", name=pane.title, y=44, h=52, children=nav_children),
-                        node("Table", y=96, h=700, children=cells),
+                        *body,
                     ],
                 )
             ],
@@ -518,6 +587,10 @@ class DeviceModel:
             return  # those screens are read-only fixtures
         pane = PANES[self.screen]
 
+        if pane.wheel is not None and _hit(_WHEEL_RECT, x, y):
+            self._turn(pane.wheel, y)
+            return
+
         if pane.cards:
             self._tap_card(pane, x, y)
             return
@@ -565,7 +638,14 @@ class DeviceModel:
         self.switches[row.switch] = not self.switches[row.switch]
 
     def drag(self, from_y: float, to_y: float) -> None:
-        """A swipe moves the contacts window; nothing else scrolls."""
+        """A swipe moves the contacts window, and nothing else.
+
+        Deliberately not the wheel. A real `UIPickerView` decelerates a drag
+        through however many rows the momentum carries, which is four on an
+        iPhone 17 Pro Max and varies run to run, so a fake that turned neatly
+        by one per drag would have been modelling something that does not
+        exist. The wheel moves on taps: see `tap`.
+        """
         if self.screen != "contacts":
             return
         rows = int(abs(from_y - to_y) // _ROW_HEIGHT)
@@ -573,6 +653,18 @@ class DeviceModel:
             self.scroll_offset = min(self.scroll_offset + rows, CONTACTS_TOTAL - CONTACTS_WINDOW)
         else:
             self.scroll_offset = max(self.scroll_offset - rows, 0)
+
+    def _turn(self, wheel: Wheel, y: float) -> None:
+        """Select the row that was tapped, one either side of the middle.
+
+        Wrapping, not clamping, because that is what a real hour wheel does:
+        12 is followed by 1 and there is no end to run onto. A fake that
+        clamped would let "wait until the value stops changing" look like a
+        working terminator, and on hardware it spins forever.
+        """
+        _, top, _, height = _WHEEL_RECT
+        step = 1 if y < top + height / 2 else -1
+        self.wheels[wheel.key] = (self.wheels[wheel.key] + step) % len(wheel.options)
 
     def type_into_search(self, text: str) -> None:
         """Typing filters the root pane. Anywhere else it goes nowhere.

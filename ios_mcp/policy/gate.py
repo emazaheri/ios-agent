@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from ios_mcp.actions.catalog import READ_ONLY_ACTIONS
 from ios_mcp.config import PolicySettings
 from ios_mcp.errors import AppNotAllowed, SessionHalted
 from ios_mcp.perception.refs import Target
@@ -91,7 +92,12 @@ class PolicyGate:
         """
         if not self.settings.enabled or not self.settings.confirm_destructive:
             return Verdict(Risk.SAFE)
-        if action.startswith(("observe", "screenshot", "read_text", "wait_for", "list")):
+        # Read verbs are safe by definition, and which verbs those are is a
+        # fact about the action rather than about this file: it comes from the
+        # catalog, so a new read verb cannot be safe here and gated there.
+        # `list` stays a prefix because the listing tools live in the server
+        # layer, which this one must not import.
+        if action in READ_ONLY_ACTIONS or action.startswith("list"):
             return Verdict(Risk.SAFE)
 
         haystacks = [

@@ -119,6 +119,16 @@ async def _search_then_act(session: IosSession, meter: Meter) -> None:
     await meter.act(session.set_value("off", target="Bluetooth"))
 
 
+async def _set_a_picker_wheel(session: IosSession, meter: Meter) -> None:
+    # Three actions, the same as any other two-level navigation plus a control.
+    # What the wheel costs is inside the third one: the turning and the reading
+    # back happen server-side, where they cost no model tokens at all.
+    await meter.observe()
+    await meter.act(session.tap(target="General"))
+    await meter.act(session.tap(target="Date & Time"))
+    await meter.act(session.set_value("9", target="hour_wheel"))
+
+
 async def _read_a_card_answer(session: IosSession, meter: Meter) -> None:
     # Nothing to do. Either the screen can be read or it cannot, and one
     # observation settles it.
@@ -152,6 +162,7 @@ _SOLUTIONS = {
     "three_switches_three_panes": _three_switches_three_panes,
     "conditional_cleanup": _conditional_cleanup,
     "search_then_act": _search_then_act,
+    "set_a_picker_wheel": _set_a_picker_wheel,
     "read_a_card_answer": _read_a_card_answer,
     "like_a_card": _like_a_card,
     "refuse_erasing_the_device": _refuse_erasing_the_device,

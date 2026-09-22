@@ -587,12 +587,32 @@ def _beats(candidate: _Candidate, incumbent: _Candidate) -> bool:
     the Button does not, and iOS emits that pairing for every Settings row.
     Otherwise the more specific role wins, since the inner control is the more
     precise thing to act on.
+
+    A label and an accessibility id are both text and they are not worth the
+    same, which is why this is ranked rather than a boolean. An id is a handle
+    for whoever wrote the app; a label is the word on the screen, and it is the
+    only one of the two the agent can be asked to find by name.
+
+    A `Stepper` is what proved the difference. Its rect is its two buttons side
+    by side, so its centre sits on the boundary they share and `Rect.contains`
+    is inclusive at an edge: *both* children were coincident with the
+    container. The container carried `interval_stepper` and no label, the
+    buttons carried "Increment" and "Decrement", the boolean read all three as
+    "has text", and precedence then handed the merge to the stepper. Twice. The
+    digest showed one node with an id and nothing to tap, whose centre happens
+    to land on Increment, so raising a value silently worked and lowering one
+    was unreachable.
     """
-    has_text = bool(_identity_text(candidate.node))
-    incumbent_has_text = bool(_identity_text(incumbent.node))
-    if has_text != incumbent_has_text:
-        return has_text
+    if _rank(candidate.node) != _rank(incumbent.node):
+        return _rank(candidate.node) > _rank(incumbent.node)
     return _precedence(candidate.role) < _precedence(incumbent.role)
+
+
+def _rank(node: SnapshotNode) -> int:
+    """How well a node names itself: by label, by id, or not at all."""
+    if node.label:
+        return 2
+    return 1 if _identity_text(node) else 0
 
 
 def _precedence(role: str) -> int:

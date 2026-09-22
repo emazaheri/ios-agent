@@ -27,7 +27,15 @@ ROLE_MAP: dict[str, str] = {
     "PageIndicator": "pageindicator",
     "SegmentedControl": "segmented",
     "PickerWheel": "picker",
-    "Picker": "picker",
+    # Not the same thing as a wheel, and mapping both to one role cost the
+    # agent the selection. A `Picker` is the box several `PickerWheel`s sit
+    # in: its rect is their union, so its centre lands inside whichever wheel
+    # is in the middle, and `_dedupe_colocated` read that pair as one control
+    # reported twice. The container won, because it carries an accessibility
+    # id and the wheel carries only a value, and the middle column's selected
+    # option disappeared from the digest. Naming the container separately puts
+    # it in `CONTAINER_ROLES`, where an unlabelled wrapper belongs.
+    "Picker": "pickergroup",
     "DatePicker": "datepicker",
     "Cell": "cell",
     "Image": "image",
@@ -110,6 +118,8 @@ CONTAINER_ROLES: frozenset[str] = frozenset(
         "nav",
         "tabbar",
         "statusbar",
+        # The box around a set of picker wheels. The wheels are the controls.
+        "pickergroup",
     }
 )
 
@@ -187,10 +197,20 @@ DECORATIVE_LABELS: frozenset[str] = frozenset(
 #: A role that is not on the list sorts last, which is the safe direction, but
 #: it means a framework that reports its controls as something else entirely
 #: loses every merge to whatever wraps it.
+#:
+#: "Sorts last is the safe direction" was wrong, and a real Clock alarm proved
+#: it. `picker` was absent here, so a wheel tied with the unlabelled `Cell`
+#: that Apple wraps the picker in, lost on precedence, and the minutes column
+#: disappeared from a three-column time picker while the hours and the meridiem
+#: survived. Absent from this tuple does not mean neutral; it means beaten by
+#: every wrapper that has a role on it. A control belongs here.
 ROLE_PRECEDENCE: tuple[str, ...] = (
     "switch",
     "slider",
     "stepper",
+    "picker",
+    "datepicker",
+    "segmented",
     "textfield",
     "securefield",
     "searchfield",

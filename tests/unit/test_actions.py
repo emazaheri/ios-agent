@@ -6,7 +6,12 @@ import pytest
 from fake_device import make_session
 from trees import form_screen, list_screen, node, settings_screen
 
-from ios_mcp.errors import ElementNotInteractable, InvalidArgument, NotSupported
+from ios_mcp.errors import (
+    ElementNotFound,
+    ElementNotInteractable,
+    InvalidArgument,
+    NotSupported,
+)
 
 
 async def test_tap_hits_the_centre_of_the_resolved_element() -> None:
@@ -271,3 +276,186 @@ async def test_read_text_scopes_to_one_element() -> None:
     narrow = await session.read_text(ref=wifi.ref)
     assert "Wi-Fi" in narrow
     assert "Bluetooth" not in narrow
+
+
+def _wheel_screen(value: str) -> dict:
+    """One picker wheel, alone on the screen so nearest-match is unambiguous."""
+    return node(
+        "Application",
+        label="Clock",
+        h=852,
+        children=[
+            node("PickerWheel", value=value, x=140, y=520, w=110, h=216),
+        ],
+    )
+
+
+#: Centre of the wheel in `_wheel_screen`, which is what a nudge taps beside.
+_WHEEL_CENTRE_Y = 520 + 216 / 2
+
+
+def _turning_wheel(options: list[str], start: int = 0, *, wraps: bool = False):
+    """A wheel that moves one row per tap on a neighbouring row.
+
+    A tap, not a drag, because that is what a real `UIPickerView` responds to
+    predictably: see `_PICKER_ROW_PX`. `wraps` models the other half of what
+    hardware showed, an hour wheel that never reaches an end and so can never
+    be detected by waiting for the value to stop changing.
+    """
+    state = {"index": start}
+    fake: dict = {}
+
+    def on_gesture(path: str, body: dict | None) -> None:
+        if not path.endswith("/wda/tap") or not body or "y" not in body:
+            return
+        step = 1 if body["y"] < _WHEEL_CENTRE_Y else -1
+        moved = state["index"] + step
+        state["index"] = moved % len(options) if wraps else max(0, min(len(options) - 1, moved))
+        fake["session"].source_tree = _wheel_screen(options[state["index"]])
+
+    return state, fake, on_gesture
+
+
+async def test_a_picker_wheel_turns_until_it_reads_the_wanted_option() -> None:
+    """The option asked for is not in the tree until the wheel shows it.
+
+    A `PickerWheel` reports its selection and nothing else, so there is no list
+    to look the answer up in and no way to compute the distance to it. Turning
+    it and reading it back is the only route, which is why this is a loop and
+    why the loop has to be bounded.
+    """
+    options = ["6", "7", "8", "9"]
+    state, holder, on_gesture = _turning_wheel(options)
+    session, fake, _ = make_session(_wheel_screen("6"), on_gesture=on_gesture)
+    holder["session"] = fake
+    digest = await session.observe()
+    wheel = next(n for n in digest.nodes if n.role == "picker")
+
+    result = await session.set_value("9", ref=wheel.ref)
+
+    assert result.ok
+    assert options[state["index"]] == "9"
+
+
+async def test_a_picker_already_showing_the_option_is_left_alone() -> None:
+    """Same contract as the switch: asking for what is already set does nothing."""
+    _, holder, on_gesture = _turning_wheel(["6", "7"])
+    session, fake, _ = make_session(_wheel_screen("6"), on_gesture=on_gesture)
+    holder["session"] = fake
+    digest = await session.observe()
+    wheel = next(n for n in digest.nodes if n.role == "picker")
+
+    await session.set_value("6", ref=wheel.ref)
+
+    assert fake.gestures == []
+
+
+async def test_a_picker_without_the_option_reports_what_it_saw() -> None:
+    """The values seen are the only record of what the wheel contained.
+
+    Failing with just "not found" would leave the agent with no way to learn
+    the spelling of the options, since they are never all on screen at once.
+    """
+    options = ["Monday", "Tuesday", "Wednesday"]
+    _, holder, on_gesture = _turning_wheel(options)
+    session, fake, _ = make_session(_wheel_screen("Monday"), on_gesture=on_gesture)
+    holder["session"] = fake
+    digest = await session.observe()
+    wheel = next(n for n in digest.nodes if n.role == "picker")
+
+    with pytest.raises(ElementNotFound) as exc_info:
+        await session.set_value("Friday", ref=wheel.ref)
+
+    assert set(exc_info.value.details["seen"]) == set(options)
+
+
+async def test_a_wheel_that_never_turns_stops_instead_of_spinning() -> None:
+    """A dead control must cost a bounded number of gestures, not a budget."""
+    session, fake, _ = make_session(_wheel_screen("6"))
+    digest = await session.observe()
+    wheel = next(n for n in digest.nodes if n.role == "picker")
+
+    with pytest.raises(ElementNotFound):
+        await session.set_value("9", ref=wheel.ref)
+
+    assert len(fake.gestures) == 2, "one nudge per direction, then give up"
+
+
+async def test_a_slider_is_dragged_from_its_thumb_to_the_requested_fraction() -> None:
+    """Starting at the thumb rather than mid-track is what makes the ends work."""
+    tree = node(
+        "Application",
+        label="Sounds",
+        h=852,
+        children=[node("Slider", name="volume", value="40%", x=60, y=300, w=270, h=32)],
+    )
+    session, fake, _ = make_session(tree)
+    digest = await session.observe()
+    slider = next(n for n in digest.nodes if n.role == "slider")
+
+    await session.set_value("80%", ref=slider.ref)
+
+    path, body = fake.gestures[-1]
+    assert path.endswith("/wda/dragfromtoforduration")
+    assert body is not None
+    assert body["fromX"] == pytest.approx(60 + 0.4 * 270)
+    assert body["toX"] == pytest.approx(60 + 0.8 * 270)
+
+
+async def test_a_slider_position_has_to_be_a_position() -> None:
+    tree = node(
+        "Application",
+        label="Sounds",
+        h=852,
+        children=[node("Slider", name="volume", value="40%", x=60, y=300, w=270, h=32)],
+    )
+    session, _, _ = make_session(tree)
+    await session.observe()
+
+    with pytest.raises(InvalidArgument):
+        await session.set_value("loud", target="volume")
+
+
+async def test_a_drawn_stepper_points_at_the_buttons_instead_of_guessing() -> None:
+    """Composed steppers dissolve into their buttons, so this is the other case.
+
+    An app that draws its own stepper leaves a container with no parts in the
+    tree. There is nothing to nudge and nothing to read back, so saying so
+    beats a gesture that cannot be verified.
+    """
+    tree = node(
+        "Application",
+        label="Reminders",
+        h=852,
+        children=[node("Stepper", name="interval_stepper", x=289, y=196, w=94, h=32)],
+    )
+    session, _, _ = make_session(tree)
+    await session.observe()
+
+    with pytest.raises(ElementNotInteractable) as exc_info:
+        await session.set_value("3", target="interval_stepper")
+
+    assert "Increment" in (exc_info.value.hint or "")
+
+
+async def test_a_wrapping_wheel_stops_when_it_comes_round_again() -> None:
+    """An hour wheel has no end, so "it stopped changing" never happens.
+
+    On a real Clock alarm the wheel wraps from 12 back to 1 forever. The first
+    version of this loop waited for the value to stop moving and would have
+    spun until its cap on every wheel it could not satisfy. Stopping on a value
+    already seen is what makes a wrapping wheel terminate, and it costs one
+    step per distinct option rather than a fixed budget.
+    """
+    options = ["1", "2", "3", "4"]
+    _, holder, on_gesture = _turning_wheel(options, wraps=True)
+    session, fake, _ = make_session(_wheel_screen("1"), on_gesture=on_gesture)
+    holder["session"] = fake
+    digest = await session.observe()
+    wheel = next(n for n in digest.nodes if n.role == "picker")
+
+    with pytest.raises(ElementNotFound) as exc_info:
+        await session.set_value("99", ref=wheel.ref)
+
+    assert set(exc_info.value.details["seen"]) == set(options)
+    assert len(fake.gestures) < 12, f"spun {len(fake.gestures)} times round a four-option wheel"

@@ -11,6 +11,7 @@ from simulator_support import requires_simulator
 
 from ios_mcp.devices.discovery import list_simulators
 from ios_mcp.devices.doctor import run_doctor
+from ios_mcp.errors import IosAutomationError
 from ios_mcp.session import IosSession
 
 pytestmark = [pytest.mark.simulator, requires_simulator]
@@ -80,8 +81,6 @@ async def test_a_deep_link_opens_a_specific_settings_pane(session: IosSession) -
 
 async def test_an_invalid_deep_link_fails_loudly(session: IosSession) -> None:
     """A silently ignored bad URL would leave the agent acting on the wrong screen."""
-    from ios_mcp.errors import IosAutomationError
-
     with pytest.raises(IosAutomationError):
         await session.open_url("prefs:root=General")  # the retired iOS 25 scheme
 
@@ -122,3 +121,82 @@ async def test_the_session_recovers_from_a_killed_runner(session: IosSession) ->
     )
     digest = await session.observe()
     assert digest.nodes, "the session should have healed and re-observed"
+
+
+async def _reachable_panes(session: IosSession) -> list:
+    """Every Settings pane one tap from the root, and the root itself.
+
+    Enough surface to find a compound control if the build has one, and
+    bounded so the test cannot wander.
+    """
+    digests = [await session.observe()]
+    roots = [n.label for n in digests[0].nodes if n.role in ("button", "cell") and n.label][:8]
+    for label in roots:
+        try:
+            result = await session.tap(target=label)
+        except IosAutomationError:
+            continue
+        digests.append(result.digest or await session.observe())
+        try:
+            await session.tap(target="Back")
+        except IosAutomationError:
+            await session.open_url("App-prefs:root")
+    return digests
+
+
+async def test_a_real_compound_control_keeps_its_value(session: IosSession) -> None:
+    """A slider or a wheel, read off a real screen rather than a fixture.
+
+    The bug this guards is a merge: iOS wraps a wheel in a `Picker` whose rect
+    is the union of its columns, and the container carries an id where the
+    wheel carries only a value, so the wrong one used to survive. A value that
+    comes back empty here is that bug returning.
+
+    Skips rather than fails when the build has neither. A simulator's Settings
+    is a reduced build: the one this was written against (iOS 27, iPhone 18
+    Pro) has no Date & Time pane and no Clock app at all, so there is no stock
+    wheel to reach. That is a fact about the simulator, not about the code, and
+    a test that lied about it would be worse than one that says so.
+    """
+    controls = [
+        n
+        for digest in await _reachable_panes(session)
+        for n in digest.nodes
+        if n.role in ("slider", "picker")
+    ]
+    if not controls:
+        pytest.skip("no slider or picker wheel on this Settings build")
+
+    for control in controls:
+        assert control.value, f"{control.role} came back with no value: {control.render()}"
+
+
+async def test_a_real_slider_can_be_set(session: IosSession) -> None:
+    """Dragging the thumb, which is the half no fake can model.
+
+    Restored in a `finally`, the way the device tier restores its one switch:
+    a test that leaves a setting moved has changed the machine it ran on.
+    """
+    slider = next(
+        (
+            n
+            for digest in await _reachable_panes(session)
+            for n in digest.nodes
+            if n.role == "slider"
+        ),
+        None,
+    )
+    if slider is None:
+        pytest.skip("no slider on this Settings build")
+    before = slider.value
+
+    try:
+        result = await session.set_value("80%", target=slider.identifier or slider.label or "")
+        assert result.ok
+        after = next(
+            n for n in (result.digest or await session.observe()).nodes if n.role == "slider"
+        )
+        assert after.value != before, f"the slider never moved off {before!r}"
+    finally:
+        if before:
+            await session.set_value(before, target=slider.identifier or slider.label or "")
