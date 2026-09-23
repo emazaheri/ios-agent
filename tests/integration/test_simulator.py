@@ -52,6 +52,42 @@ async def test_a_real_screenshot_comes_back_as_png(session: IosSession) -> None:
     assert len(png) > 10_000
 
 
+async def test_a_real_screenshot_is_a_whole_number_of_points(session: IosSession) -> None:
+    """The one claim annotation rests on, against a real runtime.
+
+    The tree is in points and the image is in pixels, and every box is placed
+    by the ratio between them. No fixture can confirm that ratio is what the
+    runtime actually renders at, which is the rule this suite exists for.
+    """
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    digest = await session.observe()
+    image = Image.open(io.BytesIO(await session.screenshot()))
+    assert digest.screen is not None
+    horizontal = image.width / digest.screen.width
+    vertical = image.height / digest.screen.height
+    assert horizontal == pytest.approx(vertical, rel=0.02), (
+        f"{image.size} pixels against {digest.screen.width}x{digest.screen.height} points"
+    )
+    assert 1.0 <= horizontal <= 3.5, f"implausible scale {horizontal}"
+
+
+async def test_annotating_a_real_screen_draws_on_it(session: IosSession) -> None:
+    """Every perception-geometry bug in this project came from a real run."""
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    plain = await session.screenshot()
+    boxed = await session.screenshot(annotate_refs=True)
+    assert boxed != plain, "nothing was drawn"
+    assert Image.open(io.BytesIO(boxed)).size == Image.open(io.BytesIO(plain)).size
+
+
 async def test_tapping_a_row_navigates(session: IosSession) -> None:
     before = await session.observe()
     result = await session.tap(target="General")

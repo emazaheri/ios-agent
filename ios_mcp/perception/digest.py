@@ -124,6 +124,11 @@ class Digest:
     #: model, and the rendered text is what the model reads.
     notes: list[str] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+    #: The whole screen in points, even when `region` narrowed what was kept.
+    #: Not serialised: it exists so a consumer that has to relate these rects
+    #: to pixels can measure the ratio instead of guessing it from the widest
+    #: element, which a region-filtered digest makes wrong. See `vision.py`.
+    screen: Rect | None = None
 
     def by_ref(self, ref: str) -> DigestNode | None:
         return next((n for n in self.nodes if n.ref == ref), None)
@@ -270,6 +275,7 @@ def build_digest(
         total_nodes=total,
         truncated=truncated,
         notes=_unreachable_content_notes(nodes, screen),
+        screen=root.rect,
     )
 
 

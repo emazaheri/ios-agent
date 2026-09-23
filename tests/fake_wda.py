@@ -14,6 +14,25 @@ from typing import Any
 import httpx
 
 
+def blank_png(width: int, height: int) -> bytes:
+    """A real PNG of a real size.
+
+    A sentinel like `b"fake-png"` is enough for a tool that only passes the
+    bytes through, but not for annotation, which opens the image and scales
+    the digest's rects against it. The default is 2x the default tree's
+    393x852 screen, so a fake session behaves like an iPhone.
+    """
+    try:
+        import io
+
+        from PIL import Image
+    except ImportError:  # Pillow is an optional extra.
+        return b"\x89PNG\r\n\x1a\nfake"
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (255, 255, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 @dataclass
 class FakeWda:
     """Serves the subset of the WDA API this project uses."""
@@ -21,7 +40,7 @@ class FakeWda:
     session_id: str = "S1"
     alive: bool = True
     source_tree: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_TREE))
-    screenshot_bytes: bytes = b"\x89PNG\r\n\x1a\nfake"
+    screenshot_bytes: bytes = field(default_factory=lambda: blank_png(786, 1704))
     window: dict[str, float] = field(default_factory=lambda: {"width": 393, "height": 852})
     alert_text: str | None = None
     alert_buttons: list[str] = field(default_factory=lambda: ["Cancel", "OK"])

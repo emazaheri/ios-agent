@@ -459,3 +459,21 @@ async def test_a_wrapping_wheel_stops_when_it_comes_round_again() -> None:
 
     assert set(exc_info.value.details["seen"]) == set(options)
     assert len(fake.gestures) < 12, f"spun {len(fake.gestures)} times round a four-option wheel"
+
+
+async def test_annotation_checks_pillow_before_spending_an_observation(monkeypatch) -> None:
+    """An observation is a tree fetch and a ref-table generation. Neither
+    should be spent to find out a package is missing."""
+    import sys
+
+    from ios_mcp.errors import ToolchainMissing
+
+    session, fake, _ = make_session(settings_screen())
+    before = session.refs.generation
+
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    with pytest.raises(ToolchainMissing):
+        await session.screenshot(annotate_refs=True)
+
+    assert session.refs.generation == before
+    assert not any(path.endswith("/screenshot") for _, path, _ in fake.calls)

@@ -328,3 +328,34 @@ async def test_find_results_are_redacted_like_every_other_payload(monkeypatch) -
     assert result["total"] >= 1
     assert "someone@example.com" not in json.dumps(result)
     assert "[redacted]" in json.dumps(result)
+
+
+async def test_an_annotated_screenshot_observes_first(server_with_session) -> None:
+    """The boxes carry refs, so the refs have to be ones the agent holds.
+
+    The version this replaces drew `session._last_digest`, which `snapshot()`
+    sets during resolution and settle polling. Those digests are deliberately
+    kept out of the ref table, so a picture built from one hands back labels
+    the resolver does not recognise, on the one output a caller trusts by eye.
+    """
+    mcp, _ctx, state = server_with_session
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        session = state["session"]
+        await session.snapshot()  # an internal look: sets _last_digest, not the refs
+        before = session.refs.generation
+
+        await client.call_tool("ios_screenshot", {"annotate_refs": True})
+        assert session.refs.generation == before + 1
+
+
+async def test_a_plain_screenshot_does_not_spend_an_observation(server_with_session) -> None:
+    """Annotating costs a tree fetch. Not annotating must not."""
+    mcp, _ctx, state = server_with_session
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        session = state["session"]
+        before = session.refs.generation
+
+        await client.call_tool("ios_screenshot", {})
+        assert session.refs.generation == before
