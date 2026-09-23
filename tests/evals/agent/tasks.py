@@ -9,10 +9,16 @@ hand-written oracle needs (`oracle.py`). Without it a measured number is just a
 number — 4 observations means nothing until you know the floor is 1.
 
 Three of them inject a failure this project hit on real hardware. Those are the
-replan tests, and they are the reason the set is not a happy path. Two more
+replan tests, and they are the reason the set is not a happy path. Three more
 live in an app Apple did not write, which is the other way this set refuses to
 be a happy path: every perception rule tuned against Settings is a bet that the
 next app is built the same way, and two of those bets have already lost.
+
+The third of those, `set_quiet_hours`, is there for a different reason again.
+Every other task in this file is at its oracle's action floor, which is a good
+result and a measurement problem: with no gap to close, anything that claims to
+help an agent find its way has nothing to show. That one has a route nobody
+could guess from the first screen.
 """
 
 from __future__ import annotations
@@ -292,6 +298,27 @@ TASKS: tuple[Task, ...] = (
             "is even reachable, one to keep an unlabelled node that carries an "
             "id and one to admit that something outside INTERACTIVE_ROLES can be "
             "tapped. Failing here is the measurement that justifies both."
+        ),
+    ),
+    Task(
+        name="set_quiet_hours",
+        goal="In the Cards app, turn off Quiet Hours.",
+        done=_switch("quiet_hours", False),
+        floor=1,
+        action_floor=4,
+        turn_floor=4,
+        start="settings_root",
+        why=(
+            "The only task here with discovery in it. Every other task is "
+            "already at its oracle floor, so there was nothing left for "
+            "knowing the route to save and no way to tell a feature that does "
+            "not help from a task with no room in it. This one starts outside "
+            "the app, so reaching the switch means opening it; the profile tab "
+            "is the third of three unlabelled glyphs; and the app calls its "
+            "notification screen Nudges. None of that is derivable from the "
+            "first screen, which is what an agent pays for on a first "
+            "encounter and what ADR 0003 named as the condition for reopening "
+            "the question of written-down knowledge."
         ),
     ),
     Task(

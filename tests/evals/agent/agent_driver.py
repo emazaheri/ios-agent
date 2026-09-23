@@ -19,7 +19,8 @@ import shutil
 import pytest
 from ios_agent import AgentSettings, SessionBackend, run_goal
 from ios_agent.config import KNOWN_EXTRAS, export_provider_credentials
-from measure import Meter
+from ios_agent.skills import SkillLoader, app_skill
+from measure import Driver, Meter
 from tasks import Task
 
 from ios_mcp.session import IosSession
@@ -84,10 +85,31 @@ _unavailable = why_unavailable()
 requires_a_model = pytest.mark.skipif(_unavailable is not None, reason=_unavailable or "")
 
 
+def driver(*, briefed: bool = True) -> Driver:
+    """One arm of the briefing measurement, as a driver the harness can run.
+
+    The only difference between the two arms is whether `run_goal` is handed
+    the skill loader, so everything else the report compares is held fixed.
+    That is the shape ADR 0003 settled the memory question in, and the reason
+    `skills` is a parameter of `run_goal` rather than an import inside it.
+    """
+
+    async def drive_arm(task: Task, session: IosSession, meter: Meter) -> None:
+        await _drive(task, session, meter, skills=app_skill if briefed else None)
+
+    return drive_arm
+
+
 async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     """One goal, start to finish, with the cost copied onto the meter."""
+    await _drive(task, session, meter, skills=app_skill)
+
+
+async def _drive(
+    task: Task, session: IosSession, meter: Meter, *, skills: SkillLoader | None
+) -> None:
     backend = SessionBackend(session)
-    outcome = await run_goal(session, task.goal, backend=backend)
+    outcome = await run_goal(session, task.goal, backend=backend, skills=skills)
 
     # The backend counts at the point the call is made, which is the only
     # place that can distinguish an explicit observation from a screen that
@@ -103,4 +125,5 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     # oracle's to declare and this column is what gets measured against it.
     meter.turns = outcome.turns
     meter.charge_model(outcome.prompt_tokens, outcome.completion_tokens)
+    meter.skill_tokens = outcome.skill_tokens
     meter.last_screen = backend.last_screen

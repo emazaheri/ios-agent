@@ -11,7 +11,7 @@ declaration, so geometry can never drift between what the agent sees and what
 responds to its taps.
 
 The injections are the interesting part. Each one reproduces a failure this
-project actually hit on hardware, documented in CLAUDE.md, and each is a
+project actually hit on hardware, documented in `docs/realities/`, and each is a
 `Injection` flag rather than a separate fake, so the same task can be run with
 and without it and the difference attributed.
 """
@@ -58,6 +58,12 @@ _CARD_W = 360.0
 _LIKE_X = 306.0
 _LIKE_SIZE = 52.0
 _LIKE_DY = 80.0
+#: A tab bar across the bottom, the way an app that is not Settings navigates.
+#: The items carry ids and no labels, because that is what a drawn icon is.
+_TAB_TOP = 788.0
+_TAB_SIZE = 44.0
+_TAB_X = 40.0
+_TAB_GAP = 120.0
 
 
 class Injection(StrEnum):
@@ -119,6 +125,20 @@ class Card:
 
 
 @dataclass(frozen=True, slots=True)
+class Tab:
+    """One item in a bottom tab bar, drawn rather than composed.
+
+    No label, because the thing on screen is a glyph and nobody wrote a word
+    for it. The identifier is positional for the same reason it usually is
+    outside Apple's apps: `testID` is set by whoever laid the bar out, and
+    "the third one" is what they knew about it.
+    """
+
+    identifier: str
+    to: str
+
+
+@dataclass(frozen=True, slots=True)
 class Wheel:
     """A picker wheel, which shows one option and hides the rest.
 
@@ -144,6 +164,18 @@ class Pane:
     cards: tuple[Card, ...] = ()
     #: A wheel sits below the rows, the way a date picker sits below its row.
     wheel: Wheel | None = None
+    #: Which app this screen belongs to. It names the `Application` node, and
+    #: it is how launching an app the agent is already inside can do nothing,
+    #: the way activating a running app really does.
+    app: str = "Settings"
+    #: A bottom tab bar, on the app's top-level screens only. A pushed screen
+    #: keeps the bar on a real phone; it is left off here so that a pane with
+    #: a Back button has exactly one way back and the route stays countable.
+    tabs: tuple[Tab, ...] = ()
+    #: Only the Settings root has a search field. Keyed separately from
+    #: `back_to` because a third-party top-level screen has no back button and
+    #: no search either, and conflating the two gave it one.
+    searchable: bool = False
 
 
 #: A cut-down Settings, deep enough that reaching Bold Text takes real
@@ -151,6 +183,7 @@ class Pane:
 PANES: dict[str, Pane] = {
     "settings_root": Pane(
         title="Settings",
+        searchable=True,
         rows=(
             Row("Airplane Mode", switch="airplane", identifier="airplane_switch"),
             Row("Wi-Fi", to="wifi", identifier="wifi_cell"),
@@ -260,6 +293,100 @@ _DEEP_LINKS = {
     "App-prefs:root=General": "general",
 }
 
+#: The three tabs every top-level screen of the Cards app carries. Positional
+#: ids and no labels: which one holds the profile is not derivable from the
+#: tree, which is the discovery cost `set_quiet_hours` measures.
+_CARDS_TABS: tuple[Tab, ...] = (
+    Tab("tabbar_item_1", "cards_feed"),
+    Tab("tabbar_item_2", "cards_likes"),
+    Tab("tabbar_item_3", "cards_me"),
+)
+
+#: A second app, with its own vocabulary and its own way of navigating.
+#:
+#: `profile_cards` above exists to break perception rules tuned on Settings.
+#: These screens exist for a different reason: the route through them is not
+#: guessable from the first screen. The settings are behind an unlabelled tab
+#: and then behind a word the app made up, so an agent that has not been told
+#: where they are has to look, and looking costs actions. Every task in this
+#: file before it was already at its oracle floor, which left nothing for a
+#: briefing to save and no way to tell "did not help" from "had no room".
+#:
+#: Nav bars are kept, as on `profile_cards` and for the same reason: a drawn
+#: header is a separate bet, and mixing it in here would mean a failure could
+#: not be attributed.
+PANES.update(
+    {
+        "cards_feed": Pane(
+            title="Discover",
+            app="Cards",
+            rows=(),
+            tabs=_CARDS_TABS,
+            cards=(
+                Card(
+                    summary="Their first photo",
+                    identifier="feed_card_1",
+                    prompt="Weekend prompt",
+                    answer="Anywhere with a view",
+                ),
+            ),
+        ),
+        "cards_likes": Pane(
+            title="Likes",
+            app="Cards",
+            tabs=_CARDS_TABS,
+            rows=(Row("Nobody yet", identifier="likes_empty"),),
+        ),
+        "cards_me": Pane(
+            title="Me",
+            app="Cards",
+            tabs=_CARDS_TABS,
+            rows=(
+                Row("My Prompts", to="cards_prompts", identifier="me_prompts_row"),
+                # The app's own word for notification settings. An agent
+                # looking for "Notifications" has to read the screen and work
+                # out that this is the row, which is the ordinary case outside
+                # Apple's apps and the thing a skill file can say in a line.
+                Row("Nudges", to="cards_nudges", identifier="me_nudges_row"),
+                Row("Account", to="cards_account", identifier="me_account_row"),
+            ),
+        ),
+        "cards_prompts": Pane(
+            title="My Prompts",
+            app="Cards",
+            back_to="cards_me",
+            rows=(Row("Weekend prompt", identifier="prompts_weekend_row"),),
+        ),
+        "cards_account": Pane(
+            title="Account",
+            app="Cards",
+            back_to="cards_me",
+            rows=(Row("Signed in as you", identifier="account_email_row"),),
+        ),
+        "cards_nudges": Pane(
+            title="Nudges",
+            app="Cards",
+            back_to="cards_me",
+            rows=(
+                Row("New Likes", switch="new_likes", identifier="nudges_likes_switch"),
+                Row("Quiet Hours", switch="quiet_hours", identifier="nudges_quiet_switch"),
+            ),
+        ),
+    }
+)
+
+#: Which app opens on which screen, and which bundle id each app answers to.
+#: `open_app` is the only way into an app the agent did not start in, so the
+#: model has to know what launching one does.
+APP_BUNDLES: dict[str, str] = {
+    "Settings": "com.apple.Preferences",
+    "Cards": "com.example.cards",
+}
+_ENTRY_SCREEN: dict[str, str] = {
+    "com.apple.Preferences": "settings_root",
+    "com.example.cards": "cards_feed",
+}
+
 
 def _row_rect(index: int) -> tuple[float, float, float, float]:
     return (0.0, _ROW_TOP + index * _ROW_HEIGHT, _SCREEN_WIDTH, _ROW_HEIGHT)
@@ -271,6 +398,10 @@ def _card_top(index: int) -> float:
 
 def _like_rect(index: int) -> tuple[float, float, float, float]:
     return (_LIKE_X, _card_top(index) + _LIKE_DY, _LIKE_SIZE, _LIKE_SIZE)
+
+
+def _tab_rect(index: int) -> tuple[float, float, float, float]:
+    return (_TAB_X + index * _TAB_GAP, _TAB_TOP, _TAB_SIZE, _TAB_SIZE)
 
 
 def _hit(rect: tuple[float, float, float, float], x: float, y: float) -> bool:
@@ -291,6 +422,8 @@ class DeviceModel:
             "bluetooth": True,
             "bold_text": False,
             "voiceover": False,
+            "new_likes": True,
+            "quiet_hours": True,
         }
     )
     #: Every URL handed to the adapter, honoured or not.
@@ -429,8 +562,8 @@ class DeviceModel:
         """
         return node(
             "Application",
-            label="Cards",
-            name="Cards",
+            label=pane.app,
+            name=pane.app,
             h=852,
             children=[
                 node(
@@ -455,10 +588,42 @@ class DeviceModel:
                                 for index, card in enumerate(pane.cards)
                             ],
                         ),
+                        *self._tab_bar(pane),
                     ],
                 )
             ],
         )
+
+    def _tab_bar(self, pane: Pane) -> list[dict[str, Any]]:
+        """The bar, if this screen has one, as ids with nothing readable on them.
+
+        The wrapper carries no identifier on purpose. Give it one and the
+        drawn-control rule keeps it, its centre lands on the middle tab, and
+        `_dedupe_colocated` folds the two into one -- the picker bug in
+        `docs/realities/compound-controls.md`, in a tab bar. Unlabelled and
+        unnamed, it collapses like any other wrapper and the three tabs
+        survive.
+        """
+        if not pane.tabs:
+            return []
+        return [
+            node(
+                "Other",
+                y=_TAB_TOP - 8,
+                h=_TAB_SIZE + 16,
+                children=[
+                    node(
+                        "Image",
+                        name=tab.identifier,
+                        x=_tab_rect(index)[0],
+                        y=_tab_rect(index)[1],
+                        w=_TAB_SIZE,
+                        h=_TAB_SIZE,
+                    )
+                    for index, tab in enumerate(pane.tabs)
+                ],
+            )
+        ]
 
     def _card_node(self, card: Card, index: int) -> dict[str, Any]:
         top = _card_top(index)
@@ -504,7 +669,7 @@ class DeviceModel:
             nav_children.insert(
                 0, node("Button", label="Back", name="back_button", x=bx, y=by, w=bw, h=bh)
             )
-        if pane.back_to is None:
+        if pane.searchable:
             # Only the Settings root pane has search, the way the real one does.
             nav_children.append(
                 node(
@@ -526,8 +691,8 @@ class DeviceModel:
             body.append(self._wheel_node(pane.wheel))
         return node(
             "Application",
-            label="Settings",
-            name="Settings",
+            label=pane.app,
+            name=pane.app,
             h=852,
             children=[
                 node(
@@ -536,6 +701,7 @@ class DeviceModel:
                     children=[
                         node("NavigationBar", name=pane.title, y=44, h=52, children=nav_children),
                         *body,
+                        *self._tab_bar(pane),
                     ],
                 )
             ],
@@ -547,7 +713,7 @@ class DeviceModel:
         Filtering on substring rather than prefix, because a person searching
         "wi-fi" and a person searching "fi" both expect the Wi-Fi row.
         """
-        if pane.back_to is not None or not self.search:
+        if not pane.searchable or not self.search:
             return list(pane.rows)
         needle = self.search.strip().lower()
         return [row for row in pane.rows if needle in row.label.lower()]
@@ -586,6 +752,11 @@ class DeviceModel:
         if self.screen in ("contacts", "mail_compose"):
             return  # those screens are read-only fixtures
         pane = PANES[self.screen]
+
+        for index, tab in enumerate(pane.tabs):
+            if _hit(_tab_rect(index), x, y):
+                self._go(tab.to)
+                return
 
         if pane.wheel is not None and _hit(_WHEEL_RECT, x, y):
             self._turn(pane.wheel, y)
@@ -677,6 +848,23 @@ class DeviceModel:
             return
         self.search = (self.search + text).replace("\n", "")
 
+    def launch(self, bundle_id: str) -> None:
+        """Open an app, or activate the one already in front.
+
+        The second half is the part worth modelling. iOS brings a running app
+        back to whatever screen it was on, so an agent that launches the app
+        it is already inside lands where it already was. A fake that reset to
+        the first screen instead would hand every run a free way back, and the
+        route counts would be measuring that.
+        """
+        entry = _ENTRY_SCREEN.get(bundle_id)
+        if entry is None:
+            return
+        current = PANES.get(self.screen)
+        if current is not None and APP_BUNDLES.get(current.app) == bundle_id:
+            return
+        self._go(entry)
+
     def press_home(self) -> None:
         self._go("settings_root")
 
@@ -707,6 +895,8 @@ def gesture_handler(model: DeviceModel) -> Callable[[str, dict[str, Any] | None]
             model.drag(float(body["fromY"]), float(body["toY"]))
         elif path.endswith("/wda/homescreen"):
             model.press_home()
+        elif path.endswith(("/wda/apps/launch", "/wda/apps/activate")) and body:
+            model.launch(str(body.get("bundleId", "")))
 
     return handle
 

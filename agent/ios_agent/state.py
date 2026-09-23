@@ -55,6 +55,11 @@ class Outcome:
     stats: BackendStats = field(default_factory=BackendStats)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: Prompt tokens spent on per-app briefings, already counted inside
+    #: `prompt_tokens` and reported separately so the price of a briefing can
+    #: be weighed against what it saved. Not on `stats` for the same reason
+    #: `turns` is not: the backend never sees one.
+    skill_tokens: int = 0
 
     @property
     def finished_cleanly(self) -> bool:

@@ -39,6 +39,12 @@ from langchain.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.types import interrupt
 
 from ios_agent.backend import Backend
+from ios_agent.skills import SkillLoader, app_skill
+from ios_mcp.devices.base import AppInfo, best_app_match
+
+#: Matches `BackendStats._charge`. A briefing is context the run pays for, so
+#: it is counted in the same currency as everything else it pays for.
+_CHARS_PER_TOKEN = 4
 
 
 @dataclass
@@ -68,6 +74,19 @@ class Run:
     #: Approvals granted by a human this run, by signature. Kept so a resumed
     #: node does not ask twice for the same action.
     approved: set[str] = field(default_factory=set)
+    #: What is installed, from the device's own list. `open_app` takes the
+    #: name a person would use and a skill file is named for a bundle id, so
+    #: something has to map between them -- and it has to map the way the
+    #: session does, or an app that opened on a fuzzy match would silently get
+    #: no notes. `best_app_match` is that shared answer.
+    apps: list[AppInfo] = field(default_factory=list)
+    #: Bundle ids already briefed this run. Opening an app a second time must
+    #: not re-pay for text the model is already carrying.
+    briefed: set[str] = field(default_factory=set)
+    #: What those briefings cost, charged the way the backend charges device
+    #: tokens. Reported, because a feature whose cost is not in the report is
+    #: one nobody can weigh.
+    skill_tokens: int = 0
     #: How many times a human was stopped and asked. Reported, because an agent
     #: that interrupts constantly is unusable however safe it is.
     approvals_asked: int = 0
@@ -77,9 +96,35 @@ class Run:
         self.steps += 1
 
 
-def build_tools(run: Run) -> list[BaseTool]:
-    """Bind the tool surface to one run."""
+def build_tools(run: Run, skills: SkillLoader | None = app_skill) -> list[BaseTool]:
+    """Bind the tool surface to one run.
+
+    `skills` is the per-app briefing loader, and `None` turns it off. It is a
+    parameter rather than an import so the eval can run both arms of the same
+    task through the same code, which is how ADR 0003 settled the last
+    question of this shape.
+    """
     backend = run.backend
+
+    def notes_on(name: str) -> str:
+        """Whatever has been written about this app, once per run.
+
+        Appended to the screen `open_app` already returns rather than sent as
+        a turn of its own: the model is about to read that result anyway, and
+        a separate message would spend a round trip saying something that fits
+        in this one.
+        """
+        if skills is None:
+            return ""
+        bundle = best_app_match(name, run.apps) or ""
+        if not bundle or bundle in run.briefed:
+            return ""
+        notes = skills(bundle)
+        if not notes:
+            return ""
+        run.briefed.add(bundle)
+        run.skill_tokens += len(notes) // _CHARS_PER_TOKEN
+        return f"\n\nNotes on this app:\n{notes}"
 
     async def guarded(action: str, call: object) -> str:
         """Run one tool call, turning a typed failure into something readable.
@@ -224,7 +269,13 @@ def build_tools(run: Run) -> list[BaseTool]:
         """Open an app by name, for example "Maps". Use this rather than
         hunting for its icon on the home screen."""
         run.count()
-        return await guarded("open_app", lambda: backend.open_app(name))
+        failures = len(run.errors)
+        screen = await guarded("open_app", lambda: backend.open_app(name))
+        if len(run.errors) > failures:
+            # The app did not open. Briefing the model about a screen it is
+            # not on would be the worst version of this feature.
+            return screen
+        return screen + notes_on(name)
 
     @tool
     async def open_url(url: str) -> str:

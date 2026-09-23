@@ -80,6 +80,23 @@ extra tokens**. Payloads are identical because the server serialises the same
 dict the library returns, and a test asserts that equality so the two sets of
 numbers stay comparable.
 
+## Per-app notes
+
+`ios_agent/skills/apps/<bundle-id>.md`, appended to the `open_app` result the
+first time a run opens that app. Nothing is paid by a run that never opens it,
+and the system prompt stays byte-identical, which is what keeps it cacheable.
+
+A file says how an app is shaped and how to reach a screen in it. It does not
+say what an attempt will do. That line is ADR 0003's: told assertively that a
+control was dead, the agent stopped touching the device and reported a failure
+it had not observed, one run in three. `tests/unit/test_skills.py` holds every
+shipped file to it, along with a 1,500-character cap, and
+`ios_agent/skills/README.md` is the longer version of the rule.
+
+`run_goal(..., skills=None)` turns the whole thing off, which is how the two
+arms in `tests/evals/agent/test_agent_skills.py` are measured against each
+other.
+
 ## Running the evals
 
 ```bash
