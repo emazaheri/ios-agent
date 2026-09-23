@@ -29,6 +29,14 @@ jobs:
       # The dev group already pulls ios-agent with both provider extras, which
       # is what the eval suite needs; the root package defines no extras of its
       # own, so naming them here fails outright.
+      # Asked first and on its own, because `uv sync --locked` fails with a
+      # resolution error that buries the cause. This one says only that the
+      # lock is stale, which is almost always a version bump that moved four
+      # files and left the fifth, and `scripts/release.py` is what stops that
+      # happening by hand.
+      - name: the lockfile is current
+        run: uv lock --check
+
       # `--locked` because a plain sync silently rewrites the lock and carries
       # on, which is how a stale one reached main: every job went green against
       # a lockfile it had just corrected. See tests/unit/test_version.py.

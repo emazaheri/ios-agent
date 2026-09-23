@@ -90,9 +90,16 @@ def test_the_lockfile_agrees_with_every_workspace_member() -> None:
     breaking it. Run through `uv run pytest`, as CI does, it can never fail: `uv
     run` re-locks before pytest starts, so the stale lock is repaired behind the
     test and five tests pass against a file that was wrong a moment earlier. Only
-    a direct `.venv/bin/python -m pytest` sees it. The guard that actually fires
-    is `uv sync --locked` in both workflows; this exists for the message, which
-    names the file and the fix rather than saying a lockfile needs updating.
+    a direct `.venv/bin/python -m pytest` sees it. This exists for the message,
+    which names the file and the fix rather than saying a lockfile needs
+    updating.
+
+    The guards that actually fire are `uv lock --check`, which asks uv rather
+    than reading a file uv has already repaired, and `uv sync --locked` behind
+    it. Both workflows run them, and `scripts/hooks/pre-push` runs the first so
+    the answer arrives before a push rather than after one. `scripts/release.py`
+    is what stops the question coming up at all, by moving every version and
+    re-locking in the same command.
 
     Derived from the lock's own `editable` paths rather than a list of names,
     so a fourth distribution is covered the day it is added rather than the day

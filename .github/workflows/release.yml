@@ -27,6 +27,11 @@ jobs:
       # `--locked` because a plain sync silently rewrites the lock and carries
       # on, which is how a stale one reached main: every job went green against
       # a lockfile it had just corrected. See tests/unit/test_version.py.
+      # A release is exactly the change most likely to leave the lock behind,
+      # since bumping a workspace member's version restates it in `uv.lock`.
+      - name: the lockfile is current
+        run: uv lock --check
+
       - run: uv sync --locked
 
       - name: the tag matches the packages

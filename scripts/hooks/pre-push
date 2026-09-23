@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Refuse to push a tree whose `uv.lock` is stale.
+#
+# Install it once:
+#
+#     git config core.hooksPath scripts/hooks
+#
+# This exists because the guard that fires is remote. `uv sync --locked` in CI
+# catches a stale lock, but only after a push, a runner and a couple of
+# minutes. The obvious local check does not work: `tests/unit/test_version.py`
+# asserts the lock agrees with every workspace member, and run the way anyone
+# runs it, through `uv run pytest`, it can never fail, because `uv run`
+# re-locks before pytest starts and repairs the file behind the test.
+#
+# `uv lock --check` asks uv directly and writes nothing, so it is the one check
+# that both fires locally and cannot be defeated by the thing it is checking.
+#
+# A version bump is what makes this happen: `uv.lock` records all three
+# workspace members with their versions, so moving one restates it in a file
+# nobody thinks of as part of the bump. `scripts/release.py` moves them
+# together; this is the backstop for the day someone edits by hand.
+set -euo pipefail
+
+command -v uv >/dev/null 2>&1 || exit 0   # no uv, nothing to say
+
+if ! uv lock --check >/dev/null 2>&1; then
+  echo "pre-push: uv.lock is stale." >&2
+  echo "  Run 'uv lock' and commit it, or 'python scripts/release.py' if this" >&2
+  echo "  is a version bump. Pushing now fails CI at 'uv sync --locked'." >&2
+  echo "  Bypass with --no-verify if you mean it." >&2
+  exit 1
+fi
