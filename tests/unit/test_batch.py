@@ -176,6 +176,32 @@ def test_every_terminator_is_a_device_verb() -> None:
     assert TERMINATES_SEQUENCE <= DEVICE_VERBS
 
 
+def test_the_terminators_are_the_ones_the_action_table_declares() -> None:
+    """The same literal, held against `ios_mcp.actions.catalog` this time.
+
+    Which actions land somewhere the turn could not have predicted is a fact
+    about the action, so it lives on `ActionSpec` beside `destructive` and
+    `takes_idem_key`. It is not imported here, because `batch.py` importing
+    nothing is what lets the guard be read as a rule rather than as a view of
+    the server; the test is the join instead, exactly as the one above is for
+    `Backend`.
+
+    All nine agent verbs happen to be catalog *method* keys, so no name
+    translation is needed: `open_app` is a method whose action name is
+    `launch_app`, and it is the method the agent calls.
+    """
+    from ios_agent.batch import _ASKED_A_QUESTION
+
+    from ios_mcp.actions.catalog import CATALOG
+
+    agent_verbs = DEVICE_VERBS | _ASKED_A_QUESTION
+    declared = {m for m, spec in CATALOG.items() if spec.terminates_sequence}
+    assert declared & agent_verbs == TERMINATES_SEQUENCE
+    # And the table says something about every verb the agent can reach, so a
+    # new one cannot arrive unclassified.
+    assert agent_verbs <= set(CATALOG)
+
+
 # -- the turn floor ---------------------------------------------------------
 
 

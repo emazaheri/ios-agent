@@ -312,3 +312,57 @@ def test_pillow_missing_warns_and_names_the_extra(monkeypatch) -> None:
 
     assert check.status == "warn"
     assert check.remedy and "--extra vision" in check.remedy
+
+
+def test_every_problem_offers_a_remedy() -> None:
+    """A `warn` or a `fail` with nothing to do about it is not a diagnosis.
+
+    `doctor --json` is the machine-readable half, and an agent reading it gets
+    `status` and `detail` for free from any report. `remedy` is the only field
+    that says what to do, so a problem without one hands the caller a dead end.
+
+    Read statically, because the alternative is a machine with every failure
+    mode present at once. It catches a new `Check("x", "fail", ...)` written
+    without a remedy; the empty-`blockers` case below is the one a static read
+    cannot see, since that line does pass a `remedy` keyword.
+    """
+    import ast
+
+    source = Path(__file__).resolve().parents[2] / "ios_mcp" / "devices" / "doctor.py"
+    tree = ast.parse(source.read_text(), filename=str(source))
+
+    missing: list[int] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "Check" or len(node.args) < 2:
+            continue
+        status = node.args[1]
+        if not (isinstance(status, ast.Constant) and status.value in ("warn", "fail")):
+            continue
+        if not any(kw.arg == "remedy" for kw in node.keywords):
+            missing.append(node.lineno)
+    assert missing == [], f"Check(...) with no remedy at lines {missing}"
+
+
+async def test_an_unready_device_with_no_blockers_still_says_what_to_do(monkeypatch) -> None:
+    """The one path where a `warn` could carry `remedy=None`.
+
+    `DeviceInfo.blockers` defaults to `()`, so a device reported as not ready
+    by a source that did not say why is the default construction, not an exotic
+    case. Joining an empty tuple gives `""`, which is falsy, so the `or None`
+    beside it turned a real warning into one with no advice at all.
+    """
+    from ios_mcp.config import Settings
+    from ios_mcp.devices import discovery
+    from ios_mcp.devices.base import DeviceInfo
+    from ios_mcp.devices.doctor import _check_attached_devices
+
+    async def _one_unexplained_device(_cfg: object = None) -> list[DeviceInfo]:
+        return [DeviceInfo(udid="UDID", name="iPhone", os_version="26.6", kind="device")]
+
+    monkeypatch.setattr(discovery, "list_real_devices", _one_unexplained_device)
+
+    check = await _check_attached_devices(Settings())
+    assert check.status == "warn"
+    assert check.remedy

@@ -1,9 +1,9 @@
-"""CLI entry point: `ios-agent devices | doctor`.
+"""CLI entry point: `ios-agent devices | doctor | reset`.
 
 The command is `ios-agent` and the distribution is `ios-tui`. `ios-mcp` serves
 the server; this drives a phone.
 
-`devices` and `doctor` deliberately never touch Textual. They answer a question
+`devices`, `doctor` and `reset` deliberately never touch Textual. They answer a question
 and exit, and a full-screen app that paints and tears down a canvas to print
 nine lines is worse at that than `print` is. Both also have to work on a
 machine where the interesting half cannot run at all, which is exactly the
@@ -24,7 +24,7 @@ from ios_tui.quickstart import quickstart
 
 #: Subcommands. Anything else in the first position is treated as a goal, so
 #: `ios-agent "turn on bold text"` keeps working without the verb.
-_COMMANDS = frozenset({"run", "devices", "doctor", "manual", "quickstart"})
+_COMMANDS = frozenset({"run", "devices", "doctor", "manual", "quickstart", "reset"})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = sub.add_parser("doctor", help="Diagnose anything that would stop a run")
     doctor.add_argument("--json", action="store_true")
 
+    reset = sub.add_parser("reset", help="Stop a WebDriverAgent a crashed run left behind")
+    reset.add_argument("--json", action="store_true")
+    reset.add_argument("--device", help="Only processes driving this UDID.")
+    reset.add_argument("-y", "--yes", action="store_true", help="Stop them, rather than list them.")
+
     return parser
 
 
@@ -159,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(settings, json_out=args.json)
     if args.command == "devices":
         return _cmd_devices(settings, json_out=args.json)
+    if args.command == "reset":
+        return _cmd_reset(settings, json_out=args.json, udid=args.device, kill=args.yes)
     if args.command == "quickstart":
         code = quickstart(settings, assume_yes=args.yes)
         if code != 0:
@@ -176,6 +183,23 @@ def main(argv: list[str] | None = None) -> int:
     # used to print help and exit, so getting to the terminal front end
     # required already knowing what you wanted from it.
     return _cmd_run(settings, build_parser().parse_args(["run"]))
+
+
+def _cmd_reset(settings: Settings, *, json_out: bool, udid: str | None, kill: bool) -> int:
+    """The same command `ios-mcp reset` runs, reached the same way `doctor` is.
+
+    Imported rather than shelled out to, because `ios_tui` is a separate
+    distribution that is allowed to reach into `ios_mcp.devices`; see ADR 0008.
+    Nothing here is added to the agent's public surface: stopping stray
+    processes is an operator's job, not something a loop should be able to do.
+    """
+    import json
+
+    from ios_mcp.devices.processes import reset
+
+    report = asyncio.run(reset(settings, udid=udid, kill=kill))
+    print(json.dumps(report.to_dict(), indent=2) if json_out else report.render())
+    return 1 if report.problems else 0
 
 
 def _cmd_doctor(settings: Settings, *, json_out: bool) -> int:

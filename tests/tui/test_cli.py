@@ -29,6 +29,11 @@ from ios_mcp.policy.audit import AuditEntry
         ),
         # A global flag before a real subcommand must not be turned into a goal.
         (["--config", "x.toml", "devices"], ["--config", "x.toml", "devices"]),
+        # `reset` is a verb and also an ordinary English word. The test is on
+        # the whole token, so the subcommand survives and the goal stays a goal.
+        (["reset"], ["reset"]),
+        (["reset", "-y"], ["reset", "-y"]),
+        (["reset the alarm"], ["run", "reset the alarm"]),
     ],
 )
 def test_a_bare_goal_means_run(argv: list[str], expected: list[str]) -> None:
