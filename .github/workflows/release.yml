@@ -77,3 +77,35 @@ jobs:
       - run: uv build --package ios-mcp
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Last, and only if PyPI accepted the upload. A GitHub Release is an
+  # announcement, and announcing a version nobody can install is the same
+  # mistake as a registry manifest pointing at one, which cost 0.1.1.
+  #
+  # A separate job because of the permission: this one needs `contents: write`
+  # to create the release, and the job holding the OIDC credential should not
+  # also be able to write to the repository.
+  announce:
+    name: github release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release, and nothing else
+    steps:
+      # The tag, and enough history to read the commit it points at.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The notes are the release commit's own body. Every release here is
+      # written up as prose in the commit that moves the version, so
+      # generating a list of commit subjects instead would replace something
+      # someone wrote with something nobody did.
+      - name: create the release from the commit that made it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git log -1 --format=%b "$GITHUB_REF_NAME" > notes.md
+          title="$(git log -1 --format=%s "$GITHUB_REF_NAME")"
+          test -s notes.md || { echo "the release commit has no body to publish" >&2; exit 1; }
+          gh release create "$GITHUB_REF_NAME" --title "$title" --notes-file notes.md

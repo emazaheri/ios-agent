@@ -154,7 +154,8 @@ def main() -> int:
         parser.error(f"{args.version!r} is not a version this project would publish")
 
     was = current_version()
-    if not args.allow_dirty and not tree_is_clean():
+    # A dry run writes nothing, so what else is in the tree is not its business.
+    if not args.dry_run and not args.allow_dirty and not tree_is_clean():
         print(
             "the tree has uncommitted changes, so the release commit would carry "
             "more than the bump.\nCommit them first, or pass --allow-dirty.",
@@ -187,8 +188,10 @@ def main() -> int:
         "  git add -u && git commit\n"
         f"  git tag -a v{now} -m 'ios-mcp {now}'\n"
         f"  git push origin main && git push origin v{now}\n\n"
-        "The tag push publishes to PyPI. That cannot be undone, and PyPI never\n"
-        "accepts a re-upload of a version, so read the diff first."
+        "The tag push publishes to PyPI and opens a GitHub Release whose notes\n"
+        "are the commit body above, so write it as the announcement it becomes.\n"
+        "The PyPI half cannot be undone and PyPI never accepts a re-upload of a\n"
+        "version, so read the diff first."
     )
     return 0
 
