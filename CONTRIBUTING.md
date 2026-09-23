@@ -90,19 +90,6 @@ were written for, because they asserted on the wrong box or on stored text
 rather than on what a person can see. Reintroducing the bug for a minute is the
 only thing that tells the two apart.
 
-## Adding notes about an app
-
-`agent/ios_agent/skills/apps/<bundle-id>.md`. The agent reads it when it opens
-that app, so write it for a model driving the phone, not for whoever maintains
-the digest.
-
-Say where things are and what the app calls them. Do not say what an attempt
-will do: "the settings are under the third tab, which this app calls Me" is a
-skill, "that toggle does nothing" is the framing ADR 0003 measured and
-rejected, and the tests will name the phrase. If something is unreachable
-because the digest drops it, that is a bug in `ios_mcp/perception/` and fixing
-it there is worth more than describing it here.
-
 ## Commits
 
 Say what was wrong, not what you typed. The diff already shows the second.

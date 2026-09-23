@@ -17,8 +17,9 @@ grouped.
 | [0009](0009-the-eval-trend-is-committed.md) | The eval trend is committed, and CI checks it rather than writing it | device tokens, observations, actions and tiers are byte-deterministic on a scripted device, so a band would only license drift |
 | [0010](0010-no-multi-action-batching.md) | No multi-action batching, though its guard stays | invited to batch, the model did it in 0 of 24 turns, at +4.2% turns and +25% cost |
 | [0011](0011-a-find-that-reads-the-tree-the-digest-threw-away.md) | A find that reads the tree the digest threw away | -9.2% turns and 70% fewer perception faults, concentrated entirely in the two tasks that called it |
+| [0012](0012-no-per-app-skill-files.md) | No per-app skill files | on a route built to need one, both arms ran at the oracle's floor, 4 actions and 6 turns, three times out of three |
 
-Five of the eleven are refusals. That is the point rather than an accident: the
+Six of the twelve are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 

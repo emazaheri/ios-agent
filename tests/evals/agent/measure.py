@@ -105,10 +105,6 @@ class Meter:
     #: The last screen the agent was shown, rendered. Success predicates read
     #: this rather than re-observing, which would corrupt the count.
     last_screen: str = ""
-    #: Prompt tokens spent on per-app briefings, inside `prompt_tokens` and
-    #: reported separately. The oracle reads no briefing and leaves this at
-    #: zero, which is why the key is conditional in the report.
-    skill_tokens: int = 0
     #: Model calls. Set by the agent driver from the run's own counter; the
     #: oracle makes none, and `turn_floor` is derived from `outcomes` instead.
     turns: int = 0
@@ -199,10 +195,6 @@ class RunResult:
     faults: dict[str, int] = field(default_factory=dict)
     #: Runner crashes the auto-heal absorbed. The run still passed.
     recoveries: int = 0
-    #: Of `prompt_tokens`, how many were per-app briefings. Written out only
-    #: when it is not zero, the way `replans` and `refusals` already are, so a
-    #: run that read none reports exactly what it did before.
-    skill_tokens: int = 0
 
     @property
     def overhead(self) -> float:
@@ -258,8 +250,6 @@ class RunResult:
                 "completion": self.completion_tokens,
             }
             out["usd"] = round(self.usd, 4)
-        if self.skill_tokens:
-            out["skill_tokens"] = self.skill_tokens
         if self.replans:
             out["replans"] = self.replans
         if self.refusals:
@@ -422,7 +412,6 @@ async def run_task(
         device_tokens=meter.device_tokens,
         prompt_tokens=meter.prompt_tokens,
         completion_tokens=meter.completion_tokens,
-        skill_tokens=meter.skill_tokens,
         replans=meter.replans,
         refusals=meter.refusals,
         seconds=time.monotonic() - started,

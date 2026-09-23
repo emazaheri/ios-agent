@@ -26,10 +26,8 @@ from langgraph.types import Command
 from ios_agent.backend import Backend, SessionBackend
 from ios_agent.config import AgentSettings, export_provider_credentials
 from ios_agent.graph import build_graph, opening_messages
-from ios_agent.skills import SkillLoader, app_skill
 from ios_agent.state import Outcome
 from ios_agent.tools import Run, build_tools
-from ios_mcp.devices.base import AppInfo
 from ios_mcp.session import IosSession
 
 ModelFactory = Callable[[list[Any]], Callable[[list[AnyMessage]], Awaitable[AIMessage]]]
@@ -93,7 +91,7 @@ def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
     return factory
 
 
-async def _device_context(session: IosSession) -> tuple[list[str], str | None, list[AppInfo]]:
+async def _device_context(session: IosSession) -> tuple[list[str], str | None]:
     """What is installed, and which of it is in front, for the opening turn.
 
     Both are best effort. A device that will not enumerate its apps is still a
@@ -118,11 +116,7 @@ async def _device_context(session: IosSession) -> tuple[list[str], str | None, l
     except Exception:
         active = None
     current = next((a.name for a in apps if a.bundle_id == active and a.name), None)
-    # The list itself comes back too, because `open_app` needs a bundle id to
-    # find what has been written about an app and the model only ever says a
-    # name. Resolving one to the other is `best_app_match`'s job, and it needs
-    # what this call already fetched.
-    return names, current, list(apps)
+    return names, current
 
 
 async def run_goal(
@@ -134,7 +128,6 @@ async def run_goal(
     settings: AgentSettings | None = None,
     approve: Approver | None = None,
     max_steps: int | None = None,
-    skills: SkillLoader | None = app_skill,
 ) -> Outcome:
     """Drive one goal to a stopping point and report what it cost.
 
@@ -143,11 +136,8 @@ async def run_goal(
     answer; without one, everything destructive is refused.
     """
     cfg = settings or AgentSettings()
-    # Before the tools, because `open_app` needs the installed-app list to
-    # find what has been written about an app it opens.
-    names, current, apps = await _device_context(session)
-    run = Run(backend=backend or SessionBackend(session), goal=goal, apps=apps)
-    tools = build_tools(run, skills=skills)
+    run = Run(backend=backend or SessionBackend(session), goal=goal)
+    tools = build_tools(run)
     call_model = (model or chat_model(cfg))(tools)
 
     prompt_tokens = 0
@@ -168,7 +158,8 @@ async def run_goal(
     # runs would resume someone else's conversation.
     config = {"configurable": {"thread_id": f"{id(run):x}"}}
 
-    step: Any = {"messages": opening_messages(operator_prompt(), goal, names, current)}
+    apps, current = await _device_context(session)
+    step: Any = {"messages": opening_messages(operator_prompt(), goal, apps, current)}
     while True:
         result = await graph.ainvoke(step, config=config)
         pending = result.get("__interrupt__") if isinstance(result, dict) else None
@@ -191,5 +182,4 @@ async def run_goal(
         stats=run.backend.stats,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
-        skill_tokens=run.skill_tokens,
     )
