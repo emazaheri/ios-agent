@@ -1,6 +1,6 @@
 """The action invariants, asserted against the source rather than remembered.
 
-CLAUDE.md states four of these in prose, and one of them had already drifted
+Four of these were stated in prose, and one of them had already drifted
 before this test existed: "Idempotency keys stay on every action" is not true
 of `handle_alert`, `wait_for`, `launch_app` or `open_url`, and has not been for
 some time. A sentence cannot notice that about itself.

@@ -58,7 +58,7 @@ The layering test gained two checks in the same static-AST style as the others:
 Every other addition to this project justified itself with a measurement.
 Three of the deep agent's four pillars were rejected on their own numbers. A
 terminal app cannot be justified that way, which makes it the most exposed to
-the feature-count trap CLAUDE.md warns about.
+the feature-count trap this project is meant to avoid.
 
 So it gets the one claim it can be held to: **watching a run must not change
 it.** `EventBackend` wraps a `Backend`, delegates `stats` and `last_screen`

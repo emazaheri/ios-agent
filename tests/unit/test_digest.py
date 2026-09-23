@@ -301,7 +301,7 @@ def test_a_screen_titled_by_a_drawn_header_still_has_a_title() -> None:
 
     Without it two structurally similar screens hash the same, and navigating
     between them reads as an action that changed nothing. That is the split-view
-    failure already recorded in CLAUDE.md, reached by a different route.
+    failure already recorded in `docs/realities/`, reached by a different route.
     """
     d = digest_of(custom_header_screen())
 

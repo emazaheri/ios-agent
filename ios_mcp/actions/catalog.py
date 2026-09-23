@@ -1,7 +1,7 @@
 """What each action is, as data rather than as prose in a contributing guide.
 
 Four facts about every action have been load-bearing since the first commit and
-were written down only in CLAUDE.md, where a human was asked to remember them:
+were written down only in prose, where a human was asked to remember them:
 which actions resolve an element before acting, which record themselves in the
 audit trail, which accept an idempotency key, and which a client must gate.
 

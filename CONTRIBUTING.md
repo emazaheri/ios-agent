@@ -30,9 +30,9 @@ replaced by a script that exits 127.
 
 **No fake has ever caught a perception or lifecycle bug.** Every one came from
 a real run against real hardware, and the list of them is in
-[CLAUDE.md](CLAUDE.md#ios-realities-the-fakes-do-not-model). If a change touches
-the digest, resolution, or the device lifecycle, run it against a simulator
-before believing it. `uv run pytest tests/integration`.
+[docs/realities](docs/realities/). If a change touches the digest,
+resolution, or the device lifecycle, run it against a simulator before
+believing it. `uv run pytest tests/integration`.
 
 **The evals are the quality gate, not a pass/fail suite.** They report tokens
 per step, wall time, action count and resolution-tier distribution. A drift
@@ -96,9 +96,23 @@ Say what was wrong, not what you typed. The diff already shows the second.
 
 ## Scope
 
-Deliberately out, with reasons in [CLAUDE.md](CLAUDE.md#scope): a consumer macOS
-app, automating your signing flow, a cloud device farm, Android. If a change
-only makes sense for one of those, it does not belong here.
+Four things are deliberately out, and each has a reason rather than a backlog
+entry.
+
+**A consumer macOS app.** Shipping WebDriverAgent to users is capped at about
+a hundred devices by provisioning, and `get-task-allow`, the entitlement that
+makes WDA work at all, is the one App Store distribution forbids. Not a polish
+problem.
+
+**Automating your signing flow.** Feasible with an App Store Connect API key
+and a dedicated keychain, and it is product plumbing rather than anything to do
+with driving a phone.
+
+**A cloud device farm.** A different business, and a capital-intensive one.
+
+**Android.** A different accessibility stack end to end.
+
+If a change only makes sense for one of those, it does not belong here.
 
 ## Releases
 

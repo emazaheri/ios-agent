@@ -4,8 +4,8 @@ Accepted, 2026-08-25.
 
 ## Context
 
-The phase plan listed planning as the first of four deep-agent pillars, and
-CLAUDE.md describes it as the pillar where agentic behaviour is most visible:
+The phase plan listed planning as the first of four deep-agent pillars, and as
+the one where agentic behaviour is most visible:
 decompose "book a table for two at seven" into steps, and replan when a tap
 does not do what the plan assumed.
 
@@ -76,7 +76,8 @@ here: a planner cannot improve on an optimum, and two of three tasks are at
 one. Spending the work to demonstrate that arithmetic would be theatre.
 
 **Adopt it anyway because the shape expects it.** This is the specific failure
-CLAUDE.md names. A planner nobody can show a number for is a tutorial.
+the governing rule of this phase names: adopt a pillar because a measurement
+demands it, never because the framework offers it. A planner nobody can show a number for is a tutorial.
 
 **Keep extending the task set until planning wins.** Tasks can always be made
 harder until a mechanism looks necessary. That is fitting the benchmark to the

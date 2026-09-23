@@ -90,7 +90,7 @@ build-backend = "hatchling.build"
 packages = ["ios_mcp"]
 
 # An allow-list, not exclusions. A source distribution defaults to "everything
-# in the directory", which here meant the private notes under .claude/, a
+# in the directory", which here meant the maintainer's local notes, a
 # 2.6 MB docs/images, and scripts that are not part of the package. Naming what
 # ships is the only version of this that stays correct as the tree grows.
 [tool.hatch.build.targets.sdist]

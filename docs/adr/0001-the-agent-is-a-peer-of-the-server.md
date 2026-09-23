@@ -4,8 +4,8 @@ Accepted, 2026-08-25.
 
 ## Context
 
-CLAUDE.md planned the deep agent as `ios_mcp/agent/`, and the first draft of
-the Phase 6 plan drew it as a seventh layer stacked on top of the six in
+The project plan had the deep agent as `ios_mcp/agent/`, and its first draft
+drew it as a seventh layer stacked on top of the six in
 ARCHITECTURE.md. Both were wrong, for two separate reasons.
 
 **The layer number does not match the import graph.** ARCHITECTURE.md draws
@@ -38,7 +38,7 @@ belongs in that row.
 
 ## Alternatives rejected
 
-**`ios_mcp/agent/` as layer 7**, which is what CLAUDE.md said. Simplest, no
+**`ios_mcp/agent/` as layer 7**, which is what the plan said. Simplest, no
 build changes, and wrong on the import graph as above. The boundary would have
 been a directory convention.
 
