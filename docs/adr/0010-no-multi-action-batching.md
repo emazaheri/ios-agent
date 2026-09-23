@@ -12,9 +12,8 @@ work at all, by construction.
 
 `browser-use` solves the same problem with `multi_act` (`agent/service.py:2729`),
 where the model returns a list of actions and two guards abort the remainder
-when the page moves underneath them. The investigation in
-`.claude/browser-use-findings.md` §2.1 put it first on a list of things worth
-taking.
+when the page moves underneath them. A comparison of the two projects put it
+first on a list of things worth taking from theirs.
 
 The reframe that shaped the work: **batching already executed here, and it was
 unguarded.** `graph.act` has always looped over `last.tool_calls`, a test has

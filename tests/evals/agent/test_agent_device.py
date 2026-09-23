@@ -2,9 +2,9 @@
 
 The last claim this project could not make. Everything below the agent has been
 driven against real hardware since the phase before this one, and the agent had
-only ever met a scripted fake and a simulator. CLAUDE.md's own standard is that
-nothing stays unverified against hardware, and this is what closes it for the
-agent.
+only ever met a scripted fake and a simulator. This project's own standard is
+that nothing stays unverified against hardware, and this is what closes it for
+the agent.
 
 A simulator is not a substitute here, and the numbers say why. A snapshot costs
 under a second on a simulator and about 3.7 seconds on a device, so

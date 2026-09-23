@@ -4,7 +4,7 @@ Accepted, 2026-08-25.
 
 ## Context
 
-CLAUDE.md carried this as an open decision from before any agent code existed:
+The plan carried this as an open decision from before any agent code existed:
 does the agent go through MCP, or call `IosSession`?
 
 - **Direct** is faster, and is exactly what the rule keeping layers 1 to 4 free

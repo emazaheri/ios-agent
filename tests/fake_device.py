@@ -39,10 +39,19 @@ class ScriptedWda(FakeWda):
         "/wda/pressButton",
     )
 
+    #: Not gestures, but they change what is on screen, so a model driving the
+    #: tree has to hear about them. Deliberately not added to `_GESTURE_PATHS`:
+    #: several tests count the entries in `gestures` as taps and drags, and a
+    #: launch appearing there would be counted as one.
+    _SCREEN_CHANGING_PATHS = ("/wda/apps/launch", "/wda/apps/activate")
+
     def _route(self, method: str, path: str, body: dict[str, Any] | None):  # type: ignore[no-untyped-def]
         response = super()._route(method, path, body)
         if any(path.endswith(p) for p in self._GESTURE_PATHS):
             self.gestures.append((path, body))
+            if self.on_gesture is not None:
+                self.on_gesture(path, body)
+        elif any(path.endswith(p) for p in self._SCREEN_CHANGING_PATHS):
             if self.on_gesture is not None:
                 self.on_gesture(path, body)
         return response
@@ -66,6 +75,10 @@ DEFAULT_APPS: tuple[AppInfo, ...] = (
     AppInfo(bundle_id="com.apple.mobilesafari", name="Safari", kind="system"),
     AppInfo(bundle_id="com.apple.Maps", name="Maps", kind="system"),
     AppInfo(bundle_id="com.apple.mobileslideshow", name="Photos", kind="system"),
+    # Not Apple's. The agent eval needs an app whose screens nobody has seen
+    # before, and `open_app` resolves a name against this list, so an app that
+    # is not here cannot be opened however many screens are modelled for it.
+    AppInfo(bundle_id="com.example.cards", name="Cards", kind="user"),
 )
 
 

@@ -9,7 +9,7 @@ The agent was going to be built in LangChain's "deep agent" shape, and
 `FilesystemMiddleware`, `TodoListMiddleware`, `SubAgentMiddleware` and system
 prompts, on the LangGraph runtime.
 
-Adopting it would have been an afternoon's work. CLAUDE.md's rule for this
+Adopting it would have been an afternoon's work. The plan's own rule for this
 phase is why it was not:
 
 > Wiring up `deepagents` would be a tutorial, not a showcase. Anyone can follow

@@ -625,7 +625,7 @@ def test_the_prompt_only_names_tools_the_model_has() -> None:
 
     A prompt naming an absent tool is worse than silence: it spends the
     model's turns on a call that can only fail, which is the shape of the
-    screenshot incident recorded in CLAUDE.md.
+    screenshot incident the operator prompt is worded against.
     """
     from ios_agent.loop import operator_prompt
     from ios_agent.tools import Run, build_tools

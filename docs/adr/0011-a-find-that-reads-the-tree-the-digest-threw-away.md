@@ -4,8 +4,9 @@ Accepted, 2026-09-20.
 
 ## Context
 
-`.claude/browser-use-findings.md` §2.2 put `browser-use`'s zero-cost queries on
-the list of things worth taking, and predicted this one would be rejected:
+The same comparison against `browser-use` that ADR 0010 came out of put its
+zero-cost queries on the list of things worth taking, and predicted this one
+would be rejected:
 
 > Given the observation floor, the honest prediction is that it does not
 > [change anything], and it becomes a rejected feature with an ADR.
@@ -169,9 +170,9 @@ Anyone reopening this should run the one-line version first.
 
 ## What hardware caught that the fakes did not
 
-Three defects, none of which any fixture reproduced. Recorded because CLAUDE.md
-already claims no fake has ever caught a perception-geometry bug, and this is
-three more.
+Three defects, none of which any fixture reproduced. Recorded because
+`docs/realities/` already claims no fake has ever caught a perception-geometry
+bug, and this is three more.
 
 1. **`shown` was decided against the wrong digest.** `find` built its own at
    default settings, so a caller who observed at `budget=180` was told all five
@@ -197,8 +198,8 @@ three more.
 at ten verbs. It is the same argument against the eleventh, and the twelfth,
 and nothing here licenses them.
 
-**A screen where `find` cannot help either.** Two of the three shapes CLAUDE.md
-records are answered by this. The third is not: a Hinge filter chip reads
+**A screen where `find` cannot help either.** Two of the three shapes recorded
+in `docs/realities/third-party-apps.md` are answered by this. The third is not: a Hinge filter chip reads
 "Signals" while its label is the raw key
 `discover_circleMembersFilter_accessibilityLabel`. No search of the tree can
 find a word the tree does not contain. That remains an argument for the

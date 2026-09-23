@@ -6,9 +6,9 @@ body:
     attributes:
       value: |
         Some things are out of scope on purpose, and the reasons are in
-        [CLAUDE.md](../blob/main/CLAUDE.md#scope): a consumer macOS app, which
-        provisioning caps at ~100 devices, automating your signing flow, a cloud
-        device farm, and Android. Decisions already taken are recorded as ADRs
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#scope): a consumer macOS
+        app, which provisioning caps at ~100 devices, automating your signing
+        flow, a cloud device farm, and Android. Decisions already taken are recorded as ADRs
         in [docs/adr](../tree/main/docs/adr), each with what would reopen it.
 
   - type: textarea

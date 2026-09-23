@@ -887,7 +887,7 @@ def _screen_title(root: SnapshotNode) -> tuple[str | None, bool]:
     is what tells a real navigation apart from an action that did nothing, and
     an app that draws its own header instead of using a `UINavigationBar`
     leaves two structurally similar screens hashing to the same value. That is
-    the split-view failure already recorded in CLAUDE.md, reached by a
+    the split-view failure already recorded in `docs/realities/`, reached by a
     different route.
 
     Returns the title and whether it came from chrome. The caller needs the

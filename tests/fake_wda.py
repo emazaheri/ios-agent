@@ -45,6 +45,10 @@ class FakeWda:
     alert_text: str | None = None
     alert_buttons: list[str] = field(default_factory=lambda: ["Cancel", "OK"])
     app_states: dict[str, int] = field(default_factory=dict)
+    #: Which app is in front. A launch moves it, because the digest header
+    #: names the foreground app and a fake that always said Settings would
+    #: tell an agent standing in another app that it was in Settings.
+    active_bundle: str = "com.apple.Preferences"
     pasteboard: str = ""
     #: When True, calls fail as a locked device until /wda/unlock is posted.
     locked: bool = False
@@ -136,7 +140,7 @@ class FakeWda:
         if tail == "/window/size":
             return self._ok(self.window)
         if tail == "/wda/activeAppInfo":
-            return self._ok({"bundleId": "com.apple.Preferences", "pid": 1234})
+            return self._ok({"bundleId": self.active_bundle, "pid": 1234})
         if tail == "/alert/text":
             if self.alert_text is None:
                 return self._error(404, "no such alert")
@@ -154,7 +158,10 @@ class FakeWda:
             self.app_states[(body or {}).get("bundleId", "")] = 1
             return self._ok(True)
         if tail in ("/wda/apps/launch", "/wda/apps/activate"):
-            self.app_states[(body or {}).get("bundleId", "")] = 4
+            bundle = (body or {}).get("bundleId", "")
+            self.app_states[bundle] = 4
+            if bundle:
+                self.active_bundle = bundle
             return self._ok(None)
         if tail == "/wda/getPasteboard":
             return self._ok(base64.b64encode(self.pasteboard.encode()).decode())

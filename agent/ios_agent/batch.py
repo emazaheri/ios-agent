@@ -34,10 +34,11 @@ result separates "already done" from "will not move". So a correct, successful
 action stops the batch, and `conditional_cleanup` is exactly that shape.
 
 That is accepted. The cost is one wasted turn and never a wrong action, which
-is the right side of the trade when CLAUDE.md names acting on the wrong control
-as the worst failure this system has. It does mean the message handed to the
-skipped calls has to say the screen did not arrive rather than implying the
-plan was wrong, or a model will discard a route that was fine.
+is the right side of the trade, since acting on the wrong control is the worst
+failure this system has and the reason `RefTable` exists at all. It does mean
+the message handed to the skipped calls has to say the screen did not arrive
+rather than implying the plan was wrong, or a model will discard a route that
+was fine.
 
 ## Freshness, and why a `seq` is needed
 

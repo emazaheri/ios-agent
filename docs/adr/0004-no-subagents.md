@@ -4,7 +4,7 @@ Accepted, 2026-08-25.
 
 ## Context
 
-Subagents were the plan's second pillar, and CLAUDE.md gave them the most
+Subagents were the plan's second pillar, and the plan gave them the most
 concrete justification of the four:
 
 > Context isolation pays here because screenshots are expensive. A "find this

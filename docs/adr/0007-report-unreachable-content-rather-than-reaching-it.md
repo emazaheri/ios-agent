@@ -4,8 +4,8 @@ Accepted, 2026-08-26.
 
 ## Context
 
-`.claude/research/capturing-the-tree-across-apps.md` set out to answer an
-efficiency question: a snapshot is the most expensive thing the agent does, so
+A research note written after the first run against a third-party app set out
+to answer an efficiency question: a snapshot is the most expensive thing the agent does, so
 where does the time go? The measurements closed the question rather than
 answering it.
 
