@@ -61,23 +61,22 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
     async def ios_screenshot(
         annotate_refs: Annotated[
             bool,
-            Field(description="Draw numbered boxes over the elements from the last observation."),
+            Field(description="Draw labelled boxes over the elements, using fresh refs."),
         ] = False,
     ) -> Image:
         """Capture the screen as an image.
 
         Use this when an element has no accessibility label, when the layout
         matters, or when `ios_observe` cannot find something you can plainly
-        see. With `annotate_refs` the boxes are labelled with the refs from the
-        last observation, so you can pick one by eye.
+        see. With `annotate_refs` each element is boxed and labelled with its
+        ref, so you can pick one by eye and pass it to an action tool.
+
+        Annotating re-reads the screen first, so the refs on the image are the
+        current ones rather than whatever was observed last. That costs a tree
+        fetch, and needs the `vision` extra installed.
         """
         session = ctx.require()
-        png = await session.screenshot()
-        if annotate_refs:
-            from ios_mcp.perception.vision import annotate
-
-            digest = session._last_digest or await session.observe()
-            png = annotate(png, digest)
+        png = await session.screenshot(annotate_refs=annotate_refs)
         return Image(data=png, format="png")
 
     @mcp.tool(annotations=READ_ONLY)

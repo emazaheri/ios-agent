@@ -288,3 +288,27 @@ async def test_neither_app_warns_and_says_automation_is_fine(monkeypatch, tmp_pa
     assert check.status == "warn"
     assert check.remedy and "Automation is unaffected" in check.remedy
     assert len(check.data["looked_in"]) == 2
+
+
+def test_pillow_present_makes_annotation_available() -> None:
+    from ios_mcp.devices.doctor import _check_vision
+
+    check = _check_vision()
+
+    assert check.status == "ok"
+    assert check.data["pillow"]
+
+
+def test_pillow_missing_warns_and_names_the_extra(monkeypatch) -> None:
+    """The digest tells the caller to annotate a screen it cannot read, and
+    Pillow is an optional extra, so the gap has to be visible before the
+    screen that needs it is."""
+    import sys
+
+    from ios_mcp.devices.doctor import _check_vision
+
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    check = _check_vision()
+
+    assert check.status == "warn"
+    assert check.remedy and "--extra vision" in check.remedy

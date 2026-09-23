@@ -200,6 +200,7 @@ async def run_doctor(settings: Settings | None = None) -> DoctorReport:
     checks.append(await _check_simulators())
     checks.append(await _check_simulator_window())
     checks.append(await _check_devicectl())
+    checks.append(_check_vision())
     goios = await _check_goios(cfg)
     checks.append(goios)
     checks.append(await _check_tunnel(cfg))
@@ -282,6 +283,30 @@ async def _check_simctl() -> Check:
             ),
         )
     return Check("simctl", "ok", "xcrun simctl available")
+
+
+def _check_vision() -> Check:
+    """Is the annotated screenshot actually available?
+
+    `ios_screenshot(annotate_refs=true)` is what the digest itself recommends
+    on a screen it cannot read, and Pillow is an optional extra, so a plain
+    install follows that advice and hits an error. Better to say so here than
+    to let the first drawn screen be where it is discovered. A warning, not a
+    failure: every other tool works without it.
+    """
+    try:
+        from PIL import __version__ as pillow_version
+    except ImportError:
+        return Check(
+            "vision",
+            "warn",
+            "Pillow is not installed, so ios_screenshot cannot annotate refs",
+            remedy=(
+                "Everything else works without it. For labelled boxes on a "
+                'screenshot: `uv sync --extra vision`, or `pip install "ios-mcp[vision]"`.'
+            ),
+        )
+    return Check("vision", "ok", f"Pillow {pillow_version}", data={"pillow": pillow_version})
 
 
 async def _check_simulator_window() -> Check:

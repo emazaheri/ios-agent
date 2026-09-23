@@ -41,6 +41,7 @@ from ios_mcp.perception.find import DEFAULT_LIMIT, FindResult, find_in_tree
 from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
 from ios_mcp.perception.roles import SETTABLE_ROLES
+from ios_mcp.perception.vision import annotate, ensure_available
 from ios_mcp.policy.audit import AuditTrail
 from ios_mcp.policy.faults import Fault, classify
 from ios_mcp.policy.gate import PolicyGate, Verdict
@@ -161,8 +162,24 @@ class IosSession:
         self.refs.update(digest)
         return digest
 
-    async def screenshot(self) -> bytes:
-        return await self.wda.screenshot()
+    async def screenshot(self, *, annotate_refs: bool = False) -> bytes:
+        """The screen as a PNG, optionally with each element boxed and labelled.
+
+        The observation is taken here, immediately before the capture, rather
+        than reusing the last one. Two reasons, and both are invariants this
+        package already holds elsewhere. A digest built by `snapshot()` during
+        resolution or settle polling was deliberately never shown to the agent,
+        so drawing its refs would hand back labels the ref table does not hold.
+        And a digest older than the picture it is drawn on boxes controls where
+        they used to be.
+        """
+        if not annotate_refs:
+            return await self.wda.screenshot()
+        # Before the observation, so a missing Pillow costs neither a tree
+        # fetch nor a ref-table generation the caller never gets to see.
+        ensure_available()
+        digest = await self.observe()
+        return annotate(await self.wda.screenshot(), digest)
 
     async def alert(self) -> AlertInfo | None:
         return await self.wda.alert()
