@@ -621,11 +621,22 @@ async def _check_attached_devices(cfg: Settings) -> Check:
 
     ready = [d for d in devices if d.ready]
     status: Status = "ok" if ready else "warn"
+    # Discovery usually says why a device is unusable, and its own words are
+    # better than anything written here. It does not always: `blockers`
+    # defaults to empty, so a source that reports a device without explaining
+    # it left this warning with no advice at all, which is the one thing
+    # `doctor --json` exists to avoid.
+    remedy = None
+    if not ready:
+        remedy = "; ".join(devices[0].blockers) or (
+            "Unlock the phone, tap Trust if asked, and enable Settings > "
+            "Privacy & Security > Developer Mode. Then re-run this."
+        )
     return Check(
         "devices",
         status,
         f"{len(devices)} device(s): {', '.join(parts)}",
-        remedy=None if ready else "; ".join(devices[0].blockers) or None,
+        remedy=remedy,
         data={"devices": [d.to_dict() for d in devices]},
     )
 

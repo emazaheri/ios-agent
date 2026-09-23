@@ -55,6 +55,24 @@ class ActionSpec:
     #: name. This flag is the coarser, client-facing claim, and the test holds
     #: it to the annotations rather than to the gate.
     destructive: bool
+    #: Nothing may be chained behind this action inside one model turn,
+    #: because where it lands cannot be predicted from the screen the turn was
+    #: planned against.
+    #:
+    #: Deliberately *not* browser-use's rule, which aborts a batch whenever the
+    #: screen changed (`agent/service.py:2818`). On iOS the valuable batch is
+    #: navigational and a changed screen is the expected case, so the guard in
+    #: `agent/ios_agent/batch.py` aborts on a screen that did *not* change and
+    #: uses this flag for the cases that move the screen somewhere the model
+    #: only guessed at. `scroll(until=...)` is the one that needs both: it
+    #: stops wherever the content did, so the no-change rule would happily wave
+    #: the next call through.
+    #:
+    #: Read-only verbs are all `False`. `observe` and `find` do end a turn's
+    #: remaining calls, but for the other reason, that a turn which had to ask
+    #: what was on screen did not know it when it chose the rest, and collapsing
+    #: the two would lose the distinction.
+    terminates_sequence: bool = False
     #: Implemented by calling another action rather than by acting itself, so
     #: the source check looks at the delegate for routing and audit.
     delegates_to: str | None = None
@@ -68,6 +86,7 @@ def _spec(
     act: bool = False,
     idem: bool = False,
     destructive: bool = False,
+    term: bool = False,
     delegates_to: str | None = None,
 ) -> ActionSpec:
     return ActionSpec(
@@ -77,6 +96,7 @@ def _spec(
         routes_through_act=act,
         takes_idem_key=idem,
         destructive=destructive,
+        terminates_sequence=term,
         delegates_to=delegates_to,
     )
 
@@ -100,18 +120,18 @@ CATALOG: dict[str, ActionSpec] = {
     # either way: it sees the delegate's action name, which is `type`.
     "type_secret": _spec("type", "type_secret", act=True, idem=True, delegates_to="type_text"),
     "set_value": _spec("set_value", "set_value", act=True, idem=True, destructive=True),
-    "press_button": _spec("press_button", "press_button", act=True, idem=True),
+    "press_button": _spec("press_button", "press_button", act=True, idem=True, term=True),
     # -- gestures and app control. No single element to resolve, so these do
     # their own work and record it in `_finish` themselves. -----------------
-    "scroll": _spec("scroll", "scroll", idem=True),
-    "swipe": _spec("swipe", "swipe", idem=True),
-    "drag": _spec("drag", "drag", idem=True),
+    "scroll": _spec("scroll", "scroll", idem=True, term=True),
+    "swipe": _spec("swipe", "swipe", idem=True, term=True),
+    "drag": _spec("drag", "drag", idem=True, term=True),
     # Destructive despite touching nothing itself: the button it presses is
     # the one granting a permission or confirming a deletion.
-    "handle_alert": _spec("handle_alert", "handle_alert", destructive=True),
-    "launch_app": _spec("launch_app", "launch_app"),
-    "open_app": _spec("launch_app", "open_app", delegates_to="launch_app"),
-    "open_url": _spec("open_url", "open_url"),
+    "handle_alert": _spec("handle_alert", "handle_alert", destructive=True, term=True),
+    "launch_app": _spec("launch_app", "launch_app", term=True),
+    "open_app": _spec("launch_app", "open_app", term=True, delegates_to="launch_app"),
+    "open_url": _spec("open_url", "open_url", term=True),
 }
 
 #: Action names a client may run without asking anyone. Derived here so the
@@ -123,4 +143,12 @@ READ_ONLY_ACTIONS: frozenset[str] = frozenset(
 #: Action names that always want a human in front of them.
 DESTRUCTIVE_ACTIONS: frozenset[str] = frozenset(
     spec.name for spec in CATALOG.values() if spec.destructive
+)
+
+#: Action names after which nothing may be chained inside one model turn.
+#: `agent/ios_agent/batch.py` keeps its own literal of the subset the agent can
+#: reach, because that module imports nothing; `tests/unit/test_batch.py` holds
+#: the two together.
+TERMINATING_ACTIONS: frozenset[str] = frozenset(
+    spec.name for spec in CATALOG.values() if spec.terminates_sequence
 )

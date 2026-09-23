@@ -26,6 +26,17 @@ Those three are what CI runs. They need neither a device nor a model: verified
 by running them with `xcrun`, `xcodebuild`, `simctl`, `ios` and `open` all
 replaced by a script that exits 127.
 
+Between runs against a device, or after one that crashed:
+
+```bash
+uv run ios-mcp reset        # lists leftover WebDriverAgent processes; -y stops them
+```
+
+A runner nobody is holding keeps the device and the next run waits out
+`wda.startup_timeout_s` before failing. `reset` claims a process only when its
+`-xctestrun`, its `--bundleid` or its forwarded port ties it to
+WebDriverAgent, so your own `xcodebuild test-without-building` is safe from it.
+
 ## Five things that are not style preferences
 
 **No fake has ever caught a perception or lifecycle bug.** Every one came from

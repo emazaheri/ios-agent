@@ -7,7 +7,7 @@ MCP server, and the library beneath both.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-677%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-835%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -268,7 +268,7 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 508 tests, no device, no model
+uv run pytest tests/unit          # 639 tests, no device, no model
 uv run pytest tests/tui           # 192 tests, the terminal front end
 uv run pytest tests/integration   # 13 tests, real simulator
 uv run pytest tests/evals -s      # golden flows, with cost per flow
@@ -330,7 +330,7 @@ app in this project's future is a client of this server, never the engine.
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 618 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 835 offline tests on Linux and macOS.
 
 ## License
 

@@ -1,4 +1,4 @@
-"""CLI entry point: `ios-mcp serve | doctor | devices`."""
+"""CLI entry point: `ios-mcp serve | doctor | devices | reset`."""
 
 from __future__ import annotations
 
@@ -29,6 +29,22 @@ def main(argv: list[str] | None = None) -> int:
     devices = sub.add_parser("devices", help="List simulators and attached devices")
     devices.add_argument("--json", action="store_true")
 
+    reset = sub.add_parser(
+        "reset",
+        help="Find WebDriverAgent processes a crashed run left behind",
+        description=(
+            "A leftover runner holds the device and makes the next run time out. "
+            "This lists every WebDriverAgent process on the machine and stops them "
+            "with --yes. It cannot tell an orphan from a session in use right now, "
+            "so it lists by default and --device narrows what it touches."
+        ),
+    )
+    reset.add_argument("--json", action="store_true")
+    reset.add_argument("--device", help="Only processes driving this UDID.")
+    reset.add_argument(
+        "-y", "--yes", action="store_true", help="Stop what was found, rather than listing it."
+    )
+
     args = parser.parse_args(argv)
 
     settings = Settings.load(args.config)
@@ -46,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(settings, json_out=args.json)
     if command == "devices":
         return _cmd_devices(settings, json_out=args.json)
+    if command == "reset":
+        return _cmd_reset(settings, json_out=args.json, udid=args.device, kill=args.yes)
     return _cmd_serve(settings, args)
 
 
@@ -58,6 +76,24 @@ def _cmd_doctor(settings: Settings, *, json_out: bool) -> int:
     else:
         print(report.render())
     return 0 if not any(c.status == "fail" for c in report.checks) else 1
+
+
+def _cmd_reset(settings: Settings, *, json_out: bool, udid: str | None, kill: bool) -> int:
+    """Exit 1 while a problem is still standing, which is what a script wants.
+
+    Listing something is a problem, because the device is still held. Stopping
+    it is not. That makes `ios-mcp reset && run-the-thing` mean "only if the
+    machine is clear", and `ios-mcp reset -y && run-the-thing` mean "clear it,
+    then go".
+    """
+    from ios_mcp.devices.processes import reset
+
+    report = asyncio.run(reset(settings, udid=udid, kill=kill))
+    if json_out:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(report.render())
+    return 1 if report.problems else 0
 
 
 def _cmd_devices(settings: Settings, *, json_out: bool) -> int:
