@@ -679,3 +679,59 @@ class TestTheColourOfAClaim:
     async def test_an_honest_failure_is_not_accused_either(self) -> None:
         """There was no claim to deny, and saying this would be an accusation."""
         assert "nothing it did changed" not in await self._rows(succeeded=False, verified=False)
+
+
+class TestWhatTheAgentCanDo:
+    """Capability discovery: the first goal typed should be one it can do.
+
+    The frontier is measured more precisely here than almost anywhere, and none
+    of it reached the person at the prompt. One line under the mark now says
+    what the agent does reliably and what it cannot do at all.
+    """
+
+    async def _written(self, app: IosAgentApp, size: tuple[int, int]) -> str:
+        async with app.run_test(size=size) as pilot:
+            await _ready(app)
+            await pilot.pause()
+            return "\n".join(line.text for line in app.transcript.lines)
+
+    async def test_a_wide_pane_says_both_halves(self) -> None:
+        from ios_tui.widgets import CAN, CANNOT
+
+        written = await self._written(_app(), WIDE)
+
+        assert CAN in written
+        assert CANNOT in written
+
+    async def test_a_narrow_pane_says_the_limits_in_one_line(self) -> None:
+        from ios_tui.widgets import CAN, CANNOT_COMPACT
+
+        written = await self._written(_app(), NARROW)
+
+        assert CANNOT_COMPACT in written
+        assert CAN not in written, "two wrapped lines where one fits"
+
+    async def test_it_is_not_in_what_someone_copies(self) -> None:
+        """Startup chrome, the same on every run, like the mark above it."""
+        from ios_tui.widgets import CANNOT, CANNOT_COMPACT
+
+        app = _app()
+        async with app.run_test(size=WIDE) as pilot:
+            await _ready(app)
+            await pilot.pause()
+            copied = app.transcript.as_text()
+
+        assert CANNOT not in copied
+        assert CANNOT_COMPACT not in copied
+
+    async def test_manual_mode_does_not_claim_an_agents_limits(self) -> None:
+        """Manual drives the verbs directly, so the agent's limits are not its own."""
+        from ios_tui.widgets import CAN, CANNOT, CANNOT_COMPACT
+
+        model = DeviceModel()
+        app = IosAgentApp(lambda sink: _Stub(sink, model), manual=True)
+        written = await self._written(app, WIDE)
+
+        assert CAN not in written
+        assert CANNOT not in written
+        assert CANNOT_COMPACT not in written
