@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import time
 from collections.abc import Awaitable, Callable, Iterable
@@ -29,6 +28,7 @@ from statistics import median
 from typing import Any
 
 from ios_agent.batch import LastAction, simulate_turns
+from ios_agent.config import AgentSettings
 from ios_agent.loop import operator_prompt
 from screens import DeviceModel
 from tasks import Task
@@ -40,13 +40,18 @@ from ios_mcp.session import IosSession
 #: reports can be compared without converting between units.
 _CHARS_PER_TOKEN = 4
 
-#: Per million tokens, for the default provider and model (Claude Opus 5:
-#: $5 in, $25 out). Recorded so the cost of the suite is visible rather than
-#: discovered on a bill. Override with `IOS_AGENT_USD_PER_MTOK_IN` and
-#: `IOS_AGENT_USD_PER_MTOK_OUT` when running against another provider, since
-#: nothing here can know what a given vendor charges.
-_USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
-_USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
+
+def token_prices() -> tuple[float, float]:
+    """Dollars per input token and per output token, as configured.
+
+    Read from `AgentSettings`, which loads `.env` the way every other setting
+    is loaded. This used to read `os.environ` at import, which a `.env` never
+    reaches, so the documented override did nothing. See `usd_per_mtok_in`.
+    """
+    cfg = AgentSettings()
+    return cfg.usd_per_mtok_in / 1_000_000, cfg.usd_per_mtok_out / 1_000_000
+
+
 #: Bumped when the report shape changes in a way a reader must notice. Shared
 #: with `tests/evals/harness.py` and read by `scripts/eval_trend.py`, which
 #: rejects any other value. Version 4 added `prompt_sha` and `model_served`.
@@ -230,10 +235,8 @@ class RunResult:
 
     @property
     def usd(self) -> float:
-        return (
-            self.prompt_tokens * _USD_PER_INPUT_TOKEN
-            + self.completion_tokens * _USD_PER_OUTPUT_TOKEN
-        )
+        per_in, per_out = token_prices()
+        return self.prompt_tokens * per_in + self.completion_tokens * per_out
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {

@@ -106,6 +106,19 @@ class AgentSettings(BaseSettings):
     #: thread. Recovering from that is a planning problem, not a budget one.
     max_steps: int = Field(default=24, gt=0)
 
+    #: What the eval suite prices a token at, per million, so a slice reports
+    #: its cost in dollars rather than leaving it to a bill. Defaults are Claude
+    #: Opus 5's rates, because nothing here can know what another vendor
+    #: charges: set both whenever `provider` or `model` changes.
+    #:
+    #: Fields rather than bare environment reads, which is what they used to
+    #: be. The harness read `os.environ` directly, a `.env` is never exported
+    #: there, and `.env.example` documented them anyway, so a price written
+    #: beside the model it describes was ignored in favour of Opus rates. Every
+    #: dollar figure recorded against `gpt-5.6-sol` came out a quarter too high.
+    usd_per_mtok_in: float = Field(default=5.0, ge=0)
+    usd_per_mtok_out: float = Field(default=25.0, ge=0)
+
     def chat_kwargs(self) -> dict[str, Any]:
         """The keyword arguments to hand the provider, and nothing more.
 

@@ -215,7 +215,12 @@ of these numbers exist. Latest measurement, 13 tasks × 3 runs on
 | model turns | 216 |
 | faults | perception 6, policy 6, model 0 |
 | refusals, unusable runs | 0, 0 |
-| cost | $1.87 over 6m39s |
+| cost | $1.50 over 6m39s |
+
+The cost is priced at $4 in and $20 out per million tokens. It was first
+published as $1.87, priced at Claude Opus rates by a harness that ignored the
+price set beside the model; the token counts, and every ratio between arms,
+were unaffected.
 
 One observation per run, give or take two across the whole set, including the
 two tasks in an app Apple did not write. That is the floor, and it holds
