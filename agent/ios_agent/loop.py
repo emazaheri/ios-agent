@@ -198,7 +198,14 @@ async def run_goal(
     # `stopped_because` stays out of it. That field means the loop ended for a
     # reason other than the agent finishing, and this run did finish; writing
     # here would make `finished_cleanly` say something untrue.
-    contradicted = bool(run.succeeded and stats.actions > 0 and stats.changes == 0)
+    #
+    # An action the session left alone because the element was already as asked
+    # backs the claim as well as a change does: the device is in the state the
+    # agent says it is. Without this the verdict called that correct run a lie,
+    # which is the flaw its own docstring used to rule out for a stronger rule.
+    contradicted = bool(
+        run.succeeded and stats.actions > 0 and stats.changes == 0 and stats.satisfied == 0
+    )
     return Outcome(
         goal=goal,
         succeeded=run.succeeded,

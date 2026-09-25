@@ -69,6 +69,10 @@ class ActionResult:
     alert: AlertInfo | None = None
     recovered: bool = False
     from_cache: bool = False
+    #: The element was already as asked, so nothing was done. Distinct from a
+    #: no-op the device caused: a switch already on and a switch that refuses to
+    #: move look identical in every other field.
+    already_satisfied: bool = False
     note: str | None = None
     #: See `Digest.scrub`. The target and the alert carry screen text of their
     #: own, so the whole payload is scrubbed rather than only the screen in it.
@@ -92,6 +96,8 @@ class ActionResult:
         if self.recovered:
             out["recovered"] = True
             out["note"] = "WebDriverAgent was restarted mid-action and the session restored."
+        if self.already_satisfied:
+            out["already_satisfied"] = True
         if self.from_cache:
             out["from_cache"] = True
             out["note"] = "Replayed from the idempotency cache; the device was not touched."
