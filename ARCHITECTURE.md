@@ -13,27 +13,43 @@ a front end needs device discovery and the doctor, which are outside it. See
 `tests/unit/test_layering.py` enforces the no-MCP-imports rule, the agent's
 public surface, and the front end's Textual-free event path statically.
 
-```
-                                                            ios_tui  <- terminal front end
-                                                                |
-   MCP clients (Claude Code, Claude Desktop, Cursor)           ios_agent
-                        |                                          |
-                        v                                          |
- 5  mcp         FastMCP: tools, resources, prompts, transports     |  <- only package importing MCP
-                        |                                          |
-                        +---------------------+--------------------+
-                                              v
- 4  actions     act, stabilize, re-observe; idempotency keys   (IosSession)
- 3  perception  accessibility tree -> UI Digest, stable refs, resolution  <- most of the value
- 2  wda         typed WebDriverAgent client, session settings, auto-heal
- 1  devices     SimulatorAdapter | RealDeviceAdapter, device pool
-                                  |
-                     iOS Simulator      iPhone (USB / Wi-Fi)
+```mermaid
+flowchart TB
+    clients["MCP clients<br/>Claude Code, Cursor"]
+    tui["ios_tui<br/>terminal UI"]
 
- 6  policy      approval gate, secret injection, redaction, audit, kill switch
-                constructed inside IosSession, so every action passes through
-                it whichever consumer started the call
+    subgraph consumers["Peers on IosSession"]
+        server["5 · server<br/>FastMCP tools,<br/>only layer<br/>importing MCP"]
+        agent["ios_agent<br/>goal-directed<br/>loop"]
+    end
+
+    subgraph library["ios_mcp, layers 1 to 4: no MCP imports"]
+        subgraph core["IosSession"]
+            session["4 · actions<br/>act, settle,<br/>re-observe"]
+            policy["6 · policy<br/>gate, redaction,<br/>audit"]
+        end
+        perception["3 · perception<br/>tree to digest,<br/>refs, resolution"]
+        wda["2 · wda<br/>WDA client,<br/>auto-heal"]
+        devices["1 · devices<br/>adapters, pool"]
+    end
+
+    sim["iOS Simulator"]
+    phone["iPhone<br/>USB or Wi-Fi"]
+
+    clients -->|"stdio, or HTTP<br/>on loopback"| server
+    tui --> agent
+    tui -.->|"discovery,<br/>doctor"| devices
+    server --> session
+    agent -->|"direct"| session
+    session --- policy
+    session --> perception --> wda --> devices
+    devices --> sim
+    devices --> phone
 ```
+
+The numbers are the section numbers below. Layer 6 is drawn inside
+`IosSession` because that is where it is constructed: every action passes
+through it, whichever consumer started the call.
 
 ## 1. Device fabric (`ios_mcp/devices/`)
 
