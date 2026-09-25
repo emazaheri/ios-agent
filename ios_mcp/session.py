@@ -106,7 +106,7 @@ class IosSession:
         self.idempotency = IdempotencyCache()
         self.gate = PolicyGate(settings.policy)
         self.redactor = Redactor(settings.policy)
-        self.audit = AuditTrail()
+        self.audit = AuditTrail(redactor=self.redactor)
         #: Called when a destructive action needs a human. When unset, the
         #: action raises ActionRequiresApproval so an external
         #: human-in-the-loop layer (LangGraph interrupt, say) can own it.
@@ -151,6 +151,13 @@ class IosSession:
         if budget is not None:
             digest_settings = digest_settings.model_copy(update={"token_budget": budget})
         digest = build_digest(root, digest_settings, app=app, query=query, region=region)
+        # Every digest this session makes says only redacted things, whoever
+        # asks. Redaction used to be the MCP server's job, applied at its own
+        # boundary, and the bundled agent and the terminal front end call this
+        # class directly, so a card number on screen reached the model provider
+        # verbatim from the agent this project ships. The nodes stay raw: see
+        # `Digest.scrub` for why they have to.
+        digest.scrub = self.redactor
         self._last_digest = digest
         return root, digest
 
@@ -190,10 +197,11 @@ class IosSession:
         # changed is misinformation, and the agent will act on it.
         digest = await self.snapshot()
         if ref is None and target is None:
-            return "\n".join(t for t in (n.text for n in digest.nodes) if t)
+            whole = "\n".join(t for t in (n.text for n in digest.nodes) if t)
+            return self.redactor.text(whole) or ""
         resolved = self.resolve(digest, ref=ref, target=target, actionable_only=False)
         inside = [n.text for n in digest.nodes if n.text and _within(n.rect, resolved.rect)]
-        return "\n".join(t for t in inside if t)
+        return self.redactor.text("\n".join(t for t in inside if t)) or ""
 
     async def find(
         self, text: str, *, limit: int = DEFAULT_LIMIT, budget: int | None = None
@@ -214,7 +222,7 @@ class IosSession:
         mislead, so the question has to be asked under the caller's own budget.
         """
         root, digest = await self._snapshot_with_root(budget=budget)
-        return find_in_tree(root, text, digest, limit=limit)
+        return replace(find_in_tree(root, text, digest, limit=limit), scrub=self.redactor)
 
     def resolve(
         self,
@@ -677,7 +685,9 @@ class IosSession:
     # -- device state ------------------------------------------------------
 
     async def get_clipboard(self) -> str:
-        return await self.wda.get_pasteboard()
+        # Redacted here rather than only at the server, for the same reason the
+        # digest is: the server was the one consumer that asked.
+        return self.redactor.text(await self.wda.get_pasteboard()) or ""
 
     async def set_clipboard(self, text: str) -> None:
         await self.wda.set_pasteboard(text)
@@ -904,6 +914,7 @@ class IosSession:
         digest: Digest | None = after
         if before is not None and _overlap(before, after) >= _DELTA_OVERLAP_THRESHOLD:
             delta = diff_digests(before, after)
+            delta.scrub = self.redactor
             digest = None  # the delta already says everything that changed
 
         if ok:
@@ -933,6 +944,7 @@ class IosSession:
             alert=alert,
             recovered=recovered,
             note=note,
+            scrub=self.redactor,
         )
 
     async def _scroll_area(self, digest: Digest, *, ref: str | None, target: str | None) -> Rect:

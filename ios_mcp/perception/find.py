@@ -24,10 +24,10 @@ handles.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from ios_mcp.perception.digest import Digest
+from ios_mcp.perception.digest import Digest, Scrubber, scrubbed
 from ios_mcp.perception.roles import role_of
 from ios_mcp.wda.models import Rect, SnapshotNode
 
@@ -97,8 +97,14 @@ class FindResult:
     #: Carried from the digest so a screen with no readable tree says so
     #: rather than merely looking empty. See ADR 0007.
     notes: tuple[str, ...] = ()
+    #: See `Digest.scrub`. A find reads the raw tree, which is exactly where a
+    #: value the digest trimmed would still be sitting in full.
+    scrub: Scrubber | None = field(default=None, compare=False, repr=False)
 
     def render(self) -> str:
+        return scrubbed(self.scrub, self._render())
+
+    def _render(self) -> str:
         if not self.total:
             lines = [f"find {self.text!r}: nothing in the accessibility tree matches"]
             lines.extend(f"note: {note}" for note in self.notes)
@@ -119,7 +125,7 @@ class FindResult:
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "text": self.text,
             "matches": [match.to_dict() for match in self.matches],
             "total": self.total,
@@ -127,6 +133,7 @@ class FindResult:
             "rendered": self.render(),
             "notes": list(self.notes),
         }
+        return self.scrub.mapping(out) if self.scrub is not None else out
 
 
 def find_in_tree(

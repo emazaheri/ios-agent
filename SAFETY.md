@@ -62,8 +62,22 @@ everything else is refused.
 
 An accessibility tree contains whatever is on screen, which on a real phone
 means message bodies, card numbers, and email addresses. Card-like numbers and
-email addresses are stripped from digests, text reads, logs and traces before
-they leave the server. Patterns are configurable via `policy.redact_patterns`.
+email addresses are stripped from what a session hands out: digests, action
+results including any alert they carry, finds, text reads, clipboard reads and
+the audit trail. Card numbers are matched whether printed contiguously or
+grouped by spaces or hyphens. Patterns are configurable via
+`policy.redact_patterns`.
+
+This is applied inside the session, so it holds for every consumer: the MCP
+server, the bundled agent and the terminal front end alike. It used to live at
+the server's boundary, which is why the agent that ships with this project was
+not redacted at all. Device logs, which only the server reads, are redacted
+there.
+
+One exit is left raw on purpose: `IosSession.alert()` returns the alert as
+WebDriverAgent reported it, because alert buttons are matched by their labels
+and nothing this project ships reads it directly. An alert that reaches the
+agent does so inside an action result, which is redacted.
 
 ## Stopping
 

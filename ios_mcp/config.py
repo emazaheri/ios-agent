@@ -126,7 +126,13 @@ class PolicySettings(BaseModel):
     #: Redacting an image needs a region model this project does not have; the
     #: redactor works on text.
     redact_patterns: tuple[str, ...] = (
-        r"\b\d{13,19}\b",  # card-like numbers
+        # Card-like numbers, contiguous or grouped by single spaces or hyphens.
+        # The pattern used to be `\d{13,19}`, contiguous only, which missed
+        # "4111 1111 1111 1111", the form a card number is almost always shown
+        # in. Grouping widens what counts as one number, so any run of 13 to 19
+        # digits joined by single separators is redacted too; that errs toward
+        # hiding an order number rather than showing a card.
+        r"\b(?:\d[ -]?){12,18}\d\b",
         r"\b[\w.+-]+@[\w-]+\.[\w.]+\b",  # emails
     )
 
