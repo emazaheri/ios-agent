@@ -69,9 +69,9 @@ one present. None of them makes it safe without one.
 | B | app allowlist and blocklist | scopes apps, not what is inside them |
 | B | text redaction, for every consumer | text only; screenshots pass through, and `IosSession.alert()` is left raw on purpose |
 | B | secrets by keychain reference | covers typed secrets, not secrets already on screen |
-| C | approval before a destructive action | a heuristic over labels; it cannot see a control that is unlabelled or misleadingly named |
+| C | approval before an action that destroys data, costs money, or reaches another person | a heuristic over labels; it cannot see a control that is unlabelled or misleadingly named |
 | C | halt after repeated failures or a detected loop | bounds a stuck agent, not a determined one |
-| C | an unanswerable approval is a refusal | protects an unattended run from *destructive* actions only |
+| C | an unanswerable approval is a refusal | protects an unattended run only from what the gate recognises |
 | A | **none** | see below |
 
 **Nothing limits A, deliberately.** ADR 0013 measured the obvious attack: a
@@ -88,13 +88,16 @@ the controls that matter.
 
 ## Unattended operation is unsupported on a device
 
-Not merely discouraged. The bundled agent refuses every destructive action when
-nobody is there to approve it, which is the right default and is not enough on
-its own: an action the gate does not classify as destructive goes through. Today
-that includes anything that reaches another person, such as a like or a follow,
-because the gate asks whether an action destroys data or costs money and has no
-question for whether it notifies a stranger. A real run liked a profile four
-times on a goal to read it, and nothing stopped it.
+Not merely discouraged. The bundled agent refuses every action the gate asks
+about when nobody is there to answer, which is the right default and is not
+enough on its own: an action the gate does not recognise goes through.
+
+The gate asks two questions. Whether an action destroys data or costs money,
+and, since [ADR 0014](adr/0014-ask-before-reaching-another-person.md), whether
+it reaches another person, which is what let a real run like a profile four
+times on a goal to read it. Both are whole-word matches over labels, so both
+miss a control that is unlabelled or named in words neither list holds. The
+lists are a heuristic; the allowlist and a person watching are the controls.
 
 On a simulator, run unattended freely. On a phone, someone should be watching.
 

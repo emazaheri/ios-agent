@@ -76,6 +76,7 @@ def test_read_only_actions_are_never_destructive() -> None:
 
 def test_the_gate_can_be_turned_off_entirely() -> None:
     assert gate(enabled=False).classify("tap", target("Delete")).risk is Risk.SAFE
+    assert gate(enabled=False).classify("tap", target("Follow")).risk is Risk.SAFE
     assert gate(confirm_destructive=False).classify("tap", target("Delete")).risk is Risk.SAFE
 
 
@@ -83,6 +84,108 @@ def test_the_verdict_explains_itself() -> None:
     verdict = gate().classify("tap", target("Send"))
     assert "Send" in (verdict.reason or "")
     assert verdict.matched == "send"
+
+
+# -- reaching another person -------------------------------------------------
+
+
+def test_a_real_failure_is_now_asked_about() -> None:
+    """The run that motivated this: four likes on a stranger's profile.
+
+    The goal was to read the profile's prompts. Every tap reached a stranger in
+    the owner's name, and the gate let all four through, because "like" answers
+    neither of the questions it used to ask: it destroys nothing and costs
+    nothing.
+    """
+    verdict = gate().classify("tap", target("Like Radha's answer"))
+
+    assert verdict.risk is Risk.REACHES_A_PERSON
+    assert verdict.needs_approval
+
+
+@pytest.mark.parametrize(
+    "label", ["Like", "Follow", "Comment", "Reply", "Share", "Invite", "Message", "Post", "RSVP"]
+)
+def test_actions_that_reach_a_person_are_asked_about(label: str) -> None:
+    assert gate().classify("tap", target(label)).risk is Risk.REACHES_A_PERSON
+
+
+@pytest.mark.parametrize("label", ["Likes", "Following", "Followers", "Comments", "Messages"])
+def test_the_screens_named_after_them_are_not(label: str) -> None:
+    """A tab called Likes is where the likes are, not a like.
+
+    Whole words, as for the destructive rule, so that navigating to the list of
+    something is not mistaken for doing it.
+    """
+    assert gate().classify("tap", target(label)).risk is Risk.SAFE
+
+
+def test_an_id_that_names_the_action_is_caught() -> None:
+    """A drawn heart arrives with no label, only an id like `like_prompt_card_2`."""
+    verdict = gate().classify("tap", target("", identifier="like_prompt_card_2"))
+
+    assert verdict.risk is Risk.REACHES_A_PERSON
+
+
+def test_the_prompt_says_what_the_action_would_do() -> None:
+    """The person approving is told the consequence, not that a rule matched."""
+    reason = gate().classify("tap", target("Follow")).reason or ""
+
+    assert "reach another person" in reason
+    assert "Follow" in reason
+
+
+def test_destroying_or_paying_outranks_reaching_someone() -> None:
+    """An action that does both is asked about as the costlier of the two."""
+    verdict = gate().classify("tap", target("Send Payment"))
+
+    assert verdict.risk is Risk.DESTRUCTIVE
+
+
+def test_the_two_questions_are_switched_separately() -> None:
+    """A simulator test suite may drop one without dropping the other."""
+    only_destructive = gate(confirm_reaching_a_person=False)
+    only_people = gate(confirm_destructive=False)
+
+    assert only_destructive.classify("tap", target("Follow")).risk is Risk.SAFE
+    assert only_destructive.classify("tap", target("Delete")).risk is Risk.DESTRUCTIVE
+    assert only_people.classify("tap", target("Delete")).risk is Risk.SAFE
+    assert only_people.classify("tap", target("Follow")).risk is Risk.REACHES_A_PERSON
+
+
+def test_typed_prose_is_not_a_person_reached() -> None:
+    """Typing reaches nobody until something is sent, and send is destructive.
+
+    Neither the typed text nor the field's own label is judged: "like" is also
+    a preposition, and a field called Comment is where a comment is drafted,
+    not posted. The button that finally sends it is what gets asked about.
+    """
+    field = target("Comment", role="textfield")
+
+    assert gate().classify("type", field, text="I'd like to come").risk is Risk.SAFE
+
+
+def test_a_paragraph_is_nobodys_button() -> None:
+    """The one false positive measured on a real Settings app, ten panes deep."""
+    prose = target(
+        "StandBy will turn on when iPhone is placed on its side while charging "
+        "to show information like widgets, photo frames, or clocks.",
+        role="text",
+    )
+
+    assert gate().classify("tap", prose).risk is Risk.SAFE
+
+
+def test_typed_text_still_answers_the_destructive_question() -> None:
+    """Narrowing the person rule leaves the older one exactly as it was."""
+    assert (
+        gate().classify("type", target("Note"), text="delete everything").risk is Risk.DESTRUCTIVE
+    )
+
+
+def test_reading_a_profile_is_still_free() -> None:
+    for action in ("observe", "screenshot", "read_text", "wait_for", "list_apps"):
+        assert gate().classify(action, target("Like")).risk is Risk.SAFE
 
 
 # -- app scope --------------------------------------------------------------

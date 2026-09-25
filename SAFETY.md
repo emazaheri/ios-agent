@@ -13,6 +13,22 @@ sits in front of every action.
 Actions are classified *before* they run, so approval is asked while the
 operation is still preventable rather than reported afterwards.
 
+Two questions are asked, each with its own switch:
+
+- **Does it destroy data or cost money?** `policy.destructive_labels`, such as
+  send, pay, delete, sign out. Checked against the control's label, its id, and
+  any text being typed.
+- **Does it reach another person?** `policy.person_labels`, such as like,
+  follow, comment, reply, share. Checked against the control being pressed
+  only. Typing is not judged, because nothing typed reaches anyone until it is
+  sent, and a paragraph of static text is nobody's button. The prompt says the
+  action "would reach another person", so the person approving knows the
+  consequence rather than only that a rule matched.
+
+The second exists because the first missed a real one: an agent asked to read a
+dating profile liked it four times, and nothing asked, because a like destroys
+nothing and costs nothing. See [ADR 0014](docs/adr/0014-ask-before-reaching-another-person.md).
+
 Matching is on whole words. "Sender" and "Undelete" do not trip the "send" and
 "delete" rules, because a gate that prompts on everything trains an operator to
 approve reflexively, which is worse than no gate.
@@ -111,6 +127,7 @@ as a regression test, and providing worked examples for a future agent.
 [policy]
 enabled = true
 confirm_destructive = true
+confirm_reaching_a_person = true
 app_allowlist = ["com.apple.Preferences"]   # empty means "anything not blocked"
 max_consecutive_failures = 5
 ```
