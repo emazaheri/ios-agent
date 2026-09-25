@@ -6,7 +6,17 @@ import json
 from pathlib import Path
 
 import pytest
-from eval_trend import CHECKED, SCHEMA_VERSION, append, compare, flatten, load, main, render
+from eval_trend import (
+    CHECKED,
+    IDENTITY,
+    SCHEMA_VERSION,
+    append,
+    compare,
+    flatten,
+    load,
+    main,
+    render,
+)
 
 FLOW_REPORT = {
     "schema_version": SCHEMA_VERSION,
@@ -238,3 +248,100 @@ def test_a_metric_added_later_does_not_read_as_a_change() -> None:
 def test_a_histogram_added_later_reads_as_empty_rather_than_missing() -> None:
     assert compare({"faults": {}}, {}) == []
     assert compare({"faults": {"model": 1}}, {}) == ["faults: {} -> {'model': 1}"]
+
+
+# -- provenance: which prompt and which model produced the numbers ----------
+
+
+#: A slice that had a model in the loop, so it carries both provenance fields.
+MODEL_REPORT = {
+    **TASK_REPORT,
+    "driver": "s11-planted-instruction",
+    "model": "openai:gpt-5.6-sol",
+    "model_served": "gpt-5.6-sol-2026-08-01",
+    "prompt_sha": "a1b2c3d4",
+}
+
+
+def test_provenance_survives_a_round_trip_in_key_order() -> None:
+    """Recorded at all, and beside `model`, which is what it qualifies.
+
+    `flatten` ends in a projection over `_KEY_ORDER`, so a key added to the
+    record and not to that tuple is dropped without a word. This is the test
+    that notices.
+    """
+    record = flatten(MODEL_REPORT, suite="agent-model")
+
+    assert record["prompt_sha"] == "a1b2c3d4"
+    assert record["model_served"] == "gpt-5.6-sol-2026-08-01"
+    keys = list(record)
+    assert keys.index("model") < keys.index("model_served") < keys.index("prompt_sha")
+
+
+def test_a_suite_with_no_model_records_no_provenance() -> None:
+    """An oracle run never read the operator prompt.
+
+    Recording a hash of it there would attribute numbers to an input that had
+    no part in producing them.
+    """
+    record = flatten(TASK_REPORT, suite="agent-oracle")
+
+    assert record["prompt_sha"] is None
+    assert record["model_served"] is None
+
+
+def test_the_prompt_is_never_guarded_as_a_count() -> None:
+    """It decides whether diffing means anything; it is not a thing to diff.
+
+    Guarding it would also misfire once. `_baseline` substitutes `type(value)()`
+    for a key the baseline lacks, which for a string is the empty one, so every
+    suite would report `prompt_sha: '' -> ...` on the first run after this
+    landed and exit non-zero for no reason.
+    """
+    assert IDENTITY not in CHECKED
+    assert compare({**MODEL_REPORT, "prompt_sha": "deadbeef"}, MODEL_REPORT) == []
+
+
+def test_a_changed_prompt_refuses_the_comparison(tmp_path: Path, capsys) -> None:
+    """The counts are not compared, rather than compared and blamed on nothing.
+
+    Both the prompt and a number move here. A run that reported the number and
+    stayed quiet about the prompt would be the drift this file exists to stop.
+    """
+    history = tmp_path / "history.jsonl"
+    report = _write(tmp_path / "agent.json", MODEL_REPORT)
+    main(["--history", str(history), "append", str(report), "--suite", "s"])
+
+    edited = json.loads(json.dumps(MODEL_REPORT))
+    edited["prompt_sha"] = "99999999"
+    edited["totals"]["actions"] = 41
+    changed = _write(tmp_path / "changed.json", edited)
+
+    assert main(["--history", str(history), "check", str(changed), "--suite", "s"]) == 1
+    out = capsys.readouterr().out
+    assert "a1b2c3d4 -> 99999999" in out
+    assert "not comparable" in out
+    assert "actions: 36 -> 41" not in out, "counts were diffed across two prompts"
+
+
+def test_an_unchanged_prompt_compares_as_before(tmp_path: Path) -> None:
+    history = tmp_path / "history.jsonl"
+    report = _write(tmp_path / "agent.json", MODEL_REPORT)
+    main(["--history", str(history), "append", str(report), "--suite", "s"])
+
+    assert main(["--history", str(history), "check", str(report), "--suite", "s"]) == 0
+
+
+def test_a_baseline_from_before_this_landed_still_compares(tmp_path: Path, capsys) -> None:
+    """Every row committed so far has no `prompt_sha`.
+
+    Refusing those would restart all three series on the day the field arrived,
+    so they compare, and the comparison says what it is assuming.
+    """
+    history = tmp_path / "history.jsonl"
+    legacy = _write(tmp_path / "legacy.json", TASK_REPORT)
+    main(["--history", str(history), "append", str(legacy), "--suite", "s"])
+
+    report = _write(tmp_path / "agent.json", MODEL_REPORT)
+    assert main(["--history", str(history), "check", str(report), "--suite", "s"]) == 0
+    assert "predates prompt recording" in capsys.readouterr().out

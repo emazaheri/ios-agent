@@ -142,14 +142,26 @@ async def run_goal(
 
     prompt_tokens = 0
     completion_tokens = 0
+    model_served: str | None = None
 
     async def metered(messages: list[AnyMessage]) -> AIMessage:
-        nonlocal prompt_tokens, completion_tokens
+        nonlocal prompt_tokens, completion_tokens, model_served
         reply = await call_model(messages)
         usage = reply.usage_metadata
         if usage:
             prompt_tokens += usage.get("input_tokens", 0)
             completion_tokens += usage.get("output_tokens", 0)
+        # What the provider says it served, which `AgentSettings.model` cannot
+        # say: that is an alias, and the thing behind it moves. Read from the
+        # first reply that names one and not overwritten, so a report says what
+        # produced the run rather than what produced its last turn.
+        #
+        # Best effort by design. The key is not part of any provider contract,
+        # a scripted model in a test has no metadata at all, and losing a run
+        # over a missing label would be a worse trade than recording None.
+        if model_served is None:
+            served = (reply.response_metadata or {}).get("model_name")
+            model_served = str(served) if served else None
         return reply
 
     graph = build_graph(run, metered, tools, max_steps=max_steps or cfg.max_steps)
@@ -182,4 +194,5 @@ async def run_goal(
         stats=run.backend.stats,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        model_served=model_served,
     )

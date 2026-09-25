@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a record's shape changes in a way a reader must notice.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Committed, unlike the reports themselves. It lives beside the suites that
 #: produce it rather than at the repository root, where `evals/` would read as
@@ -62,6 +62,16 @@ CHECKED = (
 #: Recorded and shown, never checked. The runner decides these.
 UNCHECKED = ("seconds",)
 
+#: Not a count and deliberately not in `CHECKED`. It identifies the system that
+#: produced the counts, so it decides whether comparing them means anything at
+#: all rather than being one more number to diff.
+#:
+#: Guarding it would also misfire once: `_baseline` substitutes `type(value)()`
+#: for a key the baseline lacks, which for a string is `""`, so the first run
+#: after this landed would report `prompt_sha: '' -> ...` on every suite and
+#: exit non-zero for no reason.
+IDENTITY = "prompt_sha"
+
 #: Fixed, so adjacent lines in a diff line up column-wise.
 _KEY_ORDER = (
     "schema_version",
@@ -70,6 +80,8 @@ _KEY_ORDER = (
     "suite",
     "driver",
     "model",
+    "model_served",
+    "prompt_sha",
     "units",
     "passed",
     "observations",
@@ -136,6 +148,16 @@ def flatten(report: dict[str, Any], *, suite: str, note: str | None = None) -> d
         "suite": suite,
         "driver": report.get("driver", "flows"),
         "model": report.get("model"),
+        # What the provider says it actually ran, against `model` above, which
+        # is what was asked for. `claude-opus-5` is an alias and not a version,
+        # so a provider moving underneath it is invisible in `model` alone.
+        # Absent from a report with no model in the loop, and None from a
+        # provider that does not say.
+        "model_served": report.get("model_served"),
+        # The operator prompt that produced these counts. A prompt is an input
+        # to the system, so two runs under different prompts are two systems and
+        # their counts are not comparable. See `IDENTITY`.
+        "prompt_sha": report.get("prompt_sha"),
         "units": f"{count} {units}",
         "passed": passed,
         "observations": totals.get("observations", 0),
@@ -255,6 +277,26 @@ def _cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def comparable(record: dict[str, Any], baseline: dict[str, Any]) -> str | None:
+    """Why these two runs cannot be diffed, or None when they can.
+
+    A different operator prompt is a different system, and diffing counts across
+    two systems is the drift this file exists to prevent: the number moved, and
+    nothing says which of the two changes moved it. So a changed `prompt_sha`
+    stops the comparison rather than appearing inside it.
+
+    A baseline with no `prompt_sha` at all is every row recorded before this
+    landed. Refusing those would restart all three series on the day the field
+    arrived, so they compare, and say so.
+    """
+    mine, theirs = record.get(IDENTITY), baseline.get(IDENTITY)
+    if theirs is None or mine is None:
+        return None
+    if mine != theirs:
+        return f"the operator prompt changed: {theirs} -> {mine}"
+    return None
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
     record = flatten(_read(args.report), suite=args.suite)
     history = load(args.history, suite=args.suite)
@@ -265,11 +307,26 @@ def _cmd_check(args: argparse.Namespace) -> int:
             f"{args.report} --suite {args.suite}"
         )
         return 1
-    drift = compare(record, history[-1])
+    baseline = history[-1]
+    incomparable = comparable(record, baseline)
+    if incomparable is not None:
+        print(f"{args.suite}: {incomparable}")
+        print(
+            "\nThese counts are not comparable, so they were not compared. "
+            "Record a new baseline for the new prompt:\n  python "
+            f"scripts/eval_trend.py append {args.report} --suite {args.suite}"
+        )
+        return 1
+    if baseline.get(IDENTITY) is None and record.get(IDENTITY) is not None:
+        print(
+            f"{args.suite}: the baseline predates prompt recording, so this "
+            "comparison assumes the prompt did not change."
+        )
+    drift = compare(record, baseline)
     if not drift:
-        print(f"{args.suite}: unchanged against {history[-1]['sha']}")
+        print(f"{args.suite}: unchanged against {baseline['sha']}")
         return 0
-    print(f"{args.suite} moved against {history[-1]['sha']} ({history[-1]['at']}):")
+    print(f"{args.suite} moved against {baseline['sha']} ({baseline['at']}):")
     for line in drift:
         print(f"  {line}")
     print(
