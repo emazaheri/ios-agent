@@ -7,7 +7,7 @@ MCP server, and the library beneath both.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-835%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-943%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -55,7 +55,7 @@ of steps. Four decisions follow from that, and they are the whole design:
 
 | | |
 |---|---|
-| **Perception is budget-aware** | 251 raw nodes to 12 elements on a real third-party screen; 50–445 tokens per step |
+| **Perception is budget-aware** | 251 raw nodes to 12 elements on a real third-party screen; 50 to 472 tokens per step |
 | **Actions return the screen they produced** | halves round-trips, and returns a *delta* when the screen is similar |
 | **Resolution runs on the host** | six tiers, so a retry costs zero model tokens where a round-trip costs a whole turn |
 | **The gate asks before acting, not after** | so the answer still means something |
@@ -113,11 +113,11 @@ observations, device tokens, cost.
 | `/device` · `ctrl+o` | switch phone or simulator mid-session |
 | `esc` | stop at the next step, with a complete report; again to abort |
 | `ctrl+r` · `ctrl+s` | re-read the screen · save the audit trail |
-| `/copy` · `ctrl+y` | copy the transcript, or a selection, to the clipboard |
+| drag to select | copies the selection to the clipboard, no keystroke needed |
 | `--inline` | run in a short region under the prompt |
 | `--no-tui` | plain lines, for a pipe |
 
-**`manual` mode needs no API key.** It drives the same ten verbs by hand,
+**`manual` mode needs no API key.** It drives the agent's nine verbs by hand,
 which is the fastest way to debug perception on an app nobody has pointed this
 at before.
 
@@ -136,12 +136,12 @@ uv sync --extra openai
 IOS_AGENT_PROVIDER=openai IOS_AGENT_MODEL=gpt-5.6-sol uv run ios-agent "..."
 ```
 
-Anthropic, OpenAI, Gemini, Bedrock, Groq, Mistral and a local Ollama model are
-all supported. See [agent/README.md](agent/README.md).
+Anthropic, OpenAI, Azure OpenAI, Gemini, Vertex AI, Bedrock, Groq, Mistral and
+a local Ollama model are all supported. See [agent/README.md](agent/README.md).
 
 ## Connecting your own agent over MCP
 
-31 tools and 4 resources, over stdio or HTTP. Add to `.mcp.json` (already
+31 tools and 5 resources, over stdio or HTTP. Add to `.mcp.json` (already
 present here for Claude Code):
 
 ```json
@@ -174,8 +174,8 @@ e2   switch       "Bold Text" =0 id=ENHANCE_TEXT_LEGIBILITY @(336,161)
 e3   button       "Larger Text, Off" id=LARGER_TEXT @(190,216)
 ```
 
-Measured across eleven golden flows on a real simulator: **50 to 422 tokens per
-tool call.**
+Measured across eleven golden flows on a real simulator: **50 to 472 tokens per
+step**, averaged over each flow.
 
 The agent passes `e2` back to an action. It never writes XPath and never
 guesses coordinates. If a ref goes stale because the screen moved, the host
@@ -190,24 +190,29 @@ Automating someone's real phone is not test automation. On by default:
   `action_requires_approval` error an external human-in-the-loop layer can
   answer. Approval is scoped to one action: approving Send never approves
   Delete.
-- Without an approver the run is unattended and everything destructive is
-  **refused**, because an unanswerable question is not consent.
+- So does pressing anything that **reaches another person**: Like, Follow,
+  Comment, Reply, Share, Invite, Message, Post. Undoing the tap does not undo
+  the notification. See [docs/adr/0014](docs/adr/0014-ask-before-reaching-another-person.md).
+- Without an approver the run is unattended and everything the gate would ask
+  about is **refused**, because an unanswerable question is not consent.
 - `ios_type_secret` reads a value from the host keychain and sends it straight
   to the device. It never enters a prompt, a tool result, or the audit trail.
-- Card numbers and email addresses are stripped from everything leaving the
-  server.
+- Card numbers, including the grouped `4111 1111 1111 1111` form, and email
+  addresses are redacted inside the session, so the MCP server, the bundled
+  agent and the terminal app all receive the redacted screen.
 - Repeated failures or a detected loop halt the session.
 - The device picker never pre-selects a physical phone. Reaching one always
   costs a keystroke.
 
-See [SAFETY.md](SAFETY.md). Every default is settable through an `IOS_MCP_*`
+See [SAFETY.md](SAFETY.md), and the [threat model](docs/threat-model.md) for
+what none of this protects against. Every default is settable through an `IOS_MCP_*`
 environment variable, a `.env`, or an optional `ios-mcp.toml`, in that order of
 precedence. Copy `.env.example` to `.env` for the full list.
 
 ## Measured on real hardware
 
 The eval harness was built before the agent, which is the only reason any
-of these numbers exist. Latest measurement, 13 tasks × 3 runs on
+of these numbers exist. The last full measurement, 13 tasks × 3 runs on
 `gpt-5.6-sol`:
 
 | | |
@@ -224,6 +229,13 @@ The cost is priced at $4 in and $20 out per million tokens. It was first
 published as $1.87, priced at Claude Opus rates by a harness that ignored the
 price set beside the model; the token counts, and every ratio between arms,
 were unaffected.
+
+The suite has since grown to 19 tasks, four of them planting an instruction in
+the screen the agent reads. Run for [docs/adr/0015](docs/adr/0015-route-routine-turns-to-a-small-model.md),
+3 runs each on the same model, it passed 55/57 at 1.30x the oracle's actions
+for $2.61, and obeyed no planted instruction in 12 tries. That run recorded
+passes, actions and cost, not observations or faults, so the table above
+stays the one to read for those.
 
 One observation per run, give or take two across the whole set, including the
 two tasks in an app Apple did not write. That is the floor, and it holds
@@ -276,9 +288,9 @@ change settings on it.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 639 tests, no device, no model
-uv run pytest tests/tui           # 192 tests, the terminal front end
-uv run pytest tests/integration   # 13 tests, real simulator
+uv run pytest tests/unit          # 731 tests, no device, no model
+uv run pytest tests/tui           # 212 tests, the terminal front end
+uv run pytest tests/integration   # 18 simulator + 3 device tests
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui
 ```
@@ -331,14 +343,14 @@ ios-mcp    library + MCP server   depends on neither
 An iOS app cannot automate other apps on the device it runs on. The sandbox
 blocks cross-process access, and the Accessibility API is unavailable to
 sandboxed apps even with user consent. XCUIAutomation only executes inside an
-XCTest runner started by `testmanagerd`, which is driven from a host. Any iOS
-app in this project's future is a client of this server, never the engine.
+XCTest runner started by `testmanagerd`, which is driven from a host. So the
+engine has to live on a Mac, which is why this project has no iOS app.
 
 ## Contributing
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 835 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 943 offline tests on Linux and macOS.
 
 ## License
 
