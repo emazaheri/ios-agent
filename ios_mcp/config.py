@@ -182,6 +182,11 @@ class ServerSettings(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8765
+    #: Declared and **not yet read by anything**. Setting them does not
+    #: authenticate the HTTP transport, which has no authentication at all, so
+    #: binding it off loopback exposes the device to anyone who can reach the
+    #: port. Either wire them or remove them; leaving them looking load bearing
+    #: is the defect `redact_screenshots` had. See docs/threat-model.md.
     auth_jwks_uri: str | None = None
     auth_issuer: str | None = None
     auth_audience: str | None = None
