@@ -207,14 +207,12 @@ class ServerSettings(BaseModel):
     transport: Literal["stdio", "http"] = "stdio"
     host: str = "127.0.0.1"
     port: int = 8765
-    #: Declared and **not yet read by anything**. Setting them does not
-    #: authenticate the HTTP transport, which has no authentication at all, so
-    #: binding it off loopback exposes the device to anyone who can reach the
-    #: port. Either wire them or remove them; leaving them looking load bearing
-    #: is the defect `redact_screenshots` had. See docs/threat-model.md.
-    auth_jwks_uri: str | None = None
-    auth_issuer: str | None = None
-    auth_audience: str | None = None
+    #: No authentication settings, on purpose. Three were declared from the first
+    #: commit, named after `fastmcp`'s `JWTVerifier`, and read by nothing, so a
+    #: reader who set them believed the HTTP transport was authenticated when it
+    #: was not. A remote, multi-user server is outside this project's scope, so
+    #: they were removed rather than wired; the HTTP transport instead refuses a
+    #: non-loopback bind and checks `Host` and `Origin`. See docs/threat-model.md.
 
 
 class TomlSource(PydanticBaseSettingsSource):
