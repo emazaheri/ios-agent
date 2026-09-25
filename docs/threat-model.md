@@ -104,13 +104,34 @@ On a simulator, run unattended freely. On a phone, someone should be watching.
 ## The server's own exposure
 
 The MCP server speaks stdio by default, which is reachable only by the process
-that launched it. Its HTTP transport binds `127.0.0.1` by default and has **no
-authentication**. `server.auth_jwks_uri`, `server.auth_issuer` and
-`server.auth_audience` are declared in the configuration and are not yet read
-by anything, so setting them changes nothing.
+that launched it, and needs no authentication. Every shipped configuration uses
+it: the client configs, `server.json` and the Docker image.
 
-So binding the HTTP transport to anything other than loopback hands the device
-to anyone who can reach the port, including every action in C.
+The HTTP transport, opt-in with `--transport http`, has **no authentication**,
+and does not need one for the use it has: a client on the same machine. What it
+needed instead, and did not have, was a check on where a request came from.
+
+**Loopback alone did not keep it local.** A web page can make its own hostname
+resolve to `127.0.0.1` and then reach a server on this machine from inside the
+browser. That is DNS rebinding, and it is why the MCP specification requires a
+server to check the `Host` and `Origin` headers. `fastmcp` does that when asked,
+and its default is off. Before this was fixed, a request claiming to come from
+`attacker.example` was answered with a live session. The policy gate would not
+have helped: an approval is answered by whoever made the call, so a caller that
+should not be there approves its own actions, and screenshots are not redacted.
+
+So the HTTP transport now:
+
+- **checks `Host` and `Origin`**, answering a request that names another site
+  with `421` or `403` before it reaches a tool;
+- **refuses to bind anything but loopback**, unless `--allow-remote` is passed,
+  and then says in the log that the device is reachable by anyone who can
+  reach the address.
+
+There are no authentication settings. Three were declared from the first commit
+and read by nothing, so setting them left the server as open as before while
+looking otherwise. A remote, multi-user server is outside this project's scope,
+so they were removed rather than wired.
 
 ## Out of scope
 

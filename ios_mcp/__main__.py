@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 from ios_mcp.config import Settings, set_settings
 
@@ -22,6 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--transport", choices=["stdio", "http"], default=None)
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    serve.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help=(
+            "Allow the HTTP transport to bind a non-loopback address. It has no "
+            "authentication, so anyone who can reach the port can drive the device."
+        ),
+    )
 
     doctor = sub.add_parser("doctor", help="Run preflight diagnostics")
     doctor.add_argument("--json", action="store_true")
@@ -112,19 +122,59 @@ def _cmd_devices(settings: Settings, *, json_out: bool) -> int:
     return 0
 
 
+def is_loopback(host: str) -> bool:
+    """Whether binding `host` keeps the server reachable from this machine only."""
+    if host.strip().lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def http_run_options(host: str, port: int) -> dict[str, Any]:
+    """What the HTTP transport is started with, in one place so a test can use it.
+
+    `host_origin_protection="auto"` is the part that matters. The HTTP transport
+    has no authentication, which loopback made tolerable only in appearance: a
+    web page can resolve its own hostname to 127.0.0.1 and reach a local server
+    from inside the browser, which is DNS rebinding and why the MCP spec requires
+    a server to check `Host` and `Origin`. `fastmcp` does that when asked, and its
+    own default is off. Measured before this change: a request claiming to come
+    from `attacker.example` was answered with a live session.
+    """
+    return {"transport": "http", "host": host, "port": port, "host_origin_protection": "auto"}
+
+
 def _cmd_serve(settings: Settings, args: argparse.Namespace) -> int:
     from ios_mcp.server.app import build_server
 
     transport = args.transport or settings.server.transport
-    mcp = build_server(settings)
     if transport == "http":
-        mcp.run(
-            transport="http",
-            host=args.host or settings.server.host,
-            port=args.port or settings.server.port,
-        )
+        host = args.host or settings.server.host
+        port = args.port or settings.server.port
+        if not is_loopback(host):
+            if not getattr(args, "allow_remote", False):
+                # Refused rather than warned: there is no authentication, and a
+                # warning scrolls past while the phone stays reachable.
+                print(
+                    f"Refusing to serve HTTP on {host}: the transport has no "
+                    "authentication, so anyone who can reach that address could "
+                    "drive the device, approvals included, since an approval is "
+                    "answered by whoever made the call.\n"
+                    "Bind 127.0.0.1, or pass --allow-remote on a network you control. "
+                    "See docs/threat-model.md.",
+                    file=sys.stderr,
+                )
+                return 2
+            logging.getLogger(__name__).warning(
+                "Serving HTTP on %s with no authentication. Anyone who can reach "
+                "this address can drive the device.",
+                host,
+            )
+        build_server(settings).run(**http_run_options(host, port))
     else:
-        mcp.run()
+        build_server(settings).run()
     return 0
 
 

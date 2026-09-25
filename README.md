@@ -154,7 +154,10 @@ present here for Claude Code):
 
 Then ask for what you want in plain language. The server ships an `ios_operator`
 prompt that teaches the observe/act/verify loop, so clients do not have to
-reinvent it. For a remote client, `ios-mcp serve --transport http --port 8765`.
+reinvent it. For a client that speaks HTTP rather than stdio,
+`ios-mcp serve --transport http --port 8765` serves on this machine only: it has
+no authentication, so it checks where each request came from and will not bind
+another address without `--allow-remote`. See the [threat model](docs/threat-model.md).
 
 Or skip the protocol and import the library:
 
