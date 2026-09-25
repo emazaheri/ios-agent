@@ -50,3 +50,41 @@ def test_every_link_in_the_index_resolves() -> None:
 def test_every_reality_file_carries_entries(path: Path) -> None:
     """A heading and an introduction with nothing under them is not a split."""
     assert path.read_text().count("\n- **") >= 1, f"{path.name} holds no entries"
+
+
+# -- the safety pages, which a reader copies from ------------------------------
+
+_THREAT_MODEL = _ROOT / "docs" / "threat-model.md"
+_ANY_LINK = re.compile(r"\]\(([^)#:]+)(?:#[^)]*)?\)")
+
+
+def test_the_threat_model_is_linked_from_both_safety_pages() -> None:
+    """A security document nobody is pointed at is one nobody reads."""
+    for page in ("SAFETY.md", "SECURITY.md"):
+        assert "docs/threat-model.md" in (_ROOT / page).read_text(), (
+            f"{page} does not link the threat model"
+        )
+
+
+def test_every_relative_link_in_the_threat_model_resolves() -> None:
+    for target in _ANY_LINK.findall(_THREAT_MODEL.read_text()):
+        path = (_THREAT_MODEL.parent / target).resolve()
+        assert path.exists(), f"the threat model links {target}, which does not exist"
+
+
+def test_the_safety_config_example_only_names_real_settings() -> None:
+    """The example is the thing people copy, so every key in it must exist.
+
+    `SAFETY.md` documented `redact_screenshots = false` long after the setting
+    was removed. The configuration ignores unknown keys, so a reader who set it
+    to true believing screenshots were redacted got no redaction and no error.
+    """
+    from ios_mcp.config import PolicySettings
+
+    text = (_ROOT / "SAFETY.md").read_text()
+    block = re.search(r"```toml\n\[policy\]\n(.*?)```", text, re.S)
+    assert block, "SAFETY.md has no [policy] example to check"
+    keys = {line.split("=", 1)[0].strip() for line in block.group(1).splitlines() if "=" in line}
+
+    unknown = keys - set(PolicySettings.model_fields)
+    assert not unknown, f"SAFETY.md documents settings that do not exist: {sorted(unknown)}"

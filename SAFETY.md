@@ -1,5 +1,8 @@
 # Safety
 
+The controls, and their limits. What they defend against, and which
+configuration a given setup is in, is in [the threat model](docs/threat-model.md).
+
 Driving a person's phone with their real accounts is a different risk from test
 automation. The tap that dismisses a dialog in CI can send a message, make a
 payment, or delete a photo library here. The policy layer is on by default and
@@ -79,6 +82,12 @@ WebDriverAgent reported it, because alert buttons are matched by their labels
 and nothing this project ships reads it directly. An alert that reaches the
 agent does so inside an action result, which is redacted.
 
+Redaction is text only. A screenshot is returned as captured, because redacting an image
+needs a model of where things are on it and this project does not have one. An
+earlier version of this page documented a `redact_screenshots` setting; it was
+never read by anything, and the configuration ignores unknown keys, so setting
+it changed nothing and said nothing.
+
 ## Stopping
 
 - Repeated consecutive failures halt the session rather than letting an agent
@@ -104,7 +113,6 @@ enabled = true
 confirm_destructive = true
 app_allowlist = ["com.apple.Preferences"]   # empty means "anything not blocked"
 max_consecutive_failures = 5
-redact_screenshots = false
 ```
 
 Or `IOS_MCP_POLICY__CONFIRM_DESTRUCTIVE=false` in the environment, or in a
