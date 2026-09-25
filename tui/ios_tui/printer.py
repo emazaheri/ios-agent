@@ -95,6 +95,18 @@ class Printer:
         self._line(f"    {outcome.summary or '(no summary)'}")
         if outcome.stopped_because:
             self._line(f"    stopped because: {outcome.stopped_because}")
+        # Under the claim rather than replacing it. The heading above is already
+        # honest about being the agent's account; this is the device's.
+        #
+        # Derived from the two the event carries, because a claim that was never
+        # made cannot be contradicted: `verified` is also False on an honest
+        # `done(succeeded=False)`, and printing this there would read as an
+        # accusation against a run that told the truth.
+        if outcome.succeeded and not outcome.verified:
+            self._line(
+                "    but nothing it did changed the screen, so this claim is "
+                "not backed by the device"
+            )
 
     def _line(self, text: str) -> None:
         print(text, file=self.stream, flush=True)

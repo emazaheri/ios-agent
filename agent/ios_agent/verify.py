@@ -132,6 +132,16 @@ def attempt_key(action: str, target: str | None, argument: str | None = None) ->
 class Verifier:
     """Remembers which attempts have already done nothing.
 
+    It also keeps one run-level count, `changes`, which is the only place the
+    agent can learn whether anything it did ever moved the device. The audit
+    trail knows, but the agent may not read it: `ios_mcp.policy.audit` is
+    outside the public surface `tests/unit/test_layering.py` holds the agent to,
+    the front end wraps the backend in one that forwards three attributes, and
+    the MCP-backed backend has no session at all. A verifier is constructed by
+    both backends and by the front end once per goal, so it is the one signal
+    the two transports share, which is what a verdict has to be built on if it
+    is to mean the same thing over either.
+
     Counting is per attempt rather than globally consecutive: navigating away
     and back does not clear the record, because the question is whether *this
     exact request* has ever worked, not whether something else happened in
@@ -140,6 +150,10 @@ class Verifier:
     """
 
     max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    #: Actions, this run, that moved the device. Not per attempt like `_no_ops`
+    #: below: a success there deletes the entry, so nothing in that dict can
+    #: answer "did anything ever work".
+    changes: int = 0
     _no_ops: dict[Attempt, int] = field(default_factory=dict)
 
     def no_ops(self, key: Attempt) -> int:
@@ -167,6 +181,7 @@ class Verifier:
     def record(self, key: Attempt, result: Outcome) -> Verdict:
         """Judge a completed action from what it returned."""
         if self._changed(result):
+            self.changes += 1
             self._no_ops.pop(key, None)
             return Verdict(Judgement.PROGRESSED)
 

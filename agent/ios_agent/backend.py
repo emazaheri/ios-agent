@@ -53,6 +53,15 @@ class BackendStats:
     #: waste stays visible: an agent that spends its turns on refused repeats
     #: has traded one failure mode for a quieter one.
     refusals: int = 0
+    #: Actions that moved the device, mirrored from the verifier, which is where
+    #: the judgement is made.
+    #:
+    #: The odd one out here: everything else on this object is what the run
+    #: cost, and this is what it achieved. It sits here anyway because this is
+    #: the only container both backends fill and the front end forwards, and a
+    #: verdict built anywhere else would mean one thing over the direct
+    #: transport and nothing over MCP.
+    changes: int = 0
 
     @property
     def observation_overhead(self) -> float:
@@ -236,6 +245,7 @@ class SessionBackend:
         )
 
         verdict = self.verifier.record(key, result)
+        self.stats.changes = self.verifier.changes
         rendered = self._render(result, payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 

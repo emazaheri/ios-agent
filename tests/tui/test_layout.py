@@ -599,3 +599,83 @@ async def test_the_newest_row_stays_on_screen() -> None:
         assert transcript.scroll_offset.y == transcript.max_scroll_y, (
             "the transcript is not following its newest row"
         )
+
+
+class TestTheColourOfAClaim:
+    """Green is a verdict, not a claim.
+
+    `widgets._finished_rows` styles the summary, and it used to style it on
+    `succeeded`, which is what the agent said about itself. A run that claimed
+    success having moved nothing on the phone was painted green: the bug wearing
+    the right colour. Nothing asserted the styling, so the change from claim to
+    verdict had no test behind it either.
+    """
+
+    async def _summary_style(self, *, succeeded: bool, verified: bool) -> str:
+        app = _app()
+        async with app.run_test(size=WIDE) as pilot:
+            await _ready(app)
+            app._apply(GoalStarted(goal="turn on airplane mode", model="m"))
+            app._apply(
+                GoalFinished(
+                    goal="turn on airplane mode",
+                    succeeded=succeeded,
+                    verified=verified,
+                    summary="Airplane Mode is on.",
+                )
+            )
+            await pilot.pause()
+            row = next(line for line in app.transcript.lines if "Airplane Mode is on." in line.text)
+            # A `Strip` is segments, each with its own style, so read the one
+            # carrying the summary rather than the whole line.
+            return str(
+                next(
+                    seg.style
+                    for seg in row
+                    if "Airplane Mode is on." in seg.text and seg.style is not None
+                )
+            )
+
+    async def test_a_verified_run_is_green(self) -> None:
+        assert await self._summary_style(succeeded=True, verified=True) == "green"
+
+    async def test_a_claim_the_device_denies_is_not_green(self) -> None:
+        assert await self._summary_style(succeeded=True, verified=False) == "yellow"
+
+    async def test_an_honest_failure_is_not_green_either(self) -> None:
+        assert await self._summary_style(succeeded=False, verified=False) == "yellow"
+
+    async def _rows(self, *, succeeded: bool, verified: bool) -> str:
+        app = _app()
+        async with app.run_test(size=WIDE) as pilot:
+            await _ready(app)
+            app._apply(GoalStarted(goal="turn on airplane mode", model="m"))
+            app._apply(
+                GoalFinished(
+                    goal="turn on airplane mode",
+                    succeeded=succeeded,
+                    verified=verified,
+                    summary="Airplane Mode is on.",
+                )
+            )
+            await pilot.pause()
+            return "\n".join(line.text for line in app.transcript.lines)
+
+    async def test_a_denied_claim_says_so_in_words(self) -> None:
+        """Colour alone could not carry it.
+
+        Yellow is also an honest failure and a run that stopped early, so on
+        screen a claim the device denied looked exactly like a run reporting it
+        had not worked. Found by rendering the shape and looking at it, while
+        every assertion about this state was already passing.
+        """
+        assert "nothing it did changed the screen" in await self._rows(
+            succeeded=True, verified=False
+        )
+
+    async def test_a_run_that_worked_is_not_accused(self) -> None:
+        assert "nothing it did changed" not in await self._rows(succeeded=True, verified=True)
+
+    async def test_an_honest_failure_is_not_accused_either(self) -> None:
+        """There was no claim to deny, and saying this would be an accusation."""
+        assert "nothing it did changed" not in await self._rows(succeeded=False, verified=False)

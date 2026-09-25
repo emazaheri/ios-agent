@@ -501,9 +501,20 @@ class Transcript(SelectableLog):
 
         rows: list[Text] = []
         if summary and summary != self._last_said:
-            rows.append(Text(f"  {summary}", style="green" if event.succeeded else "yellow"))
+            # Green on the verdict, not the claim. A run that claimed success
+            # and moved nothing is the case this whole check exists for, and
+            # painting it green would be that bug wearing the right colour.
+            rows.append(Text(f"  {summary}", style="green" if event.verified else "yellow"))
         elif not summary:
             rows.append(Text("  (no summary)", style="yellow"))
+
+        # The colour alone cannot carry this. Yellow is also an honest failure
+        # and a run that stopped early, so a claim the device denies looked
+        # exactly like a run that reported it had not worked. Caught by looking
+        # at `scripts/tui_screenshot.py unverified`, not by a test: every
+        # assertion about this state was already passing.
+        if event.succeeded and not event.verified:
+            rows.append(Text("  nothing it did changed the screen", style="yellow bold"))
 
         # "stopped: X" under a line that already says X is a label with nothing
         # to label. It earns its place only when it says something new.

@@ -43,6 +43,7 @@ from pathlib import Path
 import pytest
 from agent_driver import requires_a_model
 from ios_agent import AgentSettings, SessionBackend, run_goal
+from ios_agent.verify import Verifier
 from simulator_support import requires_simulator
 
 from ios_mcp.config import Settings
@@ -219,6 +220,52 @@ async def test_the_verifier_does_not_misfire_on_real_timing(session: IosSession)
     assert repeat.screen_changed is False, (
         "a real no-op reported a screen change, so the verifier would never escalate"
     )
+
+
+async def test_the_change_counter_agrees_with_a_real_device(session: IosSession) -> None:
+    """The signal the verdict is built on, counted where it could break.
+
+    `Outcome.verified` is false only when *nothing* a run did moved the screen,
+    and "moved" is `screen_changed`, a fingerprint comparison. On a real device
+    that hash is taken over a live screen: if anything in it ticks, every action
+    reads as a change, the counter never stays at zero and the verdict silently
+    never fires. A scripted device cannot show that, because nothing in it moves
+    unless a test moves it.
+
+    So count both directions against the real thing. A navigation must register,
+    and setting a switch to the state it already holds must not.
+    """
+    verifier = Verifier()
+    backend = SessionBackend(session, verifier)
+
+    # Distinct keys throughout: the idempotency cache lives on the session, and
+    # a replayed call never touches the device, so reusing one would leave the
+    # counter measuring the cache.
+    await backend.tap("Accessibility", idem_key="sim-changes-1")
+    await backend.tap("Display & Text Size", idem_key="sim-changes-2")
+
+    # Navigation is the one action whose effect does not depend on where the
+    # device started, so it is the only one worth asserting exactly.
+    assert backend.stats.changes == 2, (
+        "a real navigation went unnoticed, so nothing a run does would count "
+        "and the verdict could never fire"
+    )
+
+    # Where this switch starts is the device's business, not the test's. Asked
+    # for the state it already holds, `set_value` correctly does nothing, and a
+    # simulator that had Bold Text off already made an earlier version of this
+    # test fail for being wrong rather than for finding anything. So take the
+    # count as it lands and assert only on the repeat below.
+    await backend.set_value("off", "Bold Text", idem_key="sim-changes-3")
+    settled = backend.stats.changes
+
+    await backend.set_value("off", "Bold Text", idem_key="sim-changes-4")
+
+    assert backend.stats.changes == settled, (
+        "a genuine no-op counted as a change, so a false success claim would "
+        "read as verified on a real device"
+    )
+    assert verifier.changes == backend.stats.changes, "the mirror drifted from its source"
 
 
 async def test_a_real_navigation_lets_a_batch_continue(session: IosSession) -> None:

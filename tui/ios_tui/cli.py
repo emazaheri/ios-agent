@@ -388,8 +388,11 @@ async def _run_plain(settings: Settings, args: argparse.Namespace) -> int:
         for line in runner.last_screen.splitlines()[:20]:
             print(f"    {line}")
 
-        # The agent's own claim is not evidence. Read the device yourself.
-        return 0 if outcome.succeeded else 1
+        # The agent's own claim is not evidence, and this is where that stopped
+        # being only a comment: `verified` is the claim after the device has been
+        # allowed to contradict it, so a run that acted and moved nothing no
+        # longer exits zero at a caller that scripted it.
+        return 0 if outcome.verified else 1
     finally:
         await runner.close()
 

@@ -183,6 +183,22 @@ async def run_goal(
         run.approvals_asked += len(answers)
         step = Command(resume=answers if len(answers) > 1 else next(iter(answers.values())))
 
+    stats = run.backend.stats
+    # The claim, with the device allowed to disagree. The agent decides when it
+    # is finished, and it has no reliable way of knowing: the loop ends whenever
+    # the model stops asking for tools, so `done(succeeded=True)` is an opinion
+    # formed from the same screens that produced it.
+    #
+    # A run that acted and never moved anything is the one case where the
+    # opinion can be contradicted without reading the device again. Zero actions
+    # is not that case and must not be treated as one: reading a screen and
+    # answering from it is a legitimate way to finish, which two eval tasks do
+    # at their floor, and one of them passes precisely by refusing to act.
+    #
+    # `stopped_because` stays out of it. That field means the loop ended for a
+    # reason other than the agent finishing, and this run did finish; writing
+    # here would make `finished_cleanly` say something untrue.
+    contradicted = bool(run.succeeded and stats.actions > 0 and stats.changes == 0)
     return Outcome(
         goal=goal,
         succeeded=run.succeeded,
@@ -191,8 +207,9 @@ async def run_goal(
         steps=run.steps,
         turns=run.turns,
         approvals_asked=run.approvals_asked,
-        stats=run.backend.stats,
+        stats=stats,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         model_served=model_served,
+        contradicted=contradicted,
     )
