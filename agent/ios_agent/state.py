@@ -73,6 +73,13 @@ class Outcome:
     #: open and this records that it does. It closes only where a provider names
     #: a dated snapshot, which is untested here.
     model_served: str | None = None
+    #: Input and output tokens per model, by configured name. One entry
+    #: unless the run was routed (ADR 0015), where the small and large models
+    #: are priced differently and a single total cannot be priced at all.
+    tokens_by_model: dict[str, tuple[int, int]] = field(default_factory=dict)
+    #: The turn a routed run moved to the large model, or None if it never did
+    #: or was not routed.
+    escalated_at_turn: int | None = None
     #: Set when the agent claimed success and nothing it did moved the device.
     #: See `verified`, which is the field to read.
     contradicted: bool = False
