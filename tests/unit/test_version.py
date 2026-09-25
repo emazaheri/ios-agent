@@ -126,3 +126,46 @@ def test_the_lockfile_agrees_with_every_workspace_member() -> None:
     assert len(members) == len(PYPROJECTS), (
         f"uv.lock locks {sorted(members)} but the release moves {list(PYPROJECTS)}"
     )
+
+
+def test_the_container_installs_the_version_it_describes() -> None:
+    """The Dockerfile pin, the seventh place the version is written.
+
+    It pins the published package on purpose, so a directory's re-check sees a
+    fixed release. Nothing moved it and nothing checked it, and it sat at 0.1.1
+    through three releases. `scripts/release.py` now moves it; this is what
+    names the file if the two ever disagree again.
+    """
+    import re
+
+    pins = re.findall(r"ios-mcp==(\d+\.\d+\.\d+)", (ROOT / "Dockerfile").read_text())
+    expected = _version("pyproject.toml")
+
+    assert pins == [expected], f"Dockerfile pins ios-mcp {pins}, the package is {expected!r}"
+
+
+def test_the_release_script_moves_the_pin(tmp_path, monkeypatch) -> None:
+    """Not just checked: moved, so the next release cannot leave it behind."""
+    import release
+
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM python:3.12-slim\nRUN pip install ios-mcp==0.4.0\n")
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+
+    assert release.set_dockerfile("0.5.0") == 1
+    assert "ios-mcp==0.5.0" in dockerfile.read_text()
+    assert release.set_dockerfile("0.5.0") == 0, "an unchanged pin was rewritten"
+
+
+def test_the_release_script_refuses_a_dockerfile_it_does_not_recognise(
+    tmp_path, monkeypatch
+) -> None:
+    """Two pins, or none, means the file changed shape. Guessing could pin the wrong line."""
+    import pytest
+    import release
+
+    (tmp_path / "Dockerfile").write_text("RUN pip install ios-mcp==0.4.0 ios-mcp==0.3.0\n")
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+
+    with pytest.raises(SystemExit):
+        release.set_dockerfile("0.5.0")

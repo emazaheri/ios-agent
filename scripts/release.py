@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Move the version everywhere it is written, in one command.
 
-The version is stated in six places: three workspace `pyproject.toml` files,
-`server.json` twice, and `uv.lock`, which records every workspace member with
-its version. That last one is the whole problem. It does not look like part of
+The version is stated in seven places: three workspace `pyproject.toml` files,
+`server.json` twice, the `Dockerfile`'s pin, and `uv.lock`, which records every
+workspace member with its version. That last one is the whole problem. It does not look like part of
 a version bump, it is regenerated rather than edited, and forgetting it ships a
 tree that fails `uv sync --locked`.
 
@@ -14,8 +14,14 @@ file it had just corrected. `uv sync --locked` in CI is what closed that, and
 `tests/unit/test_version.py` is what names the file when it happens.
 
 This removes the class instead of detecting it. `uv version --package` knows
-how to set a member's version and re-lock, so the only thing left to hand is
-`server.json`, which uv has no reason to know about.
+how to set a member's version and re-lock, so the only things left to hand are
+`server.json` and the `Dockerfile`, which uv has no reason to know about.
+
+The `Dockerfile` is the seventh and was found the way the lock was: missed. It
+pins the published package on purpose, so a directory's periodic re-check sees
+a fixed release, and this script did not know it existed. It sat at 0.1.1
+through three releases, so the image a directory listed was three versions
+behind the server it described, and nothing said so.
 
     python scripts/release.py 0.4.1
     python scripts/release.py --bump minor
@@ -128,6 +134,29 @@ def set_manifest(version: str) -> int:
     return changed
 
 
+#: The one line in the `Dockerfile` that names a version.
+DOCKER_PIN = re.compile(r"ios-mcp==\d+\.\d+\.\d+")
+
+
+def set_dockerfile(version: str) -> int:
+    """Move the `Dockerfile`'s pin. Returns how many pins changed.
+
+    Exactly one pin is expected. Zero or several means the file changed shape
+    and a silent rewrite could pin the wrong line, so that is an error rather
+    than a guess.
+    """
+    path = ROOT / "Dockerfile"
+    text = path.read_text()
+    pins = DOCKER_PIN.findall(text)
+    if len(pins) != 1:
+        raise SystemExit(f"Dockerfile: expected one ios-mcp==X.Y.Z pin, found {len(pins)}")
+    wanted = f"ios-mcp=={version}"
+    if pins[0] == wanted:
+        return 0
+    path.write_text(DOCKER_PIN.sub(wanted, text))
+    return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("version", nargs="?", help="the exact version to move to")
@@ -169,13 +198,17 @@ def main() -> int:
         for name in MEMBERS:
             said = run(["uv", "version", "--dry-run", "--package", name, *flag], capture=True)
             print(f"  {said}")
-        print("  server.json: both version fields, and uv.lock: three member entries")
+        print(
+            "  server.json: both version fields, the Dockerfile pin, "
+            "and uv.lock: three member entries"
+        )
         return 0
 
     print(f"moving from {was}")
     now = set_versions(args.version, args.bump)
     fields = set_manifest(now)
     print(f"  server.json: {fields} field(s)")
+    print(f"  Dockerfile: {set_dockerfile(now)} pin")
 
     print("\ngates:")
     for label, command in GATES:
