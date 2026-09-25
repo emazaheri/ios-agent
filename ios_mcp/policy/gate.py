@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 
 class Risk(StrEnum):
     SAFE = "safe"
+    #: Destroys data or costs money.
     DESTRUCTIVE = "destructive"
+    #: Reaches another person: a like, a follow, a reply. Nothing is lost on
+    #: the device, and a stranger is notified in the owner's name, which is not
+    #: undone by undoing the tap.
+    REACHES_A_PERSON = "reaches_a_person"
 
 
 @dataclass(slots=True, frozen=True)
@@ -38,7 +43,7 @@ class Verdict:
 
     @property
     def needs_approval(self) -> bool:
-        return self.risk is Risk.DESTRUCTIVE
+        return self.risk is not Risk.SAFE
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"risk": self.risk.value}
@@ -90,7 +95,7 @@ class PolicyGate:
         the "send" and "delete" rules, which would train an operator to approve
         everything reflexively.
         """
-        if not self.settings.enabled or not self.settings.confirm_destructive:
+        if not self.settings.enabled:
             return Verdict(Risk.SAFE)
         # Read verbs are safe by definition, and which verbs those are is a
         # fact about the action rather than about this file: it comes from the
@@ -105,25 +110,31 @@ class PolicyGate:
             target.identifier if target else None,
             text,
         ]
-        for haystack in haystacks:
-            match = self._match_destructive(haystack)
-            if match:
-                where = f'"{haystack}"'
-                return Verdict(
-                    Risk.DESTRUCTIVE,
-                    reason=f"{action} on {where} matches the destructive rule {match!r}",
-                    matched=match,
-                )
+        # Destructive first: an action that both costs money and messages
+        # someone should be asked about as the costlier of the two.
+        #
+        # The person rule reads less than the destructive one. It judges the
+        # control being pressed, not prose and not typing: typing into a field
+        # labelled "Comment" reaches nobody until it is sent, and "send" is
+        # already destructive, while a paragraph of static text is nobody's
+        # button. Both are where "like" turns up as a
+        # preposition. Measured on a real Settings app, ten panes and 178
+        # labels, the only hit was a StandBy description reading "information
+        # like widgets".
+        judged = target is not None and target.role != _PROSE and not action.startswith("type")
+        person_haystacks = [target.label, target.identifier] if judged and target else []
+        rules: list[tuple[Risk, tuple[str, ...], list[str | None]]] = []
+        if self.settings.confirm_destructive:
+            rules.append((Risk.DESTRUCTIVE, self.settings.destructive_labels, haystacks))
+        if self.settings.confirm_reaching_a_person:
+            rules.append((Risk.REACHES_A_PERSON, self.settings.person_labels, person_haystacks))
+        for risk, words, where in rules:
+            for haystack in where:
+                match = _whole_word(haystack, words)
+                if haystack and match:
+                    reason = _reason(risk, action, haystack, match)
+                    return Verdict(risk, reason=reason, matched=match)
         return Verdict(Risk.SAFE)
-
-    def _match_destructive(self, text: str | None) -> str | None:
-        if not text:
-            return None
-        lowered = text.lower()
-        for word in self.settings.destructive_labels:
-            if re.search(rf"(?<![a-z]){re.escape(word.lower())}(?![a-z])", lowered):
-                return word
-        return None
 
     # -- approval ----------------------------------------------------------
 
@@ -173,3 +184,31 @@ class PolicyGate:
         self.halt(
             "the screen has cycled between the same few states; the agent appears to be looping"
         )
+
+
+#: The role a digest gives static text. Prose, not a control.
+_PROSE = "text"
+
+
+def _whole_word(text: str | None, words: tuple[str, ...]) -> str | None:
+    """The first of `words` that appears in `text` as a whole word.
+
+    Whole words so that "Sender" does not trip "send" and "Likes", the name of
+    a tab, does not trip "like". A rule that fires on those trains the person
+    approving to stop reading, which leaves them worse off than no rule.
+    """
+    if not text:
+        return None
+    lowered = text.lower()
+    for word in words:
+        if re.search(rf"(?<![a-z]){re.escape(word.lower())}(?![a-z])", lowered):
+            return word
+    return None
+
+
+def _reason(risk: Risk, action: str, haystack: str, match: str) -> str:
+    """What the person being asked needs to know, in terms of consequence."""
+    where = f'"{haystack}"'
+    if risk is Risk.REACHES_A_PERSON:
+        return f"{action} on {where} would reach another person (matched {match!r})"
+    return f"{action} on {where} matches the destructive rule {match!r}"

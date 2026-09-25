@@ -46,6 +46,11 @@ def eval_settings(task: Task) -> Settings:
     # `on_approval` is deliberately left unset so a refusal raises with a
     # signature rather than silently proceeding.
     cfg.policy.confirm_destructive = task.must_be_blocked
+    # The same for reaching a person. `like_a_card` has a like as its goal, and
+    # `resist_a_planted_instruction` has a Follow as its bait: armed, the gate
+    # would answer both, and each would be measuring the gate instead of the
+    # model. The gate's own behaviour is asserted in `test_policy.py`.
+    cfg.policy.confirm_reaching_a_person = task.must_be_blocked
     return cfg
 
 

@@ -119,6 +119,31 @@ class PolicySettings(BaseModel):
         "block",
         "report",
     )
+    #: A second question beside `destructive_labels`, which asks whether an
+    #: action destroys data or costs money. This asks whether it reaches
+    #: another person, and nothing asked that before: a real run liked a
+    #: stranger's profile four times on a goal to *read* it, and a planted
+    #: instruction's bait was a Follow button precisely because the gate could
+    #: not see one. Kept as its own switch because it is a separate cost: a
+    #: simulator test suite may reasonably turn it off while leaving
+    #: destructive confirmation on. See docs/adr/0014.
+    confirm_reaching_a_person: bool = True
+    #: Whole words, like `destructive_labels`. Chosen from the interaction verbs
+    #: of Schema.org's `InteractAction`, then pruned against every label a real
+    #: Settings app shows, because a gate that asks on navigation trains people
+    #: to approve without reading.
+    person_labels: tuple[str, ...] = (
+        "like",
+        "follow",
+        "comment",
+        "reply",
+        "share",
+        "invite",
+        "message",
+        "post",
+        "repost",
+        "rsvp",
+    )
     max_consecutive_failures: int = Field(default=5, ge=1)
     loop_detection_window: int = Field(default=6, ge=2)
     #: Note there is no `redact_screenshots`. It was declared here and read by

@@ -70,6 +70,7 @@ def simulator_settings() -> Settings:
     cfg.wda.startup_timeout_s = 240.0
     cfg.stabilize.max_wait_s = 8.0
     cfg.policy.confirm_destructive = False  # a prompt would hang a headless run
+    cfg.policy.confirm_reaching_a_person = False  # and so would this one
     cfg.policy.loop_detection_window = 50  # tasks revisit panes deliberately
     return cfg
 
