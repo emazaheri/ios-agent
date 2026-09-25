@@ -70,6 +70,21 @@ BANNER_NARROW = "ios-agent"
 #: the run to see that something is happening.
 _BANNER_HEADROOM = 8
 
+#: What the agent does reliably and what it cannot do at all, shown once under
+#: the banner so the first goal someone types is one it can succeed at.
+#:
+#: Static on purpose. Every clause is something measured rather than hoped:
+#: reading and changing screens across apps is what the eval tasks cover,
+#: including two apps Apple did not write, and the three things it cannot do are
+#: recorded facts. It has no tool that takes a screenshot and cannot read an
+#: image if handed one, and a Flutter canvas or a web view has no accessibility
+#: tree to read (`docs/realities/unreachable-content.md`). A line generated at
+#: run time could drift from that evidence; a constant can only be edited.
+CAN = "good at: reading and changing what is on screen, across apps"
+CANNOT = "cannot: take or read screenshots, or see into Flutter or web views"
+#: For a pane too narrow for both, where one wrapped line costs less than two.
+CANNOT_COMPACT = "no screenshots, Flutter or web views"
+
 #: Verbs that changed the device get one colour, reads another. A transcript
 #: where everything looks the same is a log, not a view.
 _ACTING = {"tap", "type_text", "set_value", "scroll", "press_button", "open_url"}
@@ -349,6 +364,10 @@ class Transcript(SelectableLog):
         """The mark, once, at the top of the session."""
         self._add(("banner", subtitle))
 
+    def capabilities(self) -> None:
+        """What the agent can and cannot do, once, under the mark."""
+        self._add(("capabilities", None))
+
     def clear(self) -> Transcript:
         """Empty it, entries and all.
 
@@ -372,7 +391,9 @@ class Transcript(SelectableLog):
         """
         rows: list[str] = []
         for entry in self._entries:
-            if entry[0] == "banner":
+            # Startup chrome, left out of anything someone copies: it is the
+            # same on every run and says nothing about this one.
+            if entry[0] in ("banner", "capabilities"):
                 continue
             rows.extend(row.plain.rstrip() for row in self._rows(entry))
         return "\n".join(rows).strip()
@@ -461,6 +482,8 @@ class Transcript(SelectableLog):
         match kind:
             case "banner":
                 return self._banner_rows(str(data))
+            case "capabilities":
+                return self._capability_rows()
             case "goal":
                 return [Text(f"\n> {data}", style="bold")]
             case "said":
@@ -567,6 +590,13 @@ class Transcript(SelectableLog):
         if len(BANNER_NARROW) + len(subtitle) + 2 <= width:
             name.append(f"  {subtitle}", style="dim")
         return [name]
+
+    def _capability_rows(self) -> list[Text]:
+        """Two lines where they fit, one compact line where they would wrap."""
+        width = self.size.width or 80
+        if width >= max(len(CAN), len(CANNOT)) + 4:
+            return [Text(f"  {CAN}", style="dim"), Text(f"  {CANNOT}", style="dim")]
+        return [Text(f"  {CANNOT_COMPACT}", style="dim")]
 
     def _action_row(self, event: ActionFinished) -> Text:
         """Verb, then what it was aimed at, then what it cost.

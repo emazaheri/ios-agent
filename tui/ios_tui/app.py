@@ -233,6 +233,10 @@ class IosAgentApp(App[int]):
             self.transcript.banner(
                 "manual" if self.manual_mode else "an agent that drives an iPhone"
             )
+            # Only where there is an agent. Manual mode drives the verbs
+            # directly, so the agent's limits are not its limits.
+            if not self.manual_mode:
+                self.transcript.capabilities()
         self.begin()
 
     @property
