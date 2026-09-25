@@ -106,6 +106,12 @@ class AgentSettings(BaseSettings):
     #: thread. Recovering from that is a planning problem, not a budget one.
     max_steps: int = Field(default=24, gt=0)
 
+    #: A smaller model on the same provider to start each run on, escalating
+    #: to `model` for the rest of the run at the first sign of trouble. Off by
+    #: default, and under measurement: see docs/adr/0015. A default change
+    #: would move every number the suite has recorded, so it is not one.
+    route_model: str | None = None
+
     #: What the eval suite prices a token at, per million, so a slice reports
     #: its cost in dollars rather than leaving it to a bill. Defaults are Claude
     #: Opus 5's rates, because nothing here can know what another vendor

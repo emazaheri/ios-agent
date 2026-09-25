@@ -128,6 +128,7 @@ async def run_goal(
     settings: AgentSettings | None = None,
     approve: Approver | None = None,
     max_steps: int | None = None,
+    route: ModelFactory | None = None,
 ) -> Outcome:
     """Drive one goal to a stopping point and report what it cost.
 
@@ -139,18 +140,65 @@ async def run_goal(
     run = Run(backend=backend or SessionBackend(session), goal=goal)
     tools = build_tools(run)
     call_model = (model or chat_model(cfg))(tools)
+    large_name = cfg.model
+
+    # The cascade from ADR 0015: start on the small model when one is given,
+    # and move to the configured one for the rest of the run at the first sign
+    # of trouble. `route` is injectable for the same reason `model` is.
+    small_name = cfg.route_model
+    call_small = None
+    if route is not None:
+        call_small = route(tools)
+        small_name = small_name or "route"
+    elif cfg.route_model and model is None:
+        call_small = chat_model(cfg.model_copy(update={"model": cfg.route_model}))(tools)
+    escalated_at: int | None = None
+    #: The counters the trouble check compares against, as of the last turn.
+    seen = {"errors": 0, "refusals": 0, "actions": 0, "progress": 0}
+
+    def trouble() -> bool:
+        """Did anything go wrong since the last turn? Counters only, no device read.
+
+        A failed tool call, a refused repeat, or an action that neither moved
+        the screen nor found its element already as asked.
+        """
+        stats = run.backend.stats
+        progress = stats.changes + stats.satisfied
+        now = {
+            "errors": len(run.errors),
+            "refusals": stats.refusals,
+            "actions": stats.actions,
+            "progress": progress,
+        }
+        bad = (
+            now["errors"] > seen["errors"]
+            or now["refusals"] > seen["refusals"]
+            or (now["actions"] - seen["actions"]) > (now["progress"] - seen["progress"])
+        )
+        seen.update(now)
+        return bad
 
     prompt_tokens = 0
     completion_tokens = 0
     model_served: str | None = None
+    tokens_by_model: dict[str, list[int]] = {}
 
     async def metered(messages: list[AnyMessage]) -> AIMessage:
-        nonlocal prompt_tokens, completion_tokens, model_served
-        reply = await call_model(messages)
+        nonlocal prompt_tokens, completion_tokens, model_served, escalated_at
+        on_small = call_small is not None and escalated_at is None
+        if on_small and trouble():
+            escalated_at = run.turns
+            on_small = False
+        caller = call_small if on_small and call_small is not None else call_model
+        name = (small_name if on_small else large_name) or large_name
+        reply = await caller(messages)
         usage = reply.usage_metadata
         if usage:
             prompt_tokens += usage.get("input_tokens", 0)
             completion_tokens += usage.get("output_tokens", 0)
+            spent = tokens_by_model.setdefault(name, [0, 0])
+            spent[0] += usage.get("input_tokens", 0)
+            spent[1] += usage.get("output_tokens", 0)
         # What the provider says it served, which `AgentSettings.model` cannot
         # say: that is an alias, and the thing behind it moves. Read from the
         # first reply that names one and not overwritten, so a report says what
@@ -219,4 +267,6 @@ async def run_goal(
         completion_tokens=completion_tokens,
         model_served=model_served,
         contradicted=contradicted,
+        tokens_by_model={k: (v[0], v[1]) for k, v in tokens_by_model.items()},
+        escalated_at_turn=escalated_at,
     )

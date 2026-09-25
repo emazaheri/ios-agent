@@ -905,3 +905,93 @@ def test_the_mcp_adapter_reads_it_off_the_payload() -> None:
 
     assert _AsResult({"ok": True, "already_satisfied": True}).already_satisfied is True
     assert _AsResult({"ok": True}).already_satisfied is False
+
+
+# -- routing, ADR 0015 ------------------------------------------------------------
+
+
+def _routed(small: list, large: list) -> tuple[ScriptedModel, ScriptedModel]:
+    return ScriptedModel(small), ScriptedModel(large)
+
+
+async def test_a_routed_run_with_nothing_wrong_stays_on_the_small_model() -> None:
+    session, _, _ = build_session(DeviceModel(), _settings())
+    small, large = _routed(
+        [
+            [("tap", {"target": "Accessibility"})],
+            [("done", {"succeeded": True, "summary": "opened"})],
+        ],
+        [],
+    )
+
+    outcome = await run_goal(session, "Open Accessibility.", model=large, route=small)
+
+    assert small.turns == 2
+    assert large.turns == 0, "escalated with nothing wrong"
+    assert outcome.escalated_at_turn is None
+
+
+async def test_a_no_op_moves_the_rest_of_the_run_to_the_large_model() -> None:
+    """A dead switch: the action changed nothing and nothing was already right."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    small, large = _routed(
+        [[("set_value", {"value": "on", "target": "Airplane Mode"})]],
+        [[("done", {"succeeded": False, "summary": "the switch will not move"})]],
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=large, route=small)
+
+    assert small.turns == 1
+    assert large.turns == 1
+    assert outcome.escalated_at_turn == 1
+
+
+async def test_a_failed_tool_call_escalates_too() -> None:
+    session, _, _ = build_session(DeviceModel(), _settings())
+    small, large = _routed(
+        [[("tap", {"target": "A Row That Is Not There"})]],
+        [[("done", {"succeeded": False, "summary": "no such row"})]],
+    )
+
+    outcome = await run_goal(session, "Open the missing row.", model=large, route=small)
+
+    assert large.turns == 1
+    assert outcome.escalated_at_turn == 1
+
+
+async def test_a_switch_already_as_asked_is_not_trouble() -> None:
+    """Nothing moved, and nothing was wrong: the session said it was already right."""
+    session, _, _ = build_session(DeviceModel(), _settings())
+    small, large = _routed(
+        [
+            [("set_value", {"value": "off", "target": "Airplane Mode"})],
+            [("done", {"succeeded": True, "summary": "Airplane Mode is off"})],
+        ],
+        [],
+    )
+
+    outcome = await run_goal(session, "Turn off Airplane Mode.", model=large, route=small)
+
+    assert large.turns == 0, "an already-satisfied switch was treated as trouble"
+    assert outcome.escalated_at_turn is None
+    assert outcome.verified is True
+
+
+async def test_once_escalated_the_run_never_goes_back() -> None:
+    """A cascade, not a router: the large model finishes what it took over."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    small, large = _routed(
+        [[("set_value", {"value": "on", "target": "Airplane Mode"})]],
+        [
+            [("tap", {"target": "General"})],
+            [("tap", {"target": "About"})],
+            [("done", {"succeeded": False, "summary": "gave up"})],
+        ],
+    )
+
+    await run_goal(session, "Turn on Airplane Mode.", model=large, route=small)
+
+    assert small.turns == 1
+    assert large.turns == 3
