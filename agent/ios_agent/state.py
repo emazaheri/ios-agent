@@ -55,6 +55,20 @@ class Outcome:
     stats: BackendStats = field(default_factory=BackendStats)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: What the provider said it actually ran, or None when it did not say and
+    #: when no model was in the loop at all.
+    #:
+    #: Kept apart from `AgentSettings.model` because that is a request and this
+    #: is an answer. `claude-opus-5` is an alias over something that moves, so a
+    #: number recorded against the alias alone cannot tell a prompt change from
+    #: a provider changing what the alias points at.
+    #:
+    #: How much it helps is the provider's decision, not this field's. Measured
+    #: against `openai:gpt-5.6-sol`, the answer came back as `gpt-5.6-sol`: the
+    #: same string as the request, so for that provider and model the gap stays
+    #: open and this records that it does. It closes only where a provider names
+    #: a dated snapshot, which is untested here.
+    model_served: str | None = None
 
     @property
     def finished_cleanly(self) -> bool:

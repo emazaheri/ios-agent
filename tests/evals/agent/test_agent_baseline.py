@@ -99,6 +99,19 @@ def test_write_the_baseline_report() -> None:
     # would put a number on disk that looks like a measurement and is not.
     unusable = sum(len(r.unusable) for r in _results)
     assert unusable == 0, f"{unusable} runs measured the infrastructure; refusing to record them"
-    path = write_report(_results, REPORT, driver=SLICE, model=AgentSettings().describe())
+    # The first run that got an answer. Providers that do not name what they
+    # served leave it None, and a slice where they all did is a slice recorded
+    # against an alias, which is the gap `model_served` exists to close.
+    served = next(
+        (run.model_served for result in _results for run in result.runs if run.model_served),
+        None,
+    )
+    path = write_report(
+        _results,
+        REPORT,
+        driver=SLICE,
+        model=AgentSettings().describe(),
+        model_served=served,
+    )
     assert path.exists()
     print(f"\nWrote {path}")

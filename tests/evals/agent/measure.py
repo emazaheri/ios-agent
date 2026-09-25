@@ -17,6 +17,7 @@ raw token count, is the number a planning change has to move.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -28,6 +29,7 @@ from statistics import median
 from typing import Any
 
 from ios_agent.batch import LastAction, simulate_turns
+from ios_agent.loop import operator_prompt
 from screens import DeviceModel
 from tasks import Task
 
@@ -45,8 +47,10 @@ _CHARS_PER_TOKEN = 4
 #: nothing here can know what a given vendor charges.
 _USD_PER_INPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_IN", "5.0")) / 1_000_000
 _USD_PER_OUTPUT_TOKEN = float(os.environ.get("IOS_AGENT_USD_PER_MTOK_OUT", "25.0")) / 1_000_000
-#: Bumped when the report shape changes in a way a reader must notice.
-SCHEMA_VERSION = 3
+#: Bumped when the report shape changes in a way a reader must notice. Shared
+#: with `tests/evals/harness.py` and read by `scripts/eval_trend.py`, which
+#: rejects any other value. Version 4 added `prompt_sha` and `model_served`.
+SCHEMA_VERSION = 4
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
@@ -108,6 +112,9 @@ class Meter:
     #: Model calls. Set by the agent driver from the run's own counter; the
     #: oracle makes none, and `turn_floor` is derived from `outcomes` instead.
     turns: int = 0
+    #: What the provider said it served. Set by the agent driver, None for the
+    #: oracle, which has no provider to ask.
+    model_served: str | None = None
     #: What each action did, in order, for `batch.simulate_turns`. Recording
     #: it here is what lets a turn floor be derived from the guard rather than
     #: written down beside the route and left to drift.
@@ -168,6 +175,9 @@ class RunResult:
     refusals: int
     seconds: float
     floor: int
+    #: What the provider said it served on this run. None for the oracle and
+    #: for a provider that does not say.
+    model_served: str | None = None
     #: Model calls this run actually made. Zero for the oracle, which has no
     #: model: it is the agent's number, and the one batching exists to move.
     turns: int = 0
@@ -414,6 +424,7 @@ async def run_task(
         completion_tokens=meter.completion_tokens,
         replans=meter.replans,
         refusals=meter.refusals,
+        model_served=meter.model_served,
         seconds=time.monotonic() - started,
         floor=task.floor,
         failure=failure,
@@ -537,14 +548,45 @@ def _was_blocked(session: IosSession) -> bool:
     return any(entry.code in _POLICY_CODES for entry in session.audit.failures)
 
 
+def prompt_sha() -> str:
+    """The operator prompt these numbers were produced under.
+
+    Eight hex characters, matching how a screen fingerprint is shown in
+    `ios_mcp.perception.digest`. Not `fingerprint_of`, which hashes digest nodes
+    rather than text.
+
+    The prompt is an input to the system, so two slices run under different
+    prompts are two systems and their counts are not comparable. Recording it
+    here is what lets `scripts/eval_trend.py` refuse that comparison instead of
+    printing a number that moved for a reason nobody can name.
+    """
+    return hashlib.sha256(operator_prompt().encode()).hexdigest()[:8]
+
+
 def write_report(
-    results: list[TaskResult], path: Path, *, driver: str, model: str | None = None
+    results: list[TaskResult],
+    path: Path,
+    *,
+    driver: str,
+    model: str | None = None,
+    model_served: str | None = None,
 ) -> Path:
     """Persist the run so one slice's numbers can be diffed against the next.
 
     `model` records which provider and model produced the figures. Comparing a
     slice run on one model against a slice run on another says nothing about
     either, and a report that does not name its model invites exactly that.
+
+    `model_served` is what the provider said it actually ran, against `model`,
+    which is what was asked for. Both are needed because the configured name is
+    usually an alias: `claude-opus-5` names a moving target, so a provider
+    changing what it serves is invisible in `model` alone. Absent when no model
+    was in the loop, None when the provider does not say.
+
+    Whether the two differ is up to the provider. On `openai:gpt-5.6-sol` they
+    do not, so this field records that the provider gave no version rather than
+    supplying one. That is still worth recording: it is the difference between
+    knowing the version is unavailable and assuming there was nothing to ask.
     """
     attempts = [run for result in results for run in result.runs]
     payload: dict[str, Any] = {
@@ -552,6 +594,11 @@ def write_report(
         "generated_at": time.time(),
         "driver": driver,
         "model": model or "n/a (no model in the loop)",
+        # Only where a model ran. A suite with no model in the loop never read
+        # the operator prompt, so recording a hash of it there would attribute
+        # numbers to an input that had no part in them.
+        **({"model_served": model_served} if model else {}),
+        **({"prompt_sha": prompt_sha()} if model else {}),
         "totals": {
             "tasks": len(results),
             "runs": len(attempts),

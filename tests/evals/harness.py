@@ -29,7 +29,14 @@ _CHARS_PER_TOKEN = 4
 #: the history record the two writers feed, so it moves when that record
 #: gains a column even if this suite's own payload did not change. Version
 #: 2 added `turns` and `turn_floor`, which a flow report never has.
-SCHEMA_VERSION = 2
+#:
+#: This constant was left at 2 through the 3 and 4 bumps, which meant
+#: `flatten()` rejected every freshly written flow report and this series could
+#: not be appended at all. Nothing caught it because the suite is hand-run, and
+#: the last recorded flow row is still a version 2 record. The rule above is the
+#: one that was not followed: the version describes the shared history record,
+#: so it moves when either writer's record does.
+SCHEMA_VERSION = 4
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:
