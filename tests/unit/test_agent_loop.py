@@ -19,8 +19,9 @@ import pytest
 from ios_agent.backend import SessionBackend
 from ios_agent.graph import opening_messages
 from ios_agent.loop import run_goal
-from langchain.messages import AIMessage, AnyMessage
+from langchain.messages import AnyMessage
 from screens import DeviceModel, Injection, build_session
+from scripted_model import ScriptedModel
 
 from ios_mcp.config import Settings
 
@@ -34,33 +35,6 @@ def _settings(*, confirm_destructive: bool = False) -> Settings:
     cfg.policy.loop_detection_window = 50
     cfg.policy.confirm_destructive = confirm_destructive
     return cfg
-
-
-class ScriptedModel:
-    """Replays a fixed list of tool calls, one per turn.
-
-    Records every message list it was handed, so a test can assert on what the
-    agent was actually shown rather than on what it was meant to be shown.
-    """
-
-    def __init__(self, script: list[list[tuple[str, dict[str, object]]]]) -> None:
-        self.script = script
-        self.turns = 0
-        self.seen: list[list[AnyMessage]] = []
-
-    def __call__(self, _tools: list[object]):
-        async def call(messages: list[AnyMessage]) -> AIMessage:
-            self.seen.append(list(messages))
-            if self.turns >= len(self.script):
-                return AIMessage(content="out of script")
-            calls = [
-                {"name": name, "args": args, "id": f"call-{self.turns}-{i}", "type": "tool_call"}
-                for i, (name, args) in enumerate(self.script[self.turns])
-            ]
-            self.turns += 1
-            return AIMessage(content="", tool_calls=calls)  # type: ignore[arg-type]
-
-        return call
 
 
 def tool_replies(scripted: ScriptedModel) -> str:
