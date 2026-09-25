@@ -39,6 +39,8 @@ def in_a_directory_with_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         "IOS_MCP_DIGEST__TOKEN_BUDGET=999\n"
         "IOS_AGENT_PROVIDER=from_dotenv\n"
         "IOS_AGENT_MAX_STEPS=3\n"
+        "IOS_AGENT_USD_PER_MTOK_IN=4.0\n"
+        "IOS_AGENT_USD_PER_MTOK_OUT=20.0\n"
     )
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -52,6 +54,22 @@ def test_a_dotenv_is_read_by_both_packages(in_a_directory_with_dotenv: Path) -> 
     """
     assert Settings().log_level == "FROM_DOTENV"
     assert AgentSettings().provider == "from_dotenv"
+
+
+def test_a_price_in_dotenv_reaches_the_eval_harness(in_a_directory_with_dotenv: Path) -> None:
+    """The harness priced every run at Claude Opus rates whatever `.env` said.
+
+    It read `os.environ` at import, which a `.env` never reaches, and this file
+    exempted exactly these two keys from the check that a documented setting
+    exists, so nothing noticed. Every dollar figure recorded against
+    `gpt-5.6-sol` came out a quarter too high.
+    """
+    from measure import token_prices
+
+    per_in, per_out = token_prices()
+
+    assert per_in * 1_000_000 == 4.0
+    assert per_out * 1_000_000 == 20.0
 
 
 def test_nested_settings_come_through_the_double_underscore(
@@ -122,8 +140,6 @@ def test_every_documented_setting_actually_exists() -> None:
         if key.startswith("IOS_MCP_SECRET_"):
             continue  # resolved by reference at call time, not a settings field
         prefix = "IOS_MCP_" if key.startswith("IOS_MCP_") else "IOS_AGENT_"
-        if prefix == "IOS_AGENT_" and key.startswith("IOS_AGENT_USD_PER_MTOK"):
-            continue  # read directly by the eval harness, not a settings field
         target: object = known[prefix]
         for part in key[len(prefix) :].lower().split("__"):
             # `hasattr`, not truthiness: `temperature`, `default_device` and
