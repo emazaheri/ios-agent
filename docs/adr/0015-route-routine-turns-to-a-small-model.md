@@ -1,7 +1,7 @@
 # 15. Route routine turns to a small model
 
-**Proposed, and pre-registered, 2026-09-25.** Everything below the line
-"Results" is filled in after the measurement. Everything above it was merged to
+**Accepted as an option, off by default, 2026-09-25.** Pre-registered first:
+everything below the line "Results" was filled in after the measurement. Everything above it was merged to
 `main` before a single paid run, so the hypothesis, the arms and the rule for
 adopting it could not be shaped by the numbers they are judged by. ADR 0010 and
 ADR 0012 were written after their measurements; this one is not, because the
@@ -93,4 +93,72 @@ The budget is about $3 for both arms at the prices above.
 
 ## Results
 
-*Filled in after the measurement.*
+Run exactly as registered: 19 tasks, 3 runs each, 57 per arm, back to back on
+the same code (`.artifacts/evals/agent-s15-routing.json`).
+
+| | baseline | routed |
+|---|---|---|
+| passed | 55/57 | **57/57** |
+| cost | $2.614 | **$1.278** |
+| actions against the floor | 1.30x | 1.14x |
+| turns | 335 | 297 |
+| planted baits obeyed | 0/12 | 0/12 |
+| runs that escalated | | 28/57 |
+
+**The rule:**
+
+1. routed passes at least baseline minus 2: 57 against 53. **Holds.**
+2. no planted task obeyed more often: 0 and 0. **Holds.**
+3. routed cost at most 50% of baseline: **48.9%. Holds, barely.**
+
+So routing is adopted, as registered: an option, off by default, set with
+`IOS_AGENT_ROUTE_MODEL`.
+
+**The margin on rule 3 is 1.1 points, and it should be read as a tie.** This
+suite has measured cost moving 30% between two arms of identical code, so a
+second run could land on either side of 50%. The rule was fixed in advance so
+that a result this close would be decided by the rule rather than by argument,
+and the rule says adopt. It does not say routing reliably halves cost.
+
+The two extra passes are not an improvement either. Baseline's two misses, one
+run scrolling a long list 17 times and one taking 7 actions on a read with a
+floor of 0, are ordinary model misses on tasks routed happened not to miss.
+
+**The book's claim.** Success held: routed over baseline is 1.04 against a
+claimed 0.90. Cost did not: 0.49 against a claimed 0.15. Two things put the
+floor well above 15%. A small-model turn here costs about a fifth of a
+large-model one, so even a run that never escalates cannot reach 15%. And half
+the runs escalated: the 29 that never did cost $0.11 between them, the 28 that
+did cost $1.17, and `gpt-5.6-sol` accounts for $1.10 of the routed arm's $1.28.
+
+**Why runs escalated.** Almost always at turn 2, right after the first action,
+and on eight tasks every time. A diagnostic rerun of three of them, not part of
+the registered measurement, found two kinds:
+
+- a real small-model mistake: batching a tap into Wi-Fi with a tap on
+  "Accessibility" in the same turn, when the second no longer exists on the
+  screen the first led to;
+- a false trigger: tapping a search field to focus it changes nothing visible,
+  so it reads as a no-op, though nothing went wrong.
+
+**What is not measured.** The small model's own claim about its result. In a
+smoke run before the measurement, `gpt-5.4-mini` turned Bold Text on and then
+reported failure. The suite judges the device, so that counts as a pass, but
+`ios-agent run` would exit 1 on it, since the exit code follows the verdict on
+the claim. How often a routed run under-claims was not registered and is not
+known.
+
+The measurement cost $3.89, over the ~$3 estimated, because the baseline arm
+alone cost $2.61.
+
+## What would reopen it
+
+- **Turning it on by default** needs its own measurement, as registered.
+- **Fewer false triggers.** Not treating a focus tap as a no-op, or tolerating
+  one recoverable error before escalating, would keep more runs small. Both are
+  changes to the mechanism, so each needs a new pre-registered measurement
+  rather than a tweak to this one.
+- **A different pair of models**, or a change in `gpt-5.6-sol`'s promotional
+  price, which ends "at least" November 21, 2026 and would move rule 3.
+- **A measurement of under-claiming**, if routing is to be used where the exit
+  code matters.
