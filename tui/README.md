@@ -17,10 +17,10 @@ switches to whatever you choose, releasing the current device first. `--pick`
 asks the same question before the first device is acquired.
 
 A terminal app turns on mouse reporting, so dragging to select hands the drag
-to the app rather than to the terminal. `/copy`, or `ctrl+y`, puts the
-transcript on the clipboard, or a Textual selection if you have made one. It
-prefers `pbcopy` to the OSC 52 escape, which Textual's own documentation says
-does not work on macOS Terminal.
+to the app rather than to the terminal. The app makes the selection itself, and
+selecting is the copy: letting go puts the text on the clipboard, with no key
+to press. It prefers `pbcopy` to the OSC 52 escape, which Textual's own
+documentation says does not work on macOS Terminal.
 
 Typing `/` opens a menu of everything the front end can be told to do, filtered
 as you type: `/s` narrows to `screen`, `save`, `stop`. Up and down move, tab
