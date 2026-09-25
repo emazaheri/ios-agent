@@ -34,6 +34,10 @@ class Outcome:
     whether the world actually changed. The evals judge the device, never this
     field, because a switch reporting success while never moving is exactly the
     failure being measured.
+
+    `verified` is that claim after the device has been allowed to contradict it.
+    Callers that need an answer rather than a claim read that one; the claim is
+    kept because the gap between the two is measurable only while both exist.
     """
 
     goal: str
@@ -69,6 +73,26 @@ class Outcome:
     #: open and this records that it does. It closes only where a provider names
     #: a dated snapshot, which is untested here.
     model_served: str | None = None
+    #: Set when the agent claimed success and nothing it did moved the device.
+    #: See `verified`, which is the field to read.
+    contradicted: bool = False
+
+    @property
+    def verified(self) -> bool:
+        """The claim, with the device given a chance to disagree.
+
+        Narrow on purpose, and worth knowing how narrow. It is False only when
+        *nothing* the agent did moved the screen. A run that navigates somewhere
+        and then meets a dead switch has one action that changed something, so
+        its false claim still reads as verified.
+
+        The stronger rule, "the last action changed nothing", is not available:
+        `verify.py` documents that a dead switch and a control already in the
+        requested state produce byte-identical results, so that rule would call
+        a correct run on an already-satisfied goal a lie. This one has no false
+        positives and a short reach, which is the trade.
+        """
+        return self.succeeded and not self.contradicted
 
     @property
     def finished_cleanly(self) -> bool:

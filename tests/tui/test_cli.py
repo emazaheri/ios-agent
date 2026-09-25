@@ -7,9 +7,15 @@ without either of them swallowing a real subcommand.
 
 from __future__ import annotations
 
-import pytest
-from ios_tui.cli import _normalise, build_parser, trail_row
+import argparse
 
+import pytest
+from ios_agent.state import Outcome
+from ios_tui.cli import _normalise, build_parser, trail_row
+from screens import DeviceModel, build_session
+from tui_harness import settings
+
+from ios_mcp.config import Settings
 from ios_mcp.policy.audit import AuditEntry
 
 
@@ -113,3 +119,92 @@ def test_a_failure_from_before_codes_were_recorded_still_renders() -> None:
 def test_a_row_falls_back_to_the_argument_when_nothing_was_resolved() -> None:
     row = trail_row(_entry(action="open_url", args={"url": "App-prefs:root"}))
     assert "App-prefs:root" in row
+
+
+# -- the exit code, which is the whole of what a scripted caller sees --------
+
+
+class _StubRunner:
+    """A runner that reports a given outcome without a device or a model.
+
+    `_run_plain` builds its own `GoalRunner` and `AgentSettings`, so the only
+    way to reach the exit code deterministically is to stand in for the runner.
+    The contradicted branch cannot be produced on demand by a real model
+    anyway: it needs a device that accepts an action and does not move, which
+    is an injection the scripted device has and hardware does not.
+    """
+
+    def __init__(self, outcome: Outcome) -> None:
+        self._outcome = outcome
+        self.last_screen = "screen: com.apple.Preferences"
+        self.closed = False
+
+    def __call__(self, *_args: object, **_kwargs: object) -> _StubRunner:
+        return self
+
+    async def start(self) -> object:
+        model = DeviceModel()
+        session, _, _ = build_session(model, settings())
+        return session
+
+    async def run(self, *_args: object, **_kwargs: object) -> Outcome:
+        return self._outcome
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def _exit_code(monkeypatch, outcome: Outcome) -> tuple[int, _StubRunner]:
+    import ios_tui.runner as runner_module
+    from ios_tui.cli import _run_plain
+
+    stub = _StubRunner(outcome)
+    monkeypatch.setattr(runner_module, "GoalRunner", stub)
+    args = argparse.Namespace(
+        goal="turn on airplane mode",
+        approve=False,
+        max_steps=None,
+        verbose=False,
+        device=None,
+        app=None,
+    )
+    return await _run_plain(Settings(), args), stub
+
+
+async def test_a_verified_run_exits_zero(monkeypatch) -> None:
+    outcome = Outcome(goal="g", succeeded=True, summary="done")
+    code, stub = await _exit_code(monkeypatch, outcome)
+
+    assert outcome.verified is True
+    assert code == 0
+    assert stub.closed, "the session was left open"
+
+
+async def test_a_claim_the_device_denies_exits_non_zero(monkeypatch) -> None:
+    """The bug this closed: a scripted caller could not tell a lie from a pass.
+
+    `succeeded` stays true, because it is what the agent said. The exit code
+    follows the verdict instead.
+    """
+    outcome = Outcome(goal="g", succeeded=True, summary="done", contradicted=True)
+    code, _ = await _exit_code(monkeypatch, outcome)
+
+    assert outcome.succeeded is True
+    assert outcome.verified is False
+    assert code == 1
+
+
+async def test_an_honest_failure_still_exits_non_zero(monkeypatch) -> None:
+    code, _ = await _exit_code(monkeypatch, Outcome(goal="g", succeeded=False, summary="no"))
+
+    assert code == 1
+
+
+def test_no_tui_without_a_goal_is_a_usage_error(capsys) -> None:
+    """The one shape that genuinely needs a goal up front."""
+    from ios_tui.cli import _cmd_run
+
+    args = argparse.Namespace(no_tui=True, goal=None)
+
+    assert _cmd_run(Settings(), args) == 2
+    assert "needs a goal" in capsys.readouterr().err

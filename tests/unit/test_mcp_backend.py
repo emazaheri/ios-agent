@@ -330,3 +330,23 @@ async def test_the_protocol_costs_no_extra_tokens(served: Any) -> None:
         f"the same screen cost {mcp_observe} tokens over MCP and "
         f"{direct_observe} directly; the payloads have diverged"
     )
+
+
+def test_the_mcp_stats_mirror_is_complete() -> None:
+    """`_Stats` is maintained by hand, so it drifts silently.
+
+    Its own docstring promises both backends report identically, and a counter
+    added to `BackendStats` and forgotten here is a number that exists over one
+    transport and raises `AttributeError` over the other. That is how `changes`
+    arrived: mypy caught it, which only works while the attribute is written in
+    typed code.
+    """
+    from dataclasses import fields
+
+    from ios_agent.backend import BackendStats
+    from ios_agent.mcp_backend import _Stats
+
+    expected = {f.name for f in fields(BackendStats)}
+    mirrored = {name for name in vars(_Stats()) if not name.startswith("_")}
+
+    assert expected == mirrored, f"the mirror is missing {sorted(expected - mirrored)}"

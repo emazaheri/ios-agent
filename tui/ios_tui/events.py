@@ -113,6 +113,10 @@ class ModelTurn(Event):
 class GoalFinished(Event):
     goal: str = ""
     succeeded: bool = False
+    #: The claim after the device was allowed to contradict it. Carried beside
+    #: `succeeded` rather than instead of it so the app can show a claim as a
+    #: claim while colouring by the verdict.
+    verified: bool = False
     summary: str = ""
     stopped_because: str | None = None
     steps: int = 0

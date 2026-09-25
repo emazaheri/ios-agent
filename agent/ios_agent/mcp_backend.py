@@ -203,6 +203,7 @@ class McpBackend:
         )
 
         verdict = self.verifier.record(key, _AsResult(payload))
+        self.stats.changes = self.verifier.changes
         rendered = self._render(payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 
@@ -275,6 +276,7 @@ class _Stats:
         self.actions = 0
         self.device_tokens = 0
         self.refusals = 0
+        self.changes = 0
 
     @property
     def observation_overhead(self) -> float:

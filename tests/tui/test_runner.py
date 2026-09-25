@@ -183,3 +183,52 @@ def test_tuned_only_ever_raises_a_ceiling() -> None:
     already_higher = settings()
     already_higher.stabilize.max_wait_s = 45.0
     assert tuned(already_higher).stabilize.max_wait_s == 45.0
+
+
+#: Reaches a dead switch and claims success anyway. The injection pins the one
+#: switch, so the whole run moves nothing and the claim has nothing behind it.
+DEAD_SWITCH_CLAIMED = [
+    [("observe", {})],
+    [("set_value", {"value": "on", "target": "Airplane Mode"})],
+    [("done", {"succeeded": True, "summary": "Airplane Mode is on"})],
+]
+
+
+async def test_the_verdict_reaches_the_event_the_app_reads() -> None:
+    """The wiring, which no assertion covered.
+
+    `Outcome.verified` is computed in the agent and the front end colours by it,
+    and between those two is a field on an event that has to be populated by
+    hand. Leave it out and every run renders as unverified while every test
+    still passes, because nothing else reads it.
+    """
+    from screens import Injection
+
+    sink = ListSink()
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, settings())
+    runner = GoalRunner(sink, settings(), model=ScriptedModel(DEAD_SWITCH_CLAIMED))
+    runner.session = session
+
+    outcome = await runner.run("Turn on Airplane Mode.")
+
+    assert model.switches["airplane"] is False
+    assert outcome.succeeded is True, "the claim is kept"
+    assert outcome.verified is False
+
+    finished = sink.of_type(GoalFinished)
+    assert len(finished) == 1
+    assert finished[0].succeeded is True
+    assert finished[0].verified is False, "the verdict never reached the event"
+
+
+async def test_a_run_that_worked_reaches_the_event_as_verified() -> None:
+    """The other half, so the field cannot be hardcoded to one answer."""
+    sink = ListSink()
+    runner, model = _runner(sink, BOLD_TEXT)
+
+    outcome = await runner.run("Turn on Bold Text.")
+
+    assert model.switches["bold_text"] is True
+    assert outcome.verified is True
+    assert sink.of_type(GoalFinished)[0].verified is True

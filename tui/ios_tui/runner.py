@@ -193,6 +193,7 @@ class GoalRunner:
             GoalFinished(
                 goal=goal,
                 succeeded=outcome.succeeded,
+                verified=outcome.verified,
                 summary=outcome.summary,
                 stopped_because=outcome.stopped_because,
                 steps=outcome.steps,

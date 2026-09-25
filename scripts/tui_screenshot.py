@@ -69,7 +69,7 @@ from ios_tui.approval import ApprovalModal  # noqa: E402
 from ios_tui.events import DeviceReady, Failed, Progress  # noqa: E402
 from ios_tui.runner import GoalRunner  # noqa: E402
 from ios_tui.widgets import StatsBar, StatusBar  # noqa: E402
-from screens import DeviceModel, build_session  # noqa: E402
+from screens import DeviceModel, Injection, build_session  # noqa: E402
 from tui_harness import ScriptedModel, settings  # noqa: E402
 
 OUT = _REPO / ".artifacts" / "tui"
@@ -100,6 +100,17 @@ BOLD_TEXT = [
 ]
 
 
+#: Claims a switch it never moved. With `DEAD_SWITCH` the device accepts the
+#: call, reports success and stays put, so the run finishes having changed
+#: nothing and the summary is a claim the device does not back. The shape worth
+#: looking at: a green summary here would be the bug wearing the right colour.
+DEAD_SWITCH_CLAIMED = [
+    [("observe", {})],
+    [("set_value", {"value": "on", "target": "Airplane Mode"})],
+    [("done", {"succeeded": True, "summary": "Airplane Mode is on."})],
+]
+
+
 #: Twelve scrolls, of which the verifier refuses the last nine. The state that
 #: showed the layout breaking: a long history, a narrow pane, and a marker that
 #: has to survive both.
@@ -114,6 +125,7 @@ class _Stub(GoalRunner):
     """A runner over the scripted phone. No pool, no device, no model."""
 
     def __init__(self, sink: Any, model: DeviceModel, script: list[Any] = BOLD_TEXT) -> None:
+        # The model is built by the caller so a capture can inject a failure.
         session, _, _ = build_session(model, settings())
         super().__init__(sink, settings(), model=ScriptedModel(script))
         self.session = session
@@ -139,9 +151,10 @@ async def capture(
     manual: bool = False,
     goal: str | None = None,
     script: list[Any] = BOLD_TEXT,
+    injections: frozenset[Injection] = frozenset(),
     after: Callable[[IosAgentApp, Any], Awaitable[None]] | None = None,
 ) -> None:
-    model = DeviceModel()
+    model = DeviceModel(injections=injections)
     app = IosAgentApp(
         lambda sink: _Stub(sink, model, script), goal=goal, manual=manual, inline=inline
     )
@@ -331,6 +344,15 @@ SHAPES = {
     ),
     "refusals": lambda: capture(
         "refusals", goal="Scroll to the bottom of the contacts list.", script=SCROLLING
+    ),
+    # A success the device does not back. Worth a shape of its own because the
+    # only thing separating it from a real success on screen is a colour and one
+    # line, and neither is visible in a passing test.
+    "unverified": lambda: capture(
+        "unverified",
+        goal="Turn on Airplane Mode.",
+        script=DEAD_SWITCH_CLAIMED,
+        injections=frozenset({Injection.DEAD_SWITCH}),
     ),
 }
 

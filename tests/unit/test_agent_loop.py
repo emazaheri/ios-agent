@@ -689,3 +689,126 @@ def test_the_system_prompt_never_carries_the_app_list() -> None:
     with_apps = opening_messages("SYSTEM", "Goal.", ["Maps"])
     without = opening_messages("SYSTEM", "Goal.")
     assert with_apps[0].content == without[0].content == "SYSTEM"
+
+
+# -- the claim, and the device's chance to disagree --------------------------
+
+
+async def test_a_run_that_moved_something_is_verified() -> None:
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("tap", {"target": "Accessibility"})],
+            [("done", {"succeeded": True, "summary": "opened Accessibility"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Open Accessibility.", model=scripted)
+
+    assert outcome.succeeded is True
+    assert outcome.contradicted is False
+    assert outcome.verified is True
+    assert outcome.stats.changes == 1
+
+
+async def test_a_claim_that_nothing_on_the_device_backs_is_contradicted() -> None:
+    """The failure this exists for, reproduced with the injection that models it.
+
+    `set_value` on a dead switch returns ok and moves nothing, so an agent that
+    trusts its own return value declares victory on a phone it never changed.
+    The claim is kept as the claim; only the verdict disagrees.
+    """
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("set_value", {"value": "on", "target": "Airplane Mode"})],
+            [("done", {"succeeded": True, "summary": "Airplane Mode is on"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    assert model.switches["airplane"] is False, "the injection did not inject"
+    assert outcome.succeeded is True, "the claim is the agent's and is kept"
+    assert outcome.contradicted is True
+    assert outcome.verified is False
+    # The run did finish. Conflating a contradicted claim with an interrupted
+    # loop would make this lie.
+    assert outcome.finished_cleanly is True
+
+
+async def test_a_read_only_run_is_not_contradicted() -> None:
+    """Answering from a screen without touching it is a way to finish.
+
+    Two eval tasks do exactly this at their floor, and one of them passes by
+    refusing to act at all, so a rule phrased as "no actions means not done"
+    would fail them for being correct.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("observe", {})],
+            [("done", {"succeeded": True, "summary": "Bold Text is off"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Is Bold Text on?", model=scripted)
+
+    assert outcome.stats.actions == 0
+    assert outcome.contradicted is False
+    assert outcome.verified is True
+
+
+async def test_an_honest_failure_is_never_contradicted() -> None:
+    """There is no claim to disagree with, and saying so would be an accusation."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("set_value", {"value": "on", "target": "Airplane Mode"})],
+            [("done", {"succeeded": False, "summary": "the switch will not move"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    assert outcome.succeeded is False
+    assert outcome.contradicted is False
+    assert outcome.verified is False
+
+
+async def test_one_action_that_moved_hides_a_later_one_that_did_not() -> None:
+    """Pinning how narrow the rule is, so nobody reads it as stronger.
+
+    Navigate somewhere, then meet a dead switch, then claim success: one action
+    changed the screen, so the claim stands even though it is false.
+
+    The stronger rule, "the last action changed nothing", is not available.
+    `verify.py` documents that a dead switch and a control already in the
+    requested state return byte-identical payloads, so that rule would call a
+    correct run on an already-satisfied goal a lie. This is the trade, and it is
+    asserted rather than described so that changing it is a decision.
+    """
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            # Dead: the injection pins this one switch, so it accepts the call
+            # and moves nothing.
+            [("set_value", {"value": "on", "target": "Airplane Mode"})],
+            # Live: navigation always changes the screen.
+            [("tap", {"target": "Accessibility"})],
+            [("done", {"succeeded": True, "summary": "Airplane Mode is on"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    assert model.switches["airplane"] is False, "the claim is false"
+    assert outcome.stats.actions == 2
+    assert outcome.stats.changes == 1, "one moved, one did not, which is the point"
+    assert outcome.succeeded is True
+    assert outcome.contradicted is False, "the rule is narrower than this run"
