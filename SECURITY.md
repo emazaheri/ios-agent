@@ -8,7 +8,8 @@ tap that dismisses a dialog in a test suite can send a message, make a payment,
 or delete a photo library here. Treat it accordingly.
 
 The controls that exist, and their limits, are documented in
-[SAFETY.md](SAFETY.md). The short version:
+[SAFETY.md](SAFETY.md). What they defend against, and what is accepted rather
+than defended, is in [the threat model](docs/threat-model.md). The short version:
 
 - Destructive actions are classified **before** they run and require approval.
 - Secrets are passed by reference and read from the host keychain, never
