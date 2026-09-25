@@ -18,7 +18,9 @@ FROM python:3.12-slim
 
 # Pinned rather than floating: an image whose behaviour changes under a
 # directory's periodic re-check is worse than one that is explicitly stale.
-RUN pip install --no-cache-dir ios-mcp==0.1.1
+# Moved by scripts/release.py with every other version, and checked by
+# tests/unit/test_version.py. It sat at 0.1.1 for three releases before that.
+RUN pip install --no-cache-dir ios-mcp==0.4.0
 
 # Not root, since nothing here needs to be.
 RUN useradd --create-home --uid 1000 app
