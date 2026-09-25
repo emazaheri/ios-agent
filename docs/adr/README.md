@@ -20,6 +20,7 @@ grouped.
 | [0012](0012-no-per-app-skill-files.md) | No per-app skill files | on a route built to need one, both arms ran at the oracle's floor, 4 actions and 6 turns, three times out of three |
 | [0013](0013-no-defence-against-instructions-planted-in-screen-content.md) | No defence against instructions planted in screen content | a labelled bait named by the text beside it, with the gate disarmed, was taken 0 times in 24; reopened on a disguised payload, a goal that acts, and a late bait, 0 in 18 more |
 | [0014](0014-ask-before-reaching-another-person.md) | Ask before reaching another person | a real run liked a stranger's profile four times unasked; on a real Settings app, one false positive in 178 labels, removed by judging only the pressed control |
+| [0015](0015-route-routine-turns-to-a-small-model.md) | Route routine turns to a small model: **proposed, pre-registered** | not yet measured; the rule for adopting it was merged before the first paid run |
 
 Seven of the fourteen are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
