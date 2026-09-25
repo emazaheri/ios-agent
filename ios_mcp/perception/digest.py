@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Protocol
 
 from ios_mcp.config import DigestSettings
 from ios_mcp.perception.roles import (
@@ -37,6 +37,24 @@ _CHARS_PER_TOKEN = 4
 #: How much of a control must sit inside another before they are judged the
 #: same thing. Not 1.0: real iOS rects overhang their own parents slightly.
 _CONTAINMENT_RATIO = 0.8
+
+
+class Scrubber(Protocol):
+    """What a digest needs from a redactor, spelled so this layer imports none.
+
+    `ios_mcp.policy.redact.Redactor` satisfies it structurally. Perception sits
+    below policy, and a digest has no business knowing where its redactor comes
+    from, only that text leaving it goes through one.
+    """
+
+    def text(self, value: str | None) -> str | None: ...
+
+    def mapping(self, value: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def scrubbed(scrub: Scrubber | None, text: str) -> str:
+    """`text`, passed through `scrub` when there is one."""
+    return (scrub.text(text) or "") if scrub is not None else text
 
 
 @dataclass(slots=True, frozen=True)
@@ -129,6 +147,13 @@ class Digest:
     #: to pixels can measure the ratio instead of guessing it from the widest
     #: element, which a region-filtered digest makes wrong. See `vision.py`.
     screen: Rect | None = None
+    #: Applied to what this digest *says*, never to what it holds. The nodes
+    #: stay raw because refs, fingerprints and target resolution all run on
+    #: them, and resolution comparing a redacted label against a raw tree would
+    #: read every redacted element as a different one. Set by `IosSession` on
+    #: every digest it hands out, so any consumer that renders or serialises
+    #: one gets redacted text without having to remember to ask.
+    scrub: Scrubber | None = field(default=None, compare=False, repr=False)
 
     def by_ref(self, ref: str) -> DigestNode | None:
         return next((n for n in self.nodes if n.ref == ref), None)
@@ -150,7 +175,7 @@ class Digest:
                 "(narrow by query or region, or search the tree for what you expect)"
             )
         lines.extend(f"note: {note}" for note in self.notes)
-        return "\n".join(lines)
+        return scrubbed(self.scrub, "\n".join(lines))
 
     def to_dict(self, *, include_elements: bool = False) -> dict[str, Any]:
         """Serialise for the wire.
@@ -175,7 +200,7 @@ class Digest:
         }
         if include_elements:
             payload["elements"] = [n.to_dict() for n in self.nodes]
-        return payload
+        return self.scrub.mapping(payload) if self.scrub is not None else payload
 
     def estimated_tokens(self) -> int:
         return len(self.render()) // _CHARS_PER_TOKEN

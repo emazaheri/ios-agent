@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ios_mcp.policy.faults import attribute
+from ios_mcp.policy.redact import Redactor
 
 
 @dataclass(slots=True)
@@ -41,6 +42,12 @@ class AuditEntry:
 class AuditTrail:
     entries: list[AuditEntry] = field(default_factory=list)
     started_at: float = field(default_factory=time.time)
+    #: Applied as each entry is recorded, which is what the module docstring
+    #: always claimed and what did not happen: targets were stored as the raw
+    #: label, so a card number on a button reached the trail, the exported trace
+    #: and the terminal `ios-agent run` prints the trail to. None leaves an entry
+    #: exactly as given, for a trail built outside a session.
+    redactor: Redactor | None = field(default=None, repr=False)
 
     def record(
         self,
@@ -58,6 +65,12 @@ class AuditTrail:
         details: dict[str, Any] | None = None,
         recovered: bool | None = None,
     ) -> AuditEntry:
+        scrub = self.redactor
+        if scrub is not None:
+            args = scrub.payload(args)
+            target = scrub.text(target)
+            error = scrub.text(error)
+            details = scrub.payload(details) if details is not None else None
         entry = AuditEntry(
             seq=len(self.entries) + 1,
             at=time.time(),

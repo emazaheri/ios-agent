@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ios_mcp.perception.digest import Digest, DigestNode
+from ios_mcp.perception.digest import Digest, DigestNode, Scrubber, scrubbed
 from ios_mcp.perception.refs import Target
 from ios_mcp.wda.models import AlertInfo
 
@@ -23,6 +23,8 @@ class DigestDelta:
     added: list[DigestNode] = field(default_factory=list)
     removed: list[DigestNode] = field(default_factory=list)
     changed: list[tuple[DigestNode, DigestNode]] = field(default_factory=list)
+    #: See `Digest.scrub`: applied to the rendered change, never to the nodes.
+    scrub: Scrubber | None = field(default=None, compare=False, repr=False)
 
     @property
     def empty(self) -> bool:
@@ -41,7 +43,7 @@ class DigestDelta:
                 f"~ {after.render()}   (was "
                 f"{before.value if before.value is not None else 'unset'})"
             )
-        return "\n".join(lines)
+        return scrubbed(self.scrub, "\n".join(lines))
 
     def to_dict(self) -> dict[str, Any]:
         """The rendered form only, for the same reason as ``Digest.to_dict``."""
@@ -68,6 +70,9 @@ class ActionResult:
     recovered: bool = False
     from_cache: bool = False
     note: str | None = None
+    #: See `Digest.scrub`. The target and the alert carry screen text of their
+    #: own, so the whole payload is scrubbed rather than only the screen in it.
+    scrub: Scrubber | None = field(default=None, compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -96,7 +101,7 @@ class ActionResult:
             out["change"] = self.delta.to_dict()
         if self.digest is not None:
             out["screen"] = self.digest.to_dict()
-        return out
+        return self.scrub.mapping(out) if self.scrub is not None else out
 
 
 def diff_digests(before: Digest, after: Digest) -> DigestDelta:
