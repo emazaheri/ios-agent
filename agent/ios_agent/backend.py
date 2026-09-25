@@ -62,6 +62,9 @@ class BackendStats:
     #: verdict built anywhere else would mean one thing over the direct
     #: transport and nothing over MCP.
     changes: int = 0
+    #: Actions that left an element alone because it was already as asked,
+    #: mirrored from the verifier. With `changes`, what the verdict reads.
+    satisfied: int = 0
 
     @property
     def observation_overhead(self) -> float:
@@ -246,6 +249,7 @@ class SessionBackend:
 
         verdict = self.verifier.record(key, result)
         self.stats.changes = self.verifier.changes
+        self.stats.satisfied = self.verifier.satisfied
         rendered = self._render(result, payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 

@@ -89,8 +89,21 @@ class Outcome:
         The stronger rule, "the last action changed nothing", is not available:
         `verify.py` documents that a dead switch and a control already in the
         requested state produce byte-identical results, so that rule would call
-        a correct run on an already-satisfied goal a lie. This one has no false
-        positives and a short reach, which is the trade.
+        a correct run on an already-satisfied goal a lie.
+
+        This one used to make the same mistake whenever *every* action was like
+        that, and this docstring said it had no false positives. It did: turn
+        on a switch that was already on, see nothing move, report success, and
+        the verdict called it unbacked. The session knows the difference for a
+        switch, since it reads the value and declines to tap, and now says so,
+        so that case is counted as backed.
+
+        One class remains and cannot be closed from here: a tap or a scroll with
+        nothing left to do because the goal was already met, such as scrolling
+        to the end of a list that was already at its end. No element carries a
+        value to compare, so the verdict still reads it as unbacked. It is a
+        false positive, it is known, and it is why a contradicted run is shown
+        as "not backed by the device" rather than as false.
         """
         return self.succeeded and not self.contradicted
 

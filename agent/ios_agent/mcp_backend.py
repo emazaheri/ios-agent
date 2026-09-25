@@ -204,6 +204,7 @@ class McpBackend:
 
         verdict = self.verifier.record(key, _AsResult(payload))
         self.stats.changes = self.verifier.changes
+        self.stats.satisfied = self.verifier.satisfied
         rendered = self._render(payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 
@@ -277,6 +278,7 @@ class _Stats:
         self.device_tokens = 0
         self.refusals = 0
         self.changes = 0
+        self.satisfied = 0
 
     @property
     def observation_overhead(self) -> float:
@@ -297,6 +299,7 @@ class _AsResult:
         self.digest = screen if isinstance(screen, dict) and screen else None
         change = payload.get("change")
         self.delta = _AsDelta(change) if isinstance(change, dict) else None
+        self.already_satisfied = bool(payload.get("already_satisfied"))
 
 
 class _AsDelta:

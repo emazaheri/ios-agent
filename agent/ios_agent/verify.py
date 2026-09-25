@@ -85,6 +85,9 @@ class Outcome(Protocol):
     @property
     def delta(self) -> object | None: ...
 
+    @property
+    def already_satisfied(self) -> bool: ...
+
 
 #: Consecutive no-ops on one action before it is refused outright. One can be a
 #: slow transition the settle loop called early. Three, after the fingerprint
@@ -154,6 +157,16 @@ class Verifier:
     #: below: a success there deletes the entry, so nothing in that dict can
     #: answer "did anything ever work".
     changes: int = 0
+    #: Actions, this run, that did nothing because the element was already as
+    #: asked. Only the session can tell these apart from a device that refused,
+    #: and it says so on the result. Counted apart from `changes` because the
+    #: device did not move, and apart from the no-ops below because nothing was
+    #: wrong: a claim of success after one of these is backed by the device.
+    #:
+    #: Only the count is new. What the agent is told about the attempt is left
+    #: exactly as it was, because that message is part of a measured result and
+    #: changing it is a separate measurement.
+    satisfied: int = 0
     _no_ops: dict[Attempt, int] = field(default_factory=dict)
 
     def no_ops(self, key: Attempt) -> int:
@@ -180,6 +193,8 @@ class Verifier:
 
     def record(self, key: Attempt, result: Outcome) -> Verdict:
         """Judge a completed action from what it returned."""
+        if result.already_satisfied:
+            self.satisfied += 1
         if self._changed(result):
             self.changes += 1
             self._no_ops.pop(key, None)

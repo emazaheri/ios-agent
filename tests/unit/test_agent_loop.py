@@ -812,3 +812,96 @@ async def test_one_action_that_moved_hides_a_later_one_that_did_not() -> None:
     assert outcome.stats.changes == 1, "one moved, one did not, which is the point"
     assert outcome.succeeded is True
     assert outcome.contradicted is False, "the rule is narrower than this run"
+
+
+# -- a switch that was already right ------------------------------------------
+
+
+async def test_a_switch_already_as_asked_backs_the_claim() -> None:
+    """The false positive #6 shipped, and its fix.
+
+    Asked to turn off a switch that is already off, the session reads the value
+    and declines to tap, because tapping would undo it. Nothing moves and the
+    agent correctly reports success. The verdict used to call that unbacked; a
+    scripted caller got exit code 1 for a run that was right.
+    """
+    model = DeviceModel()
+    assert model.switches["airplane"] is False
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("set_value", {"value": "off", "target": "Airplane Mode"})],
+            [("done", {"succeeded": True, "summary": "Airplane Mode is off"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn off Airplane Mode.", model=scripted)
+
+    assert outcome.stats.actions == 1
+    assert outcome.stats.changes == 0
+    assert outcome.stats.satisfied == 1
+    assert outcome.contradicted is False
+    assert outcome.verified is True
+
+
+async def test_a_dead_switch_is_still_contradicted() -> None:
+    """The other half: the session tapped, so it was not already right."""
+    model = DeviceModel(injections=frozenset({Injection.DEAD_SWITCH}))
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("set_value", {"value": "on", "target": "Airplane Mode"})],
+            [("done", {"succeeded": True, "summary": "Airplane Mode is on"})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Turn on Airplane Mode.", model=scripted)
+
+    assert outcome.stats.satisfied == 0
+    assert outcome.contradicted is True
+
+
+async def test_a_scroll_with_nothing_left_to_do_is_still_read_as_unbacked() -> None:
+    """The false positive that remains, pinned so changing it is a decision.
+
+    Settings' root is too short to scroll. A claim that the end was reached is
+    true, and no element carries a value that would let anything here tell a
+    scroll with nothing left to do from one the device ignored.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    scripted = ScriptedModel(
+        [
+            [("scroll", {"direction": "down"})],
+            [("done", {"succeeded": True, "summary": "Reached the end of the list."})],
+        ]
+    )
+
+    outcome = await run_goal(session, "Scroll to the bottom.", model=scripted)
+
+    assert outcome.stats.changes == 0
+    assert outcome.stats.satisfied == 0
+    assert outcome.contradicted is True, "a known false positive stopped being one"
+
+
+async def test_the_session_says_so_and_a_replay_keeps_saying_so() -> None:
+    """Marked before the result is cached, so an idempotent replay agrees."""
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    await session.observe()
+
+    first = await session.set_value("off", target="Airplane Mode", idem_key="k1")
+    replay = await session.set_value("off", target="Airplane Mode", idem_key="k1")
+
+    assert first.already_satisfied is True
+    assert first.to_dict()["already_satisfied"] is True
+    assert replay.from_cache is True
+    assert replay.already_satisfied is True
+
+
+def test_the_mcp_adapter_reads_it_off_the_payload() -> None:
+    """The MCP backend judges from JSON, and must judge the same way."""
+    from ios_agent.mcp_backend import _AsResult
+
+    assert _AsResult({"ok": True, "already_satisfied": True}).already_satisfied is True
+    assert _AsResult({"ok": True}).already_satisfied is False

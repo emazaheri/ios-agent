@@ -352,21 +352,27 @@ class IosSession:
         failure shape this whole project is written against.
         """
 
-        async def do(resolved: Target) -> None:
+        async def do(resolved: Target) -> bool | None:
             if resolved.role == "switch":
                 current = self._last_digest.by_ref(resolved.ref) if self._last_digest else None
                 wanted = value.strip().lower() in ("1", "on", "true", "yes")
                 if current is not None and (current.value == "1") == wanted:
-                    return  # already in the requested state; tapping would undo it
+                    # Already in the requested state; tapping would undo it.
+                    # Said so on the result, because this is the one moment the
+                    # difference is known: a switch left alone because it was
+                    # already right and a switch tapped that refused to move
+                    # return byte-identical payloads, and without this the
+                    # correct one reads as a failure.
+                    return True
                 x, y = resolved.point
                 await self.wda.tap(x, y)
-                return
+                return None
             if resolved.role == "slider":
                 await self._set_slider(resolved, value)
-                return
+                return None
             if resolved.role == "picker":
                 await self._set_picker(resolved, value)
-                return
+                return None
             if resolved.role in ("stepper", "segmented"):
                 # Both are containers the digest normally dissolves into the
                 # parts iOS already reports: a stepper into "Increment" and
@@ -726,7 +732,9 @@ class IosSession:
     async def _act(
         self,
         name: str,
-        do: Callable[[Any], Awaitable[None]],
+        #: Returns True when it deliberately did nothing because the element was
+        #: already as asked; anything else, including None, means it acted.
+        do: Callable[[Any], Awaitable[bool | None]],
         *,
         ref: str | None,
         target: str | None,
@@ -781,7 +789,7 @@ class IosSession:
 
         recovered_before = self.wda.recovered_count
         try:
-            await do(resolved)
+            already = await do(resolved)
         except IosAutomationError as exc:
             self._record_failure(name, args, exc)
             raise
@@ -797,6 +805,9 @@ class IosSession:
             note=note,
             recovered=self.wda.recovered_count > recovered_before,
         )
+        if already is True:
+            # Marked before caching, so a replay of this call says the same.
+            result = replace(result, already_satisfied=True)
         self.idempotency.put(idem_key, result)
         return result
 

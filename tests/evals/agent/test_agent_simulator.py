@@ -259,9 +259,16 @@ async def test_the_change_counter_agrees_with_a_real_device(session: IosSession)
     # count as it lands and assert only on the repeat below.
     await backend.set_value("off", "Bold Text", idem_key="sim-changes-3")
     settled = backend.stats.changes
+    satisfied = backend.stats.satisfied
 
     await backend.set_value("off", "Bold Text", idem_key="sim-changes-4")
 
+    # The switch is off now whatever it started as, so the session must have
+    # read its real value and declined to tap. If it did not recognise that on
+    # a live screen, a correct "already off" run would read as unbacked.
+    assert backend.stats.satisfied == satisfied + 1, (
+        "a real switch already as asked was not recognised as such"
+    )
     assert backend.stats.changes == settled, (
         "a genuine no-op counted as a change, so a false success claim would "
         "read as verified on a real device"
