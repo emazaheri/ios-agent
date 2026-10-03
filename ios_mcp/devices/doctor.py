@@ -485,6 +485,13 @@ async def _check_tunnel(cfg: Settings) -> Check:
             data={"tunnels": tunnels},
         )
 
+    if cfg.goios.auto_start_tunnel and cfg.goios.tunnel_mode == "userspace":
+        return Check(
+            "tunnel",
+            "ok",
+            "none running; a userspace tunnel is started, without sudo, when a cabled "
+            "device is used",
+        )
     return Check(
         "tunnel",
         "warn",
@@ -492,7 +499,8 @@ async def _check_tunnel(cfg: Settings) -> Check:
         remedy=(
             "Needed only to drive a physical device over USB. Simulators do not "
             "use it, and a device on Wi-Fi is driven through xcodebuild instead. "
-            "For USB, run `sudo ios tunnel start` and leave it running; see "
+            "For USB, run `ios tunnel start --userspace`, which needs no sudo, or set "
+            "goios.auto_start_tunnel = true to have it started on demand; see "
             "scripts/start_tunnel.sh for a launchd setup."
         ),
     )

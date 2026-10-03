@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import plistlib
 import re
 import shutil
 import tempfile
@@ -19,7 +20,7 @@ from typing import Any, Literal
 
 import httpx
 
-from ios_mcp.config import Settings
+from ios_mcp.config import Settings, WdaSettings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
 from ios_mcp.devices.shell import probe, run, which
@@ -39,6 +40,7 @@ class RealDeviceAdapter:
         self._runner_proc: asyncio.subprocess.Process | None = None
         self._forward_proc: asyncio.subprocess.Process | None = None
         self._log_path: Path | None = None
+        self._tunnel_proc: asyncio.subprocess.Process | None = None
 
     @property
     def udid(self) -> str:
@@ -89,27 +91,34 @@ class RealDeviceAdapter:
             return
 
         if cfg.auto_start_tunnel:
-            logger.info("Starting go-ios tunnel daemon")
-            await asyncio.create_subprocess_exec(
-                "sudo",
-                self._ios,
-                "tunnel",
-                "start",
+            # The userspace tunnel needs no root, which is what lets this be on
+            # by default. It is ours, so teardown stops it; one left by a crash
+            # is harmless, since `tunnel_for` finds and reuses it next time.
+            argv = [self._ios, "tunnel", "start"]
+            if cfg.tunnel_mode == "userspace":
+                argv.append("--userspace")
+            else:
+                argv.insert(0, "sudo")
+            logger.info("Starting go-ios %s tunnel", cfg.tunnel_mode)
+            self._tunnel_proc = await asyncio.create_subprocess_exec(
+                *argv,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            for _ in range(20):
-                await asyncio.sleep(1.0)
+            for _ in range(40):
+                await asyncio.sleep(0.5)
                 if await tunnel_for(cfg, self.udid) is not None:
                     return
+                if self._tunnel_proc.returncode is not None:
+                    break
 
         raise TunnelDown(
             f"iOS {self.info.os_version} needs a RemoteXPC tunnel, "
             f"but none is running for {self.info.name}",
             hint=(
-                "Run `sudo ios tunnel start` once and leave it running "
-                "(see scripts/start_tunnel.sh), or set goios.auto_start_tunnel = true "
-                "if this process can obtain sudo without a prompt."
+                "Run `ios tunnel start --userspace` and leave it running; it needs no "
+                "sudo. Or set goios.auto_start_tunnel = true to have it started here. "
+                "If one is running, unlock the phone and check the cable."
             ),
         )
 
@@ -263,36 +272,49 @@ class RealDeviceAdapter:
         spelling no longer exists. The runner bundle id is configurable because
         a free Apple ID cannot sign com.facebook.WebDriverAgentRunner, so
         anyone without a paid membership will have built their own.
+
+        No fixed wait. This used to sleep three seconds to see whether go-ios
+        exited, which was most of a 4.5s launch; `_wait_for_runner` now polls
+        for readiness and notices an exit as it happens. Output goes to a file,
+        not a pipe: go-ios logs to stderr for as long as the runner lives, and a
+        pipe nobody reads fills and stalls it.
         """
-        bundle_id = self.settings.wda.bundle_id
+        bundle_id = self._runner_bundle_id()
         logger.info("Starting WebDriverAgent (%s) on %s over USB", bundle_id, self.info.name)
-        self._runner_proc = await asyncio.create_subprocess_exec(
-            self._ios,
-            "runwda",
-            f"--bundleid={bundle_id}",
-            f"--testrunnerbundleid={bundle_id}",
-            "--xctestconfig=WebDriverAgentRunner.xctest",
-            f"--udid={self.udid}",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        # testmanagerd needs a few seconds to hand control to the runner.
-        await asyncio.sleep(3.0)
-        if self._runner_proc.returncode not in (None, 0):
-            stderr = b""
-            if self._runner_proc.stderr is not None:
-                stderr = await self._runner_proc.stderr.read()
-            raise DeviceNotReady(
-                "go-ios could not start WebDriverAgent",
-                hint=(
-                    f"Check that {bundle_id} is installed and trusted on the device. "
-                    "Build it with scripts/prepare_wda.sh device, install it with "
-                    "`ios install --path <app>`, then trust the developer under "
-                    "Settings > General > VPN & Device Management. iOS refuses to "
-                    "launch a free-account app until that is done."
-                ),
-                details={"stderr": stderr.decode(errors="replace")[:300]},
+        self._log_path = Path(tempfile.mkstemp(prefix="wda-", suffix=".log")[1])
+        with self._log_path.open("w") as log:
+            self._runner_proc = await asyncio.create_subprocess_exec(
+                self._ios,
+                "runwda",
+                f"--bundleid={bundle_id}",
+                f"--testrunnerbundleid={bundle_id}",
+                "--xctestconfig=WebDriverAgentRunner.xctest",
+                f"--udid={self.udid}",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=log,
             )
+
+    def _runner_bundle_id(self) -> str:
+        """The installed runner's bundle id, read from the build when not set.
+
+        The Wi-Fi route never needed it, since the .xctestrun names the runner,
+        so a setup used over Wi-Fi could leave it at the default `com.facebook.*`
+        id, which no free Apple ID can sign, and fail 10 launches out of 10 the
+        first time the phone was cabled. Reading it from the prebuilt runner
+        keeps that setup working.
+        """
+        configured = self.settings.wda.bundle_id
+        if configured != WdaSettings().bundle_id:
+            return configured
+        app = self.settings.wda.runner_app_path or _discover_runner_app()
+        if app is None:
+            return configured
+        try:
+            with (app / "Info.plist").open("rb") as handle:
+                found = plistlib.load(handle).get("CFBundleIdentifier")
+        except (OSError, plistlib.InvalidFileException):
+            return configured
+        return found if isinstance(found, str) and found else configured
 
     async def _start_forward(self, port: int) -> None:
         """Forward a host port to WDA's port 8100 on the device."""
@@ -312,7 +334,16 @@ class RealDeviceAdapter:
         while asyncio.get_running_loop().time() < deadline:
             if await self._runner_alive(endpoint):
                 return
-            await asyncio.sleep(0.5)
+            # The USB route only: over the network the runner is xcodebuild,
+            # whose early exit `_await_announced_address` already reports.
+            usb = endpoint.meta.get("transport") != "network"
+            if usb and self._runner_proc is not None and self._runner_proc.returncode is not None:
+                raise DeviceNotReady(
+                    "go-ios could not start WebDriverAgent",
+                    hint=_runwda_hint(self._runner_bundle_id()),
+                    details={"output": _tail(self._log_path)},
+                )
+            await asyncio.sleep(0.25)
         raise DeviceNotReady(
             f"WebDriverAgent did not become ready within "
             f"{self.settings.wda.startup_timeout_s:.0f}s on {endpoint.base_url}",
@@ -337,7 +368,7 @@ class RealDeviceAdapter:
             self._endpoint = None
             return
 
-        for proc in (self._forward_proc, self._runner_proc):
+        for proc in (self._forward_proc, self._runner_proc, self._tunnel_proc):
             if proc and proc.returncode is None:
                 proc.terminate()
                 try:
@@ -346,6 +377,7 @@ class RealDeviceAdapter:
                     proc.kill()
         self._forward_proc = None
         self._runner_proc = None
+        self._tunnel_proc = None
 
         if self._log_path is not None:
             self._log_path.unlink(missing_ok=True)
@@ -437,6 +469,29 @@ class RealDeviceAdapter:
 
 #: WebDriverAgent prints the address it bound, wrapped in these markers.
 _SERVER_URL = re.compile(r"ServerURLHere->(http://[^<\s]+)<-ServerURLHere")
+
+
+def _discover_runner_app() -> Path | None:
+    """The signed runner `scripts/prepare_wda.sh device` leaves in vendor/wda."""
+    candidate = Path("vendor/wda/WebDriverAgentRunner-Runner.app")
+    return candidate if candidate.is_dir() else None
+
+
+def _runwda_hint(bundle_id: str) -> str:
+    return (
+        f"Check that {bundle_id} is installed and trusted on the device. "
+        "Build it with scripts/prepare_wda.sh device, install it with "
+        "`ios install --path <app>`, then trust the developer under "
+        "Settings > General > VPN & Device Management. iOS refuses to "
+        "launch a free-account app until that is done, and asks again when a "
+        "profile is reissued after it expired."
+    )
+
+
+def _tail(path: Path | None, limit: int = 300) -> str:
+    if path is None or not path.exists():
+        return ""
+    return path.read_text(errors="replace")[-limit:]
 
 
 def _discover_device_xctestrun() -> Path | None:

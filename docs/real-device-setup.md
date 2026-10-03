@@ -20,18 +20,24 @@ ios version
 2. Enable **Settings > Privacy & Security > Developer Mode** and reboot.
 3. Confirm it is visible: `ios list`.
 
-## 3. Start the tunnel (iOS 17 and later)
+## 3. The tunnel (iOS 17 and later)
 
 iOS 17 moved device communication from TCP to QUIC + RemoteXPC, so a tunnel
-must exist before anything can reach the device. It needs root.
+must exist before anything can reach a cabled device. Nothing to do: when a
+cabled device has none, the server starts go-ios's userspace tunnel, which
+needs no sudo, and stops it when the session ends.
+
+To run one yourself instead, for other go-ios commands or for several
+sessions to share:
 
 ```bash
-sudo ios tunnel start        # or: ./scripts/start_tunnel.sh
+ios tunnel start --userspace        # no sudo
 ```
 
-Leave it running. The server talks to its control API on `127.0.0.1:28100`
-rather than starting one per session. `scripts/start_tunnel.sh` contains a
-`launchd` plist for running it at boot.
+The kernel tunnel, `sudo ios tunnel start` (or `./scripts/start_tunnel.sh`,
+which carries a `launchd` plist for running it at boot), still works; set
+`IOS_MCP_GOIOS__TUNNEL_MODE=kernel` to have the server start that one. A
+phone on Wi-Fi needs no tunnel at all, since it is driven through xcodebuild.
 
 ## 4. Build and sign WebDriverAgent
 
@@ -172,10 +178,10 @@ than discover it by failing.
 
 | Symptom | Cause |
 |---|---|
-| `tunnel_down` | The daemon is not running. `sudo ios tunnel start`. |
+| `tunnel_down` | No tunnel, and none could be started. Unlock the phone, check the cable, or run `ios tunnel start --userspace`. |
 | `device_locked` | The phone slept. The session wakes it automatically, but cannot type a passcode. Set Auto-Lock to Never for long runs. |
 | `signing_invalid`, or WDA stops working after a week | Free profile expired. Re-run `prepare_wda.sh device` and reinstall. |
-| `device_not_ready` | Phone untrusted, Developer Mode off, or the runner not trusted under VPN & Device Management. |
+| `device_not_ready` | Phone untrusted, Developer Mode off, or the runner not trusted under VPN & Device Management. A profile reissued after it expired asks for Trust again. |
 | Launch fails with `deviceprocesscontrolservice` code 2 | The developer certificate is not trusted on the phone. |
 | `ApplicationVerificationFailed` on install | The bundle was modified after signing. |
 | The first run after a crash times out waiting for WebDriverAgent | A runner from the previous run is still holding the device. `uv run ios-mcp reset` lists it and `-y` stops it. |

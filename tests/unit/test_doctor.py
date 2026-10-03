@@ -366,3 +366,33 @@ async def test_an_unready_device_with_no_blockers_still_says_what_to_do(monkeypa
     check = await _check_attached_devices(Settings())
     assert check.status == "warn"
     assert check.remedy
+
+
+async def _tunnel_check(monkeypatch, **goios):
+    import ios_mcp.devices.doctor as module
+    from ios_mcp.config import Settings
+
+    async def no_tunnels(_cfg):
+        return []
+
+    monkeypatch.setattr(module, "which", lambda _name: "/usr/local/bin/ios")
+    monkeypatch.setattr(module, "list_tunnels", no_tunnels)
+    cfg = Settings()
+    for key, value in goios.items():
+        setattr(cfg.goios, key, value)
+    return await module._check_tunnel(cfg)
+
+
+async def test_no_tunnel_is_fine_when_one_starts_on_demand_without_sudo(monkeypatch) -> None:
+    check = await _tunnel_check(monkeypatch, auto_start_tunnel=True, tunnel_mode="userspace")
+    assert check.status == "ok"
+    assert "without sudo" in check.detail
+
+
+async def test_no_tunnel_is_a_warning_with_a_no_sudo_remedy_when_nothing_starts_one(
+    monkeypatch,
+) -> None:
+    check = await _tunnel_check(monkeypatch, auto_start_tunnel=False)
+    assert check.status == "warn"
+    assert "--userspace" in (check.remedy or "")
+    assert "sudo ios tunnel start" not in (check.remedy or "")

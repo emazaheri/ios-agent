@@ -14,6 +14,7 @@ from ios_mcp.config import Settings, get_settings
 from ios_mcp.devices import devicectl
 from ios_mcp.devices.base import DeviceInfo
 from ios_mcp.devices.shell import probe, run, which
+from ios_mcp.devices.tunnel import tunnel_for
 from ios_mcp.errors import DeviceNotReady
 
 _RUNTIME_RE = re.compile(r"iOS[-\s](\d+)[-.](\d+)(?:[-.](\d+))?", re.IGNORECASE)
@@ -137,8 +138,17 @@ async def _from_goios(cfg: Settings) -> list[DeviceInfo]:
         else:
             blockers.append("device info unavailable; is it unlocked and trusted?")
 
-        if _needs_tunnel(os_version):
-            blockers.append("iOS 17+ requires a running `sudo ios tunnel start` daemon")
+        # Blocked only when nothing will provide a tunnel. This used to block
+        # every cabled iOS 17+ phone unconditionally, tunnel or no tunnel.
+        if (
+            _needs_tunnel(os_version)
+            and not cfg.goios.auto_start_tunnel
+            and await tunnel_for(cfg.goios, udid) is None
+        ):
+            blockers.append(
+                "iOS 17+ needs a go-ios tunnel: run `ios tunnel start --userspace`, "
+                "or set goios.auto_start_tunnel"
+            )
 
         out.append(
             DeviceInfo(

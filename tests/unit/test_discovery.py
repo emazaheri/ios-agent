@@ -36,3 +36,47 @@ def test_runtime_to_version(runtime: str, expected: str | None) -> None:
 )
 def test_needs_tunnel(version: str, expected: bool) -> None:
     assert _needs_tunnel(version) is expected
+
+
+# -- a cabled phone and its tunnel ------------------------------------------
+
+
+async def _cabled_phone(monkeypatch, *, auto_start: bool, tunnel: bool):
+    from types import SimpleNamespace
+
+    import ios_mcp.devices.discovery as module
+    from ios_mcp.config import Settings
+
+    async def probe(_binary, *args, **_kw):
+        if args[0] == "list":
+            return SimpleNamespace(ok=True, json=lambda: {"deviceList": ["PHONE-1"]})
+        info = {"DeviceName": "Phone", "ProductVersion": "26.6", "ProductType": "iPhone18,2"}
+        return SimpleNamespace(ok=True, json=lambda: info)
+
+    async def tunnel_for(_cfg, udid):
+        return {"udid": udid} if tunnel else None
+
+    monkeypatch.setattr(module, "which", lambda _name: "/usr/local/bin/ios")
+    monkeypatch.setattr(module, "probe", probe)
+    monkeypatch.setattr(module, "tunnel_for", tunnel_for)
+    cfg = Settings()
+    cfg.goios.auto_start_tunnel = auto_start
+    (device,) = await module._from_goios(cfg)
+    return device
+
+
+async def test_a_cabled_phone_is_ready_when_a_tunnel_will_be_started(monkeypatch) -> None:
+    """Every cabled iOS 17+ phone used to be marked blocked, tunnel or not."""
+    device = await _cabled_phone(monkeypatch, auto_start=True, tunnel=False)
+    assert device.ready
+
+
+async def test_a_cabled_phone_is_ready_when_a_tunnel_is_already_up(monkeypatch) -> None:
+    device = await _cabled_phone(monkeypatch, auto_start=False, tunnel=True)
+    assert device.ready
+
+
+async def test_a_cabled_phone_is_blocked_only_when_nothing_will_tunnel(monkeypatch) -> None:
+    device = await _cabled_phone(monkeypatch, auto_start=False, tunnel=False)
+    assert not device.ready
+    assert any("--userspace" in blocker for blocker in device.blockers)

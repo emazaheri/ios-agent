@@ -15,9 +15,25 @@ The device path, the runner that drives it, and the timings that shape every set
 - **The first snapshot after backgrounding an app blocks for 61 seconds.**
   XCTest keeps waiting on the app that went away. `home()` activates
   SpringBoard immediately after, which drops it to about 5s.
-- **A device snapshot costs ~3.7s** against under a second on a simulator, so
-  `stabilize.max_wait_s` must exceed `stable_samples` snapshots or a real
-  device times out on every action.
+- **A device snapshot was measured at ~3.7s** in August 2026, against under a
+  second on a simulator, so `stabilize.max_wait_s` must exceed
+  `stable_samples` snapshots or a real device times out on every action. In
+  October the same phone read Settings root in 0.4 to 0.6s, over USB and
+  Wi-Fi alike. The ceiling stays; the 3.7s is no longer the typical case.
+- **The USB tunnel needs no sudo.** `ios tunnel start --userspace` carried 10
+  of 10 runner launches, and the adapter now starts it on demand. Launch to
+  ready is 3.1 to 3.3s including the tunnel, down from 4.5s when go-ios was
+  given a fixed three seconds to fail. See ADR 0018.
+- **pymobiledevice3's `--native` tunnel is not usable for a session.** It
+  rides macOS's own tunnel, and the device treats every RSD connection from
+  one host address as one peer, so it and `remoted` evict each other. It
+  launched 10 of 10 over Wi-Fi in one stretch, then refused six attempts in a
+  row after a replug. Its no-root alternative is USB-only. Wi-Fi stays on
+  xcodebuild.
+- **A profile reissued after it expired asks for Trust again.** Xcode deletes
+  an expired profile, so `prepare_wda.sh` finds no team to read (pass
+  `TEAM_ID`), and the phone then refused the runner until the developer was
+  trusted again under VPN & Device Management.
 - **iOS 26 retired `prefs:` for `App-prefs:`.** Sub-pane URLs like
   `App-prefs:root=WIFI` return success and do nothing, and `App-prefs:root`
   does not reset Settings out of a sub-pane, so tests terminate the app.

@@ -23,8 +23,9 @@ grouped.
 | [0015](0015-route-routine-turns-to-a-small-model.md) | Route routine turns to a small model, as an off-by-default option | pre-registered; all three rules held, cost at 48.9% against a 50% bar, which is a tie; the book's 15% did not hold |
 | [0016](0016-no-accessibility-inspector-tree-source.md) | No Accessibility Inspector tree source | a focus walk at 60 to 80 ms per element; Settings root 3.3 to 4.4s against WDA's 3.7s, with no rects, and it scrolls the screen as it reads |
 | [0017](0017-no-simulator-native-tree-source.md) | No simulator-native tree source | CoreSimulator read the same screens 10 to 23% faster than WDA against a 50% bar; both wait on the app serialising its tree, and on Xcode 27 the read bootstraps through XCTest anyway |
+| [0018](0018-start-the-usb-tunnel-without-sudo.md) | Start the USB tunnel without sudo; Wi-Fi stays on xcodebuild | go-ios's userspace tunnel launched 10 of 10 in 3.1 to 3.3s with no sudo; pymobiledevice3's native tunnel launched faster, then refused six in a row after a replug, because it and `remoted` evict each other by design |
 
-Nine of the seventeen are refusals. That is the point rather than an accident: the
+Nine of the eighteen are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 

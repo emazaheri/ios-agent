@@ -200,7 +200,16 @@ class GoIosSettings(BaseModel):
     binary: str = "ios"
     tunnel_api_host: str = "127.0.0.1"
     tunnel_api_port: int = 28100
-    auto_start_tunnel: bool = False  # requires sudo; opt in explicitly
+    #: Start go-ios's tunnel when a cabled iOS 17+ device has none.
+    #:
+    #: On by default because the userspace tunnel needs no sudo: measured on an
+    #: iPhone 17 Pro Max, `ios tunnel start --userspace` carried 10 of 10 runner
+    #: launches. It used to start `sudo ios tunnel start`, which is why it was
+    #: opt-in. See ADR 0018.
+    auto_start_tunnel: bool = True
+    #: ``userspace`` needs no root. ``kernel`` is `sudo ios tunnel start`, for a
+    #: process that can obtain sudo without a prompt.
+    tunnel_mode: Literal["userspace", "kernel"] = "userspace"
 
 
 class ServerSettings(BaseModel):
