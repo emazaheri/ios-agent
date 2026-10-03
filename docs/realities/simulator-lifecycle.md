@@ -25,3 +25,9 @@ Everything about getting a simulator to exist, boot, and show a window.
   name second, and warns rather than debugs when neither opens: it logged at
   debug for five days on a machine whose owner expected to watch the runs, and
   nothing said so. `doctor` has a `simulator-window` check for that reason.
+- **Simulator Accessibility needs bootstrapping on Xcode 27.** Readers built
+  on CoreSimulator's `AccessibilityPlatformTranslation`, such as AXe and idb,
+  start a short-lived `XCUIDeviceRemoteAutomationSession` to load it. On a
+  fresh boot that timed out on the first two reads; after a WDA session or a
+  tap it held for the rest of the boot. Once loaded, a full read costs about
+  what WDA's does. See ADR 0017.

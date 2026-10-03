@@ -22,8 +22,9 @@ grouped.
 | [0014](0014-ask-before-reaching-another-person.md) | Ask before reaching another person | a real run liked a stranger's profile four times unasked; on a real Settings app, one false positive in 178 labels, removed by judging only the pressed control |
 | [0015](0015-route-routine-turns-to-a-small-model.md) | Route routine turns to a small model, as an off-by-default option | pre-registered; all three rules held, cost at 48.9% against a 50% bar, which is a tie; the book's 15% did not hold |
 | [0016](0016-no-accessibility-inspector-tree-source.md) | No Accessibility Inspector tree source | a focus walk at 60 to 80 ms per element; Settings root 3.3 to 4.4s against WDA's 3.7s, with no rects, and it scrolls the screen as it reads |
+| [0017](0017-no-simulator-native-tree-source.md) | No simulator-native tree source | CoreSimulator read the same screens 10 to 23% faster than WDA against a 50% bar; both wait on the app serialising its tree, and on Xcode 27 the read bootstraps through XCTest anyway |
 
-Eight of the sixteen are refusals. That is the point rather than an accident: the
+Nine of the seventeen are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 
