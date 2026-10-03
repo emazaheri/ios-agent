@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import socket
+
 import pytest
 
 from ios_mcp.config import Settings
 from ios_mcp.devices.base import DeviceInfo
 from ios_mcp.devices.pool import DevicePool, _best_default
-from ios_mcp.devices.ports import free_port, release_port
+from ios_mcp.devices.ports import free_port, held_ports, release_port
 from ios_mcp.errors import DeviceUnavailable
 
 
@@ -126,6 +128,32 @@ def test_released_ports_are_reusable() -> None:
     b = free_port(18200, 18200)
     release_port(b)
     assert a == b
+
+
+@pytest.mark.parametrize(
+    ("family", "address"),
+    [
+        (socket.AF_INET, ""),
+        (socket.AF_INET, "127.0.0.1"),
+        (socket.AF_INET6, "::"),
+        (socket.AF_INET6, "::1"),
+    ],
+    ids=["ipv4-wildcard", "ipv4-loopback", "ipv6-wildcard", "ipv6-loopback"],
+)
+def test_a_port_held_on_any_address_is_skipped(family: socket.AddressFamily, address: str) -> None:
+    """A Docker container on `*:8100` once passed a check that bound only
+    127.0.0.1, and WebDriverAgent, which binds `::`, then could not start."""
+    try:
+        listener = socket.socket(family, socket.SOCK_STREAM)
+    except OSError:
+        pytest.skip("this host has no IPv6")
+    with listener:
+        listener.bind((address, 18400))
+        listener.listen()
+        assert held_ports(18400, 18400) == [18400]
+        port = free_port(18400, 18401)
+        release_port(port)
+        assert port == 18401
 
 
 def test_exhausted_port_range_fails_with_a_remedy() -> None:

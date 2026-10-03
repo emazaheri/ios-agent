@@ -293,6 +293,24 @@ async def test_a_port_answering_with_no_process_behind_it_is_reported(
     assert "8104" in ports.detail
 
 
+async def test_a_port_held_by_something_other_than_a_runner_is_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This line used to say "nothing listening" over a container on 8100
+    while every runner launched there timed out."""
+    from ios_mcp.devices import processes
+
+    monkeypatch.setattr(processes, "_ps", _ps_returning(""))
+    monkeypatch.setattr(processes, "probe_wda_ports", _returning_list([]))
+    monkeypatch.setattr(processes, "held_ports", lambda _low, _high: [8100])
+
+    report = await processes.reset(Settings())
+    ports = next(c for c in report.checks if c.name == "wda-ports")
+    assert ports.status == "ok"
+    assert "8100 held by another process" in ports.detail
+    assert "nothing listening" not in ports.detail
+
+
 async def test_an_unreadable_process_table_is_a_skip_rather_than_a_crash(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

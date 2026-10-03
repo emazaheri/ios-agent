@@ -46,6 +46,7 @@ from typing import Any, Literal
 
 from ios_mcp.config import Settings, get_settings
 from ios_mcp.devices.doctor import Check, Status
+from ios_mcp.devices.ports import held_ports
 from ios_mcp.devices.shell import run
 
 #: What launched it, named after the command rather than after the device.
@@ -444,6 +445,21 @@ async def _port_check(cfg: Settings, orphans: list[OrphanProcess]) -> Check:
     answering = await probe_wda_ports(cfg)
     low, high = cfg.wda.port_range
     if not answering:
+        # Something that is not a runner can still hold a port in the range,
+        # and this line used to say "nothing listening" over a container on
+        # 8100 while every runner launched there timed out. It is no longer a
+        # fault, since `free_port` skips a held port, so it is reported rather
+        # than warned about.
+        held = held_ports(low, high)
+        if held:
+            listed = ", ".join(str(port) for port in held)
+            return Check(
+                "wda-ports",
+                "ok",
+                f"no WebDriverAgent in {low}-{high}; {listed} held by another process, "
+                "which runners skip",
+                data={"held": held},
+            )
         return Check("wda-ports", "ok", f"nothing listening in {low}-{high}")
 
     listed = ", ".join(str(port) for port in answering)
