@@ -26,3 +26,8 @@ The device path, the runner that drives it, and the timings that shape every set
   with, 743 ms without, `isVisible` present either way. It is no longer sent,
   and reinstating it on the XML endpoint would strip `isVisible`, which the
   digest depends on.
+- **The Accessibility Inspector service is not a cheaper tree.** It needs no
+  signed WDA, but it reads by walking inspector focus one element at a time,
+  at 60 to 80 ms each, with no frames, and it scrolls the screen to reach rows
+  below the fold. Settings root took 3.3 to 4.4s against WDA's 3.7s. Its
+  `perform_press` only works on debug builds. See ADR 0016.
