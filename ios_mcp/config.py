@@ -78,16 +78,25 @@ class StabilizeSettings(BaseModel):
     """Post-action settle loop.
 
     ``max_wait_s`` has to exceed ``stable_samples`` snapshots or the loop can
-    never converge. A snapshot costs under a second on a simulator but roughly
-    3.7s on a physical iPhone, so the old 6s ceiling meant a real device timed
+    never converge. A snapshot has cost up to 3.7s on a physical iPhone (1.3
+    to 1.8s in October 2026), so the old 6s ceiling meant a real device timed
     out on every single action and reported an unsettled screen. Raising it is
     free for fast devices, which exit as soon as the fingerprint repeats.
+
+    ``signal="frames"`` settles on screenshots instead, then reads the tree
+    once. It took 17 to 22% off a phone's settle time and returned early once
+    in 304 settles, where the tree loop did 3 times in 198. ``quiet_s`` is how
+    long no novel frame must appear, and ``frame_timeout_s`` how long to watch
+    before falling back to polling. See ADR 0019.
     """
 
     min_delay_s: float = Field(default=0.15, ge=0.0)
     poll_interval_s: float = Field(default=0.2, gt=0.0)
     max_wait_s: float = Field(default=20.0, gt=0.0)
     stable_samples: int = Field(default=2, ge=1)
+    signal: Literal["tree", "frames"] = "tree"
+    quiet_s: float = Field(default=0.6, gt=0.0)
+    frame_timeout_s: float = Field(default=3.0, gt=0.0)
 
 
 class PolicySettings(BaseModel):

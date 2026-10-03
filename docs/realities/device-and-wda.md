@@ -20,6 +20,16 @@ The device path, the runner that drives it, and the timings that shape every set
   `stable_samples` snapshots or a real device times out on every action. In
   October the same phone read Settings root in 0.4 to 0.6s, over USB and
   Wi-Fi alike. The ceiling stays; the 3.7s is no longer the typical case.
+  Later in October it was 0.7 to 1.4s over USB and 1.6s over Wi-Fi, so the
+  cost moves from day to day and no setting should be fitted to one reading.
+- **A screenshot costs a tenth of a tree read.** 0.10s on a simulator, 0.15s
+  over USB and 0.17s over Wi-Fi, against 1.0, 1.3 and 1.6s. That is what lets
+  `stabilize.signal = "frames"` watch the screen settle and read the tree once.
+  See ADR 0019.
+- **"Identical frames" is not "settled".** After typing into Settings search
+  the screen holds still for 0.42s, then animates its results in; after that,
+  the caret blinks through the same two or three frames forever. Only frames
+  never seen before in the settle count as movement.
 - **The USB tunnel needs no sudo.** `ios tunnel start --userspace` carried 10
   of 10 runner launches, and the adapter now starts it on demand. Launch to
   ready is 3.1 to 3.3s including the tunnel, down from 4.5s when go-ios was

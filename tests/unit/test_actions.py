@@ -6,6 +6,7 @@ import pytest
 from fake_device import make_session
 from trees import form_screen, list_screen, node, settings_screen
 
+from ios_mcp.config import Settings
 from ios_mcp.errors import (
     ElementNotFound,
     ElementNotInteractable,
@@ -477,3 +478,35 @@ async def test_annotation_checks_pillow_before_spending_an_observation(monkeypat
 
     assert session.refs.generation == before
     assert not any(path.endswith("/screenshot") for _, path, _ in fake.calls)
+
+
+async def test_settling_on_frames_reads_the_tree_once_after_acting() -> None:
+    """The fake's screen never moves, so the frames go quiet and one read follows."""
+    cfg = Settings()
+    cfg.stabilize.min_delay_s = 0.0
+    cfg.stabilize.max_wait_s = 0.5
+    cfg.stabilize.signal = "frames"
+    cfg.stabilize.quiet_s = 0.01
+    cfg.stabilize.frame_timeout_s = 0.5
+
+    def toggle(path: str, body: dict | None) -> None:
+        if path.endswith("/wda/tap"):
+            fake.source_tree = settings_screen(airplane_on=True)
+
+    session, fake, _ = make_session(settings_screen(airplane_on=False), cfg, on_gesture=toggle)
+    await session.observe()
+    fake.calls.clear()
+
+    result = await session.tap(target="Airplane Mode", role="switch")
+
+    paths = fake.paths_called()
+    after_tap = paths[paths.index(next(p for p in paths if p.endswith("/wda/tap"))) :]
+    assert any(p.endswith("/screenshot") for p in after_tap)
+    assert sum(p.endswith("/source") for p in after_tap) == 1
+    assert result.screen_changed is True
+
+
+async def test_the_default_signal_takes_no_screenshots() -> None:
+    session, fake, _ = make_session(settings_screen())
+    await session.tap(target="Wi-Fi")
+    assert not any(p.endswith("/screenshot") for p in fake.paths_called())

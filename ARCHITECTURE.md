@@ -161,7 +161,10 @@ loop costs two round-trips per step; folding the observation in halves that.
 - **Stabilization** polls the fingerprint until it repeats, rather than
   sleeping a fixed interval. An optional baseline keeps it polling while the
   screen still matches its pre-action state, so a slow transition is not
-  mistaken for an action that did nothing.
+  mistaken for an action that did nothing. With `stabilize.signal = "frames"`
+  it watches screenshots instead, at a tenth of a tree read's cost, and reads
+  the tree once when no new frame has appeared for `quiet_s`; anything the
+  frames cannot settle falls back to polling (ADR 0019).
 - **Deltas.** When the screen is structurally similar the result is a diff
   (`~ e2 switch "Bold Text" =1 (was 0)`); a genuine navigation returns the
   whole screen.

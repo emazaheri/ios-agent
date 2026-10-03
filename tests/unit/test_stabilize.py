@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 from ios_mcp.actions.stabilize import settle, wait_until
@@ -90,3 +91,130 @@ async def test_wait_until_reports_failure_rather_than_raising() -> None:
     )
     assert met is False
     assert digest.fingerprint == "a"
+
+
+# -- settling on frames ---------------------------------------------------------
+
+
+def frames_mode(**overrides: float) -> StabilizeSettings:
+    values: dict = dict(quiet_s=0.02, frame_timeout_s=0.3)
+    values.update(overrides)
+    return fast().model_copy(update={"signal": "frames", **values})
+
+
+@dataclass
+class Frames:
+    """Yields a scripted series of screenshots, repeating the last forever."""
+
+    sequence: list[bytes]
+    calls: int = 0
+    fail: bool = False
+
+    async def __call__(self) -> bytes:
+        if self.fail:
+            raise ConnectionError("screenshot failed")
+        png = self.sequence[min(self.calls, len(self.sequence) - 1)]
+        self.calls += 1
+        await asyncio.sleep(0.002)
+        return png
+
+
+class Animating:
+    """Every frame is new, like a spinner that never stops."""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+    async def __call__(self) -> bytes:
+        self.n += 1
+        await asyncio.sleep(0.002)
+        return f"frame{self.n}".encode()
+
+
+async def test_quiet_frames_cost_one_tree_read() -> None:
+    """The point of the signal: the confirming tree read is the expensive one."""
+    screens = Screens(["done"])
+    outcome = await settle(screens, frames_mode(), frame=Frames([b"a", b"b", b"c"]))
+    assert outcome.via == "frames"
+    assert outcome.settled is True
+    assert screens.calls == 1
+    assert outcome.digest.fingerprint == "done"
+
+
+async def test_a_blinking_caret_still_reads_as_quiet() -> None:
+    """Frames that repeat earlier ones are not movement, or a text field never settles."""
+    caret = [b"move1", b"move2", b"on", b"off"] + [b"on", b"off"] * 200
+    screens = Screens(["typed"])
+    outcome = await settle(screens, frames_mode(), frame=Frames(caret))
+    assert outcome.via == "frames"
+    assert screens.calls == 1
+
+
+async def test_frames_that_never_go_quiet_fall_back_to_polling() -> None:
+    screens = Screens(["a", "a"])
+    outcome = await settle(screens, frames_mode(), frame=Animating())
+    assert outcome.via == "tree"
+    assert outcome.settled is True
+    assert screens.calls >= 2
+
+
+async def test_a_failing_screenshot_falls_back_to_polling() -> None:
+    screens = Screens(["a"])
+    outcome = await settle(screens, frames_mode(), frame=Frames([b"x"], fail=True))
+    assert outcome.via == "tree"
+    assert outcome.settled is True
+
+
+async def test_quiet_frames_on_the_baseline_screen_keep_polling() -> None:
+    """Still frames before the effect has appeared are not a settled screen.
+
+    The phone returned a scroll after two identical frames that preceded the
+    swipe rendering at all. The baseline is what catches that case.
+    """
+    screens = Screens(["start", "start", "start", "new", "new", "new"])
+    outcome = await settle(screens, frames_mode(), baseline="start", frame=Frames([b"still"]))
+    assert outcome.via == "tree"
+    assert outcome.digest.fingerprint == "new"
+
+
+async def test_a_pause_shorter_than_the_window_is_not_the_end() -> None:
+    """Settings search holds still for 0.42s, then animates its results in."""
+
+    class Debounced:
+        """Still for 30ms after typing, then the results arrive and stay."""
+
+        def __init__(self) -> None:
+            self.started: float | None = None
+
+        def shown(self) -> str:
+            loop = asyncio.get_running_loop()
+            self.started = self.started or loop.time()
+            return "typed" if loop.time() - self.started < 0.03 else "results"
+
+        async def frame(self) -> bytes:
+            await asyncio.sleep(0.002)
+            return self.shown().encode()
+
+        async def observe(self) -> Digest:
+            return Digest(nodes=[], fingerprint=self.shown())
+
+    short = Debounced()
+    early = await settle(short.observe, frames_mode(quiet_s=0.01), frame=short.frame)
+    assert early.digest.fingerprint == "typed", "a window inside the pause returns too soon"
+
+    long = Debounced()
+    outcome = await settle(long.observe, frames_mode(quiet_s=0.05), frame=long.frame)
+    assert outcome.via == "frames"
+    assert outcome.digest.fingerprint == "results"
+
+
+async def test_the_tree_signal_never_takes_a_screenshot() -> None:
+    frames = Frames([b"a"])
+    await settle(Screens(["a"]), fast(), frame=frames)
+    assert frames.calls == 0
+
+
+async def test_frames_mode_without_a_frame_source_polls_the_tree() -> None:
+    screens = Screens(["a"])
+    outcome = await settle(screens, frames_mode())
+    assert outcome.via == "tree"

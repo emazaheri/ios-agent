@@ -21,7 +21,7 @@ from typing import Any, Literal, cast
 
 from ios_mcp.actions.idempotency import IdempotencyCache
 from ios_mcp.actions.result import ActionResult, DigestDelta, diff_digests
-from ios_mcp.actions.stabilize import settle, wait_until
+from ios_mcp.actions.stabilize import SettleOutcome, settle, wait_until
 from ios_mcp.config import Settings
 from ios_mcp.devices.base import best_app_match, closest_app_names
 from ios_mcp.devices.pool import Lease
@@ -160,6 +160,16 @@ class IosSession:
         digest.scrub = self.redactor
         self._last_digest = digest
         return root, digest
+
+    async def _settle(self, *, baseline: str | None = None) -> SettleOutcome:
+        """Wait for the screen an action produced, by tree or by frames.
+
+        Goes through `snapshot`, never `observe`: a screen read while waiting
+        was not shown to the agent, and the ref table must not say it was.
+        """
+        return await settle(
+            self.snapshot, self.settings.stabilize, baseline=baseline, frame=self.wda.screenshot
+        )
 
     async def observe(
         self, *, query: str | None = None, region: Rect | None = None, budget: int | None = None
@@ -433,7 +443,7 @@ class IosSession:
             for _ in range(max_scrolls if until else 1):
                 previous_fp = digest.fingerprint
                 await self._swipe_within(area, direction)
-                outcome = await settle(self.snapshot, self.settings.stabilize)
+                outcome = await self._settle()
                 digest = outcome.digest
                 scrolls += 1
                 if until and _contains_text(digest, until):
@@ -479,9 +489,7 @@ class IosSession:
             before = await self.snapshot()
             area = await self._scroll_area(before, ref=ref, target=target)
             await self._swipe_within(area, direction)
-            outcome = await settle(
-                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
-            )
+            outcome = await self._settle(baseline=before.fingerprint)
             result = await self._finish(
                 "swipe",
                 before,
@@ -513,9 +521,7 @@ class IosSession:
             sx, sy = source.point
             dx, dy = destination.point
             await self.wda.drag(sx, sy, dx, dy, duration_s)
-            outcome = await settle(
-                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
-            )
+            outcome = await self._settle(baseline=before.fingerprint)
             result = await self._finish(
                 "drag",
                 before,
@@ -571,9 +577,7 @@ class IosSession:
             started = time.monotonic()
             before = await self.snapshot()
             await self.wda.handle_alert(action, button)
-            outcome = await settle(
-                self.snapshot, self.settings.stabilize, baseline=before.fingerprint
-            )
+            outcome = await self._settle(baseline=before.fingerprint)
             return await self._finish(
                 f"handle_alert:{action}",
                 before,
@@ -630,7 +634,7 @@ class IosSession:
             started = time.monotonic()
             before = self._last_digest
             await self.wda.launch_app(bundle_id, fresh=fresh)
-            outcome = await settle(self.snapshot, self.settings.stabilize)
+            outcome = await self._settle()
             return await self._finish(
                 f"launch_app:{bundle_id}",
                 before,
@@ -675,7 +679,7 @@ class IosSession:
                 await self.lease.adapter.open_url(url)
             else:
                 await self.wda.open_url(url)
-            outcome = await settle(self.snapshot, self.settings.stabilize)
+            outcome = await self._settle()
             return await self._finish(
                 "open_url",
                 before,
@@ -794,7 +798,7 @@ class IosSession:
             self._record_failure(name, args, exc)
             raise
 
-        outcome = await settle(self.snapshot, self.settings.stabilize, baseline=before.fingerprint)
+        outcome = await self._settle(baseline=before.fingerprint)
         result = await self._finish(
             name,
             before,
