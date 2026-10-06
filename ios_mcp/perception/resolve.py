@@ -137,6 +137,7 @@ def _resolve_text(
     pool = digest.nodes
     if role:
         pool = [n for n in pool if n.role == role]
+    everything = pool
     if actionable_only:
         actionable = [n for n in pool if n.actionable]
         # Fall back to everything when nothing actionable matches: reading a
@@ -195,6 +196,21 @@ def _resolve_text(
     scored.sort(key=lambda pair: pair[0], reverse=True)
     if scored and scored[0][0] >= _FUZZY_THRESHOLD:
         return _target(scored[0][1], "text-fuzzy")
+
+    # A disabled control is not actionable, so it never reached the pool, and
+    # "nothing on screen matches" was the answer for a button the digest itself
+    # showed as `disabled`. Returning it lets the action say what is true: it
+    # is there, and it is disabled. Only disabled nodes, and only by label, so
+    # a tap meant for a control can never fall through to a caption.
+    disabled = [
+        n
+        for n in everything
+        if not n.enabled and needle and any(needle in text for text in _prose(n))
+    ]
+    if disabled:
+        best = min(disabled, key=lambda n: len(n.label or ""))
+        exact_label = _normalise(best.label) == needle
+        return _target(best, "text-exact" if exact_label else "text-partial")
 
     raise ElementNotFound(
         f"Nothing on screen matches {target!r}",

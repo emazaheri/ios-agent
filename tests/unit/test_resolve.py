@@ -239,3 +239,29 @@ def test_an_identifier_is_searchable_the_way_it_is_rendered() -> None:
     )
 
     assert [n.identifier for n in d.nodes] == ["like_post_1"]
+
+
+def _with_a_disabled_button() -> dict:
+    return node(
+        "Application",
+        label="Signup",
+        h=852,
+        children=[
+            node("TextField", label="Email", y=140),
+            node("Button", label="Continue", y=780, enabled=False),
+        ],
+    )
+
+
+def test_a_disabled_control_resolves_so_the_action_can_say_it_is_disabled() -> None:
+    """The digest showed `Continue disabled` while a tap said nothing matched it."""
+    digest, refs = make(_with_a_disabled_button())
+    target = resolve(digest, refs, target="Continue")
+    assert target.label == "Continue"
+    assert target.enabled is False
+
+
+def test_a_miss_still_never_falls_through_to_a_caption() -> None:
+    digest, refs = make(_with_a_disabled_button())
+    with pytest.raises(ElementNotFound):
+        resolve(digest, refs, target="Sign in")
