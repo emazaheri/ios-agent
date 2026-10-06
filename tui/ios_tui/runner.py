@@ -82,6 +82,7 @@ class GoalRunner:
         bundle_id: str | None = None,
         acquire: Acquire | None = None,
         model: ModelFactory | None = None,
+        route: ModelFactory | None = None,
     ) -> None:
         self.sink = sink
         self.settings = settings
@@ -96,6 +97,11 @@ class GoalRunner:
         #: the same reason `run_goal` takes one: the mechanics deserve a
         #: deterministic test, and one that needs an API key is not that.
         self._model = model
+        #: The small model a routed run starts on (ADR 0015). `run_goal` builds
+        #: one itself from `route_model` only when it builds the large one too,
+        #: so a front end that injects a streaming model has to inject this as
+        #: well or routing is silently off.
+        self._route = route
         self.session: IosSession | None = None
         #: Carried across goals so a new goal's screen pane does not start
         #: blank. The backend itself is rebuilt every time; this is only text.
@@ -171,7 +177,8 @@ class GoalRunner:
         backend = EventBackend(SessionBackend(session, Verifier()), self.sink)
         backend.last_screen = self._last_screen
 
-        self.sink.emit(GoalStarted(goal=goal, model=self.agent.describe()))
+        routed_from = self._routed_from()
+        self.sink.emit(GoalStarted(goal=goal, model=self.model_label()))
         started = time.monotonic()
         try:
             outcome = await run_goal(
@@ -182,6 +189,7 @@ class GoalRunner:
                 settings=self.agent,
                 approve=self._watched(approve),
                 max_steps=max_steps,
+                route=self._route,
             )
         except Exception as exc:
             self.sink.emit(Failed(where="run", message=str(exc)))
@@ -202,9 +210,23 @@ class GoalRunner:
                 prompt_tokens=outcome.prompt_tokens,
                 completion_tokens=outcome.completion_tokens,
                 elapsed_s=time.monotonic() - started,
+                routed_from=routed_from,
+                large_model=self.agent.model,
+                escalated_at_turn=outcome.escalated_at_turn,
+                tokens_by_model=dict(outcome.tokens_by_model),
             )
         )
         return outcome
+
+    def model_label(self) -> str:
+        """What the status bar calls the model, with the route when there is one.
+
+        Here rather than in `AgentSettings.describe()`, which labels eval
+        reports: adding the route there would rename every recorded identity.
+        """
+        label = self.agent.describe()
+        routed_from = self._routed_from()
+        return f"{label} route={routed_from}" if routed_from else label
 
     def stop(self, reason: str = "you asked it to stop") -> None:
         """End the run at the next node boundary.
@@ -220,6 +242,19 @@ class GoalRunner:
         self.sink.emit(Stopping(reason=reason))
 
     # -- internals ---------------------------------------------------------
+
+    def _routed_from(self) -> str | None:
+        """The small model this run starts on, or None when it is not routed.
+
+        Mirrors the two ways `run_goal` routes: an injected `route`, or
+        `route_model` set and no model injected, where it builds both. The
+        name is the one `run_goal` keys `tokens_by_model` on.
+        """
+        if self._route is not None:
+            return self.agent.route_model or "route"
+        if self.agent.route_model and self._model is None:
+            return self.agent.route_model
+        return None
 
     def _watched(self, approve: Approver | None) -> Approver | None:
         """Announce the question, then ask it.

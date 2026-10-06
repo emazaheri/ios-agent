@@ -17,10 +17,17 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ios_mcp.config import Settings, set_settings
 from ios_mcp.policy.audit import AuditEntry
 from ios_tui.quickstart import quickstart
+
+if TYPE_CHECKING:
+    from ios_agent import AgentSettings
+    from ios_agent.loop import ModelFactory
+
+    from ios_tui.bus import EventSink
 
 #: Subcommands. Anything else in the first position is treated as a goal, so
 #: `ios-agent "turn on bold text"` keeps working without the verb.
@@ -51,7 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ask before destructive actions instead of refusing them outright.",
     )
-    run.add_argument("--max-steps", type=int, help="Turns before the agent gives up. Default 24.")
+    run.add_argument(
+        "--max-steps",
+        type=int,
+        help="Turns, and actions, before the agent gives up. Default 24 each.",
+    )
     run.add_argument(
         "--no-tui",
         action="store_true",
@@ -291,7 +302,6 @@ def _cmd_run(settings: Settings, args: argparse.Namespace) -> int:
 def _cmd_manual(settings: Settings, args: argparse.Namespace) -> int:
     """No provider is resolved at all, so this works with no API key."""
     from ios_tui.app import IosAgentApp
-    from ios_tui.bus import EventSink
     from ios_tui.runner import GoalRunner, tuned
 
     cfg = tuned(settings)
@@ -304,13 +314,33 @@ def _cmd_manual(settings: Settings, args: argparse.Namespace) -> int:
     return app.run(inline=args.inline, inline_no_clear=args.inline) or 0
 
 
+def streamed_models(
+    agent: AgentSettings, sink: EventSink, *, stream: bool
+) -> tuple[ModelFactory | None, ModelFactory | None]:
+    """The large model and, for a routed run (ADR 0015), the small one.
+
+    `None` for both when not streaming, which hands construction back to
+    `run_goal`: it builds the configured model and, when `route_model` is set,
+    the small one too. It builds the small one *only* when it builds the large
+    one, so a streamed run has to bring both, or `IOS_AGENT_ROUTE_MODEL` is
+    silently ignored, which it was.
+    """
+    from ios_tui.stream import streaming_chat_model
+
+    if not stream:
+        return None, None
+    model = streaming_chat_model(agent, sink)
+    if not agent.route_model:
+        return model, None
+    small = agent.model_copy(update={"model": agent.route_model})
+    return model, streaming_chat_model(small, sink)
+
+
 def _run_app(settings: Settings, args: argparse.Namespace) -> int:
     from ios_agent import AgentSettings, export_provider_credentials
 
     from ios_tui.app import IosAgentApp
-    from ios_tui.bus import EventSink
     from ios_tui.runner import GoalRunner
-    from ios_tui.stream import streaming_chat_model
 
     export_provider_credentials()
 
@@ -324,9 +354,15 @@ def _run_app(settings: Settings, args: argparse.Namespace) -> int:
         # the escape hatch for a provider whose streaming is broken or whose
         # chunks assemble badly: the run still works, it just arrives a turn at
         # a time.
-        model = None if args.no_stream else streaming_chat_model(agent, sink)
+        model, route = streamed_models(agent, sink, stream=not args.no_stream)
         return GoalRunner(
-            sink, settings, agent, device=args.device, bundle_id=args.app, model=model
+            sink,
+            settings,
+            agent,
+            device=args.device,
+            bundle_id=args.app,
+            model=model,
+            route=route,
         )
 
     app = IosAgentApp(

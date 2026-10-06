@@ -61,7 +61,15 @@ class Printer:
                 self._line(f"    observe      -> {stats.device_tokens} device tokens so far")
             case ActionFinished(verb=verb, args=args, elapsed_ms=ms, refused=refused):
                 target = _target_of(args)
-                note = "  refused (never reached the device)" if refused else ""
+                note = ""
+                if refused:
+                    note = "  refused (never reached the device)"
+                elif event.error:
+                    note = f"  error: {event.error}"
+                elif event.failed:
+                    note = "  failed: the device did not do what was asked"
+                elif event.already:
+                    note = "  already as asked (nothing to do)"
                 self._line(f"    {verb:<12} {target[:44]:<44} {ms:>5}ms{note}")
             case ApprovalAsked(request=request):
                 self._line(f"\n  ? {request.get('action')} on {request.get('signature')}")
@@ -85,6 +93,16 @@ class Printer:
             f"{stats.device_tokens} device tokens, {outcome.elapsed_s:.1f}s"
         )
         self._line(f"    model: {outcome.prompt_tokens} in / {outcome.completion_tokens} out")
+        if outcome.routed_from:
+            for name, (spent_in, spent_out) in outcome.tokens_by_model.items():
+                self._line(f"      {name}: {spent_in} in / {spent_out} out")
+            if outcome.escalated_at_turn is None:
+                self._line(f"    routed: stayed on {outcome.routed_from} throughout")
+            else:
+                self._line(
+                    f"    routed: moved off {outcome.routed_from} at turn "
+                    f"{outcome.escalated_at_turn}"
+                )
         if stats.refusals:
             self._line(f"    {stats.refusals} call(s) refused before reaching the device")
         if outcome.approvals_asked:

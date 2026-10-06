@@ -735,3 +735,72 @@ class TestWhatTheAgentCanDo:
         assert CAN not in written
         assert CANNOT not in written
         assert CANNOT_COMPACT not in written
+
+
+class TestWhatAnActionDidOnItsRow:
+    """A returned action is not a worked one, and a row has to say which.
+
+    Typed text that read back wrong returns rather than raising, and its row was
+    cyan with a timing, the same as a success. A switch already as asked looked
+    like any other tap.
+    """
+
+    async def _row(self, event: ActionFinished) -> tuple[str, str]:
+        app = _app()
+        async with app.run_test(size=WIDE) as pilot:
+            await _ready(app)
+            app._apply(event)
+            await pilot.pause()
+            row = next(line for line in app.transcript.lines if event.verb in line.text)
+            verb_style = next(str(seg.style) for seg in row if event.verb in seg.text)
+            return row.text, verb_style
+
+    async def test_a_failed_action_says_failed_in_yellow(self) -> None:
+        text, verb_style = await self._row(
+            ActionFinished(verb="type_text", args={"text": "hi"}, elapsed_ms=420, failed=True)
+        )
+        assert "failed" in text
+        assert "420ms" not in text, "a failure still reads as a timing"
+        assert verb_style == "yellow"
+
+    async def test_an_action_already_as_asked_says_so(self) -> None:
+        text, verb_style = await self._row(
+            ActionFinished(verb="set_value", args={"target": "Wi-Fi"}, elapsed_ms=300, already=True)
+        )
+        assert "already" in text and "ms" not in text.split("Wi-Fi")[1]
+        assert verb_style == "cyan", "nothing was wrong, so the verb is not flagged"
+
+
+class TestWhereARoutedRunRan:
+    """ADR 0015: a routed run says which model it ended on, and when it moved."""
+
+    async def _written(self, event: GoalFinished) -> str:
+        app = _app()
+        async with app.run_test(size=WIDE) as pilot:
+            await _ready(app)
+            app._apply(GoalStarted(goal="open it", model="m"))
+            app._apply(event)
+            await pilot.pause()
+            return "\n".join(line.text for line in app.transcript.lines)
+
+    async def test_an_escalated_run_names_both_models_and_the_turn(self) -> None:
+        text = await self._written(
+            GoalFinished(
+                goal="open it",
+                summary="opened",
+                routed_from="mini",
+                large_model="big",
+                escalated_at_turn=2,
+            )
+        )
+        assert "started on mini, moved to big at turn 2" in text
+
+    async def test_a_run_that_stayed_small_says_so(self) -> None:
+        text = await self._written(
+            GoalFinished(goal="open it", summary="opened", routed_from="mini")
+        )
+        assert "stayed on mini throughout" in text
+
+    async def test_a_run_that_was_not_routed_says_nothing_about_it(self) -> None:
+        text = await self._written(GoalFinished(goal="open it", summary="opened"))
+        assert "stayed on" not in text and "moved to" not in text
