@@ -20,6 +20,7 @@ from dataclasses import replace
 from typing import Any, Literal, cast
 
 from ios_mcp.actions.idempotency import IdempotencyCache
+from ios_mcp.actions.readback import Readback, compare, field_text
 from ios_mcp.actions.result import ActionResult, DigestDelta, diff_digests
 from ios_mcp.actions.stabilize import SettleOutcome, settle, wait_until
 from ios_mcp.config import Settings
@@ -288,18 +289,41 @@ class IosSession:
         idem_key: str | None = None,
         _redact: bool = False,
     ) -> ActionResult:
-        """Type into a field, focusing it first if a target was given."""
+        """Type into a field, focusing it first if a target was given.
 
-        async def do(resolved: Target | None) -> None:
+        The field is read back before submitting, and the result says whether
+        the text landed: see `ios_mcp.actions.readback`. When nothing holds
+        focus there is nothing to read, and the result says only what it
+        always did.
+        """
+
+        async def do(resolved: Target | None) -> Readback | None:
             if resolved is not None:
                 x, y = resolved.point
                 await self.wda.tap(x, y)
+            field = await self.wda.focused_element()
             if clear_first:
-                # Select-all then overwrite; WDA has no reliable clear-by-coordinate.
-                await self.wda.send_keys("a")
+                if field is None:
+                    raise ElementNotInteractable(
+                        "Nothing has keyboard focus, so there is no field to clear",
+                        hint="Pass the field as ref or target so it is focused first.",
+                    )
+                # Ctrl-A is not select-all on an iOS keyboard: sent as keys it
+                # typed a control character and the letter a into the field.
+                await self.wda.clear_element(field)
+            # XCTest reports an empty field's value as its placeholder, so
+            # the placeholder is read once to tell the two apart.
+            placeholder = await self._placeholder(field)
+            before = await self._field_text(field, placeholder)
             await self.wda.send_keys(text)
+            readback = None
+            if before is not None:
+                after = await self._field_text(field, placeholder)
+                if after is not None:
+                    readback = compare(text, before, after, secret=_redact)
             if submit:
                 await self.wda.send_keys("\n")
+            return readback
 
         return await self._act(
             "type",
@@ -314,6 +338,24 @@ class IosSession:
             # the model. Its content cannot be a destructive instruction.
             policy_text=None if _redact else text,
         )
+
+    async def _field_text(self, field: str | None, placeholder: str | None) -> str | None:
+        """What a focused field holds, or None when it cannot be read."""
+        if field is None:
+            return None
+        try:
+            value = await self.wda.element_attribute(field, "value")
+        except IosAutomationError:
+            return None
+        return field_text(value, placeholder)
+
+    async def _placeholder(self, field: str | None) -> str | None:
+        if field is None:
+            return None
+        try:
+            return await self.wda.element_attribute(field, "placeholderValue")
+        except IosAutomationError:
+            return None
 
     async def type_secret(
         self,
@@ -737,8 +779,9 @@ class IosSession:
         self,
         name: str,
         #: Returns True when it deliberately did nothing because the element was
-        #: already as asked; anything else, including None, means it acted.
-        do: Callable[[Any], Awaitable[bool | None]],
+        #: already as asked, a Readback when it typed and read the field back,
+        #: and anything else, including None, when it simply acted.
+        do: Callable[[Any], Awaitable[bool | Readback | None]],
         *,
         ref: str | None,
         target: str | None,
@@ -798,6 +841,11 @@ class IosSession:
             self._record_failure(name, args, exc)
             raise
 
+        readback = already if isinstance(already, Readback) else None
+        landed = readback is None or readback.landed
+        if readback is not None and readback.note:
+            note = f"{note}; {readback.note}" if note else readback.note
+
         outcome = await self._settle(baseline=before.fingerprint)
         result = await self._finish(
             name,
@@ -808,10 +856,17 @@ class IosSession:
             args=args,
             note=note,
             recovered=self.wda.recovered_count > recovered_before,
+            # Text that did not land is a failed action, whatever the keyboard
+            # said. Reporting it as ok is the failure this check exists for.
+            ok=landed,
+            code=None if landed else "text_mismatch",
+            error=None if landed else note,
         )
         if already is True:
             # Marked before caching, so a replay of this call says the same.
             result = replace(result, already_satisfied=True)
+        if readback is not None:
+            result = replace(result, readback=readback)
         self.idempotency.put(idem_key, result)
         return result
 

@@ -6,6 +6,7 @@ import json
 
 import pytest
 from fake_device import make_session
+from fake_wda import FakeField
 from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from trees import form_screen, node, settings_screen
@@ -359,3 +360,16 @@ async def test_a_plain_screenshot_does_not_spend_an_observation(server_with_sess
 
         await client.call_tool("ios_screenshot", {})
         assert session.refs.generation == before
+
+
+async def test_text_that_did_not_land_reaches_an_mcp_client_as_a_failure(
+    server_with_session,
+) -> None:
+    """`ok()` puts True first, so the result's own False has to win."""
+    mcp, _, state = server_with_session
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        state["fake"].focused_field = FakeField(drop_leading=4)
+        result = payload(await client.call_tool("ios_type", {"text": "hello world"}))
+    assert result["ok"] is False
+    assert result["typed"] == {"status": "mismatch", "shown": "o world"}

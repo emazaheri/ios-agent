@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import base64
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 
@@ -34,6 +35,54 @@ def blank_png(width: int, height: int) -> bytes:
 
 
 @dataclass
+class FakeField:
+    """A focused text field, with the ways real ones lose or reshape input.
+
+    `drop_leading` loses the first characters of each burst of keys, which
+    is what a keyboard still animating in does. `transform` rewrites what
+    arrives, as autocapitalisation or an input mask would. An empty field
+    reads as its placeholder, because that is what XCTest reports.
+    """
+
+    ELEMENT: ClassVar[str] = "field-1"
+
+    text: str = ""
+    placeholder: str | None = "Search"
+    secure: bool = False
+    drop_leading: int = 0
+    transform: Callable[[str], str] | None = None
+    clears: int = 0
+
+    def receive(self, keys: str) -> None:
+        if keys == "\n":
+            return
+        keys = keys[self.drop_leading :]
+        self.text += keys
+        if self.transform is not None:
+            self.text = self.transform(self.text)
+
+    def shown(self) -> str | None:
+        if not self.text:
+            return self.placeholder
+        return chr(0x2022) * len(self.text) if self.secure else self.text
+
+    def route(self, tail: str) -> httpx.Response:
+        if tail == "/attribute/value":
+            return _ok_value(self.shown())
+        if tail == "/attribute/placeholderValue":
+            return _ok_value(self.placeholder)
+        if tail == "/clear":
+            self.clears += 1
+            self.text = ""
+            return _ok_value(None)
+        return _ok_value(None)
+
+
+def _ok_value(value: Any) -> httpx.Response:
+    return httpx.Response(200, json={"value": value})
+
+
+@dataclass
 class FakeWda:
     """Serves the subset of the WDA API this project uses."""
 
@@ -55,6 +104,9 @@ class FakeWda:
     #: A passcode-locked phone cannot be woken by WebDriverAgent.
     passcode_locked: bool = False
     unlock_calls: int = 0
+    #: A text field holding keyboard focus, or None when nothing does. Off by
+    #: default, so a fake that never modelled focus still answers as before.
+    focused_field: FakeField | None = None
 
     calls: list[tuple[str, str, dict[str, Any] | None]] = field(default_factory=list)
     settings_applied: dict[str, Any] = field(default_factory=dict)
@@ -163,6 +215,14 @@ class FakeWda:
             if bundle:
                 self.active_bundle = bundle
             return self._ok(None)
+        if tail == "/element/active":
+            if self.focused_field is None:
+                return self._error(404, "no such element")
+            return self._ok({"ELEMENT": FakeField.ELEMENT})
+        if tail.startswith(f"/element/{FakeField.ELEMENT}/") and self.focused_field is not None:
+            return self.focused_field.route(tail.rsplit("/element/" + FakeField.ELEMENT, 1)[1])
+        if tail == "/wda/keys" and self.focused_field is not None:
+            self.focused_field.receive("".join((body or {}).get("value", [])))
         if tail == "/wda/getPasteboard":
             return self._ok(base64.b64encode(self.pasteboard.encode()).decode())
         if tail == "/wda/setPasteboard":

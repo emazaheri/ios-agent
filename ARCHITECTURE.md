@@ -168,6 +168,13 @@ loop costs two round-trips per step; folding the observation in halves that.
 - **Deltas.** When the screen is structurally similar the result is a diff
   (`~ e2 switch "Bold Text" =1 (was 0)`); a genuine navigation returns the
   whole screen.
+- **Typed text is read back.** After `type`, the focused field's value is
+  compared with what was sent, before return is pressed. Text that did not
+  land fails the action and says what the field shows; capitalisation, smart
+  punctuation or an input mask is reported as `reformatted` and succeeds. A
+  clean type adds nothing to the payload. A secret is judged by its length
+  only. `clear_first` empties the field through WebDriverAgent's element
+  clear: sent as keys, Ctrl-A typed a control character and the letter a.
 - **Already satisfied** is reported when `set_value` finds a switch already in
   the requested state and declines to tap. A switch left alone for that reason
   and a switch that refused to move return otherwise identical payloads, and

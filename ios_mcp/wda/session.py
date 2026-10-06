@@ -14,13 +14,16 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from ios_mcp.config import Settings
-from ios_mcp.errors import DeviceLocked, RunnerCrashed, SessionLost, WdaError
+from ios_mcp.errors import DeviceLocked, ElementNotFound, RunnerCrashed, SessionLost, WdaError
 from ios_mcp.wda.client import WdaClient
 from ios_mcp.wda.models import AlertInfo, Rect, SnapshotNode
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+#: The key a W3C WebDriver response names an element under.
+_W3C_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf"
 
 #: The home screen, as an app. Activating it after backgrounding another
 #: app is what stops XCTest blocking on the one that went away.
@@ -286,6 +289,31 @@ class WdaSession:
                 f"/session/{sid}/wda/keys", {"value": list(text), "frequency": frequency}
             )
         )
+
+    async def focused_element(self) -> str | None:
+        """The id of the element holding keyboard focus, or None when nothing does.
+
+        One cheap call (0.06s on a simulator) that names the field keys went
+        to, where finding it in the tree would mean reading the whole tree.
+        """
+        try:
+            value = await self._call(lambda sid: self.client.get(f"/session/{sid}/element/active"))
+        except ElementNotFound:
+            return None
+        if not isinstance(value, dict):
+            return None
+        element = value.get("ELEMENT") or value.get(_W3C_ELEMENT_KEY)
+        return str(element) if element else None
+
+    async def element_attribute(self, element: str, name: str) -> str | None:
+        value = await self._call(
+            lambda sid: self.client.get(f"/session/{sid}/element/{element}/attribute/{name}")
+        )
+        return None if value is None else str(value)
+
+    async def clear_element(self, element: str) -> None:
+        """Empty a text field. Selects and deletes, so it works where Ctrl-A does not."""
+        await self._call(lambda sid: self.client.post(f"/session/{sid}/element/{element}/clear"))
 
     async def press_button(self, name: str) -> None:
         await self._call(

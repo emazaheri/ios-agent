@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ios_mcp.actions.readback import Readback
 from ios_mcp.perception.digest import Digest, DigestNode, Scrubber, scrubbed
 from ios_mcp.perception.refs import Target
 from ios_mcp.wda.models import AlertInfo
@@ -73,6 +74,10 @@ class ActionResult:
     #: no-op the device caused: a switch already on and a switch that refuses to
     #: move look identical in every other field.
     already_satisfied: bool = False
+    #: Typing only: what the field held afterwards, judged against the text
+    #: sent. Reported when it is anything but an exact match, so a clean
+    #: type costs no extra tokens.
+    readback: Readback | None = None
     note: str | None = None
     #: See `Digest.scrub`. The target and the alert carry screen text of their
     #: own, so the whole payload is scrubbed rather than only the screen in it.
@@ -98,6 +103,8 @@ class ActionResult:
             out["note"] = "WebDriverAgent was restarted mid-action and the session restored."
         if self.already_satisfied:
             out["already_satisfied"] = True
+        if self.readback is not None and self.readback.status != "verified":
+            out["typed"] = self.readback.to_dict()
         if self.from_cache:
             out["from_cache"] = True
             out["note"] = "Replayed from the idempotency cache; the device was not touched."

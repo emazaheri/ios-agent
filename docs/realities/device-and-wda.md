@@ -57,3 +57,13 @@ The device path, the runner that drives it, and the timings that shape every set
   at 60 to 80 ms each, with no frames, and it scrolls the screen to reach rows
   below the fold. Settings root took 3.3 to 4.4s against WDA's 3.7s. Its
   `perform_press` only works on debug builds. See ADR 0016.
+- **An empty text field reports its placeholder as its value.** The Settings
+  search field reads `value="Search"` until something is typed, so a
+  read-back that took the value at its word would see text in an empty field.
+- **Ctrl-A is not select-all on an iOS keyboard.** Sent through `/wda/keys` on a simulator,
+  `\ue009a` arrived as two characters: "Airplane" became "Airplane\ue009aWi"
+  instead of "Wi". `POST /element/{id}/clear` empties it, 0.34s on a
+  simulator. `GET /element/active` names the focused field in 0.06s.
+- **Reading a field back costs 0.4 to 0.5s on a simulator and 0.7 to 0.9s on
+  a phone over Wi-Fi**, four calls on a 6s and a 12s type, measured on
+  Settings search.

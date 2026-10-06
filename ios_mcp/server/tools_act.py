@@ -84,7 +84,12 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
         approve: ApproveArg = None,
         idem_key: IdemArg = None,
     ) -> dict[str, Any]:
-        """Type into a field, focusing it first when a ref or target is given."""
+        """Type into a field, focusing it first when a ref or target is given.
+
+        The field is read back afterwards. If the text did not land, the call
+        fails with `typed.shown` saying what the field holds; `reformatted`
+        means it landed with the app's own capitalisation or formatting.
+        """
         session = ctx.require()
         _approve(approve)
         result = await session.type_text(
