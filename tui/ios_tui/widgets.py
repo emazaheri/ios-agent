@@ -539,6 +539,9 @@ class Transcript(SelectableLog):
         if event.succeeded and not event.verified:
             rows.append(Text("  nothing it did changed the screen", style="yellow bold"))
 
+        if event.routed_from:
+            rows.append(Text(f"  {_routing(event)}", style="dim"))
+
         # "stopped: X" under a line that already says X is a label with nothing
         # to label. It earns its place only when it says something new.
         if stopped and stopped != summary and stopped != self._last_said:
@@ -616,7 +619,7 @@ class Transcript(SelectableLog):
         # both cases the verb is what is remarkable rather than the timing.
         # Colouring the first column means it survives any width; a note at the
         # end of the row does not.
-        unusual = event.refused or bool(event.error)
+        unusual = event.refused or event.failed or bool(event.error)
         style = "yellow" if unusual else ("cyan" if event.verb in _ACTING else "dim")
         line.append(f"{event.verb:<12}", style=style)
         target = _target_of(event.args)
@@ -629,6 +632,13 @@ class Transcript(SelectableLog):
             # turn usually fixes them, so a run full of red on its way to
             # succeeding reads as a disaster that did not happen.
             line.append(event.error, style="yellow")
+        elif event.failed:
+            # Reached the device and did not do what was asked, without
+            # raising. Without this the row was cyan with a timing, the same
+            # as a success, while the model was being told it had failed.
+            line.append("failed", style="yellow")
+        elif event.already:
+            line.append("already", style="dim")
         elif event.elapsed_ms:
             line.append(f"{event.elapsed_ms}ms", style="dim")
         return line
@@ -886,3 +896,12 @@ class LogPane(SelectableLog):
 
     def __init__(self) -> None:
         super().__init__(markup=True, wrap=True, id="log-pane")
+
+
+def _routing(event: GoalFinished) -> str:
+    """Which model a routed run (ADR 0015) ran on, said in one line."""
+    small = event.routed_from
+    if event.escalated_at_turn is None:
+        return f"stayed on {small} throughout"
+    large = event.large_model or "the configured model"
+    return f"started on {small}, moved to {large} at turn {event.escalated_at_turn}"

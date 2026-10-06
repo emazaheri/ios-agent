@@ -166,6 +166,8 @@ class EventBackend:
         self._sink.emit(ActionStarted(verb=verb, args=dict(args)))
         before_screen = self.last_screen
         before_refusals = self.stats.refusals
+        before_satisfied = self.stats.satisfied
+        before_action = self.last_action
         started = time.monotonic()
         try:
             rendered = await call()
@@ -198,6 +200,21 @@ class EventBackend:
         # backend's `Verifier`, and both couple the front end to internals
         # that `Backend` deliberately does not expose.
         refused = self.stats.refusals > before_refusals
+        already = self.stats.satisfied > before_satisfied
+
+        # An action can reach the device, fail, and still return: typed text
+        # that read back as something else does, so the screen it produced
+        # arrives. `last_action` is the record both backends write for every
+        # action that ran, so this reads it rather than the rendered text. A
+        # new record, not merely a falsy `ok`, since a path that returns
+        # without recording would otherwise inherit the previous one.
+        after_action = self.last_action
+        failed = (
+            not refused
+            and after_action is not None
+            and after_action is not before_action
+            and not after_action.ok
+        )
 
         # `SessionBackend` only replaces `last_screen` when the action returned
         # a full digest. When the new screen is similar to the old one it
@@ -215,6 +232,8 @@ class EventBackend:
                 rendered=rendered,
                 elapsed_ms=elapsed_ms,
                 refused=refused,
+                failed=failed,
+                already=already,
                 screen_refreshed=refreshed,
                 stats=StatsSnapshot.of(self.stats),
             )

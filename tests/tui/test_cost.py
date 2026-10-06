@@ -63,6 +63,40 @@ async def test_watching_a_run_does_not_change_what_it_costs() -> None:
     assert bare_stats["actions"] == 3 and bare_stats["observations"] == 1
 
 
+#: A routed run (ADR 0015): the small model misses a row, which is trouble, and
+#: the large one finishes the route. Escalation is decided from counters the
+#: wrapper delegates, so a wrapper that disturbed them would move the turn.
+ROUTED_SMALL = [[("tap", {"target": "A Row That Is Not There"})]]
+ROUTED_LARGE = SCRIPT[1:]
+
+
+async def _routed(*, watched: bool) -> tuple[dict[str, int], int | None, bool]:
+    model = DeviceModel()
+    session, _, _ = build_session(model, settings())
+    inner = SessionBackend(session, Verifier())
+    backend = EventBackend(inner, ListSink()) if watched else inner
+
+    outcome = await run_goal(
+        session,
+        "Turn on Bold Text.",
+        model=ScriptedModel(ROUTED_LARGE),
+        route=ScriptedModel(ROUTED_SMALL, prefix="small"),
+        backend=backend,
+    )
+    return asdict(outcome.stats), outcome.escalated_at_turn, model.switches["bold_text"]
+
+
+async def test_watching_a_routed_run_does_not_move_where_it_escalates() -> None:
+    bare = await _routed(watched=False)
+    watched = await _routed(watched=True)
+
+    assert watched == bare, (
+        f"the front end changed a routed run:\n  bare    {bare}\n  watched {watched}"
+    )
+    # Both sides escalated and finished, so the equality is about something.
+    assert bare[1] == 1 and bare[2] is True
+
+
 async def test_the_wrapper_reports_every_call_it_passed_through() -> None:
     """Equality above would also hold for a wrapper that emitted nothing."""
     model = DeviceModel()

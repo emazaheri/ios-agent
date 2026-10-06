@@ -572,7 +572,7 @@ class IosAgentApp(App[int]):
             return False
         probe = probe_provider(self.runner.agent)
         status = self.query_one(StatusBar)
-        status.model = self.runner.agent.describe()
+        status.model = self.runner.model_label()
 
         # Kept so a later failure can offer the same remedy without guessing
         # from the provider's wording.

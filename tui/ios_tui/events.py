@@ -125,6 +125,14 @@ class GoalFinished(Event):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     elapsed_s: float = 0.0
+    #: The small model a routed run started on (ADR 0015), or None when the
+    #: run was not routed. `large_model` is where it escalates to.
+    routed_from: str | None = None
+    large_model: str = ""
+    #: The turn a routed run moved to the large model, or None if it never did.
+    escalated_at_turn: int | None = None
+    #: Input and output tokens per model. One entry unless the run was routed.
+    tokens_by_model: Mapping[str, tuple[int, int]] = field(default_factory=dict)
 
 
 # -- what it did to the phone ----------------------------------------------
@@ -153,6 +161,14 @@ class ActionFinished(Event):
     #: failure because nothing was touched, and apart from a success because
     #: the agent spent a turn.
     refused: bool = False
+    #: It reached the device and returned `ok=False` without raising: typed
+    #: text that read back as something else is the case that does this. The
+    #: rendered text says why. Apart from `error`, which is only ever an
+    #: exception, because a row that looked like a success here was the bug.
+    failed: bool = False
+    #: The session left the element alone because it was already as asked, so
+    #: nothing moved and nothing was wrong.
+    already: bool = False
     #: Why the action raised, if it did.
     #:
     #: Almost always recoverable, and recovered from: an ambiguous target or a

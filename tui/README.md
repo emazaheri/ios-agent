@@ -63,6 +63,14 @@ through `export_provider_credentials`, because pydantic-settings reads `.env`
 into a settings object rather than into the process environment, and the SDK
 looks in the environment.
 
+`IOS_AGENT_ROUTE_MODEL` routes a run (ADR 0015): it starts on that smaller
+model and moves to `IOS_AGENT_MODEL` at the first sign of trouble. The app and
+`ios-agent run` both honour it, streamed or not. The status bar shows the route
+beside the model, and the end of a run says whether it moved and at which turn;
+`--no-tui` also splits the tokens by model. It used to be silently ignored
+here: `run_goal` builds the small model only when it builds the large one, and
+a streamed run builds its own, so the app now builds both.
+
 On startup the app checks the toolchain before acquiring a device, so a Mac
 with no Xcode or no WebDriverAgent build is told what is missing and how to fix
 it, rather than spending a minute on a boot and then failing with whichever
