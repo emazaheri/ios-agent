@@ -482,3 +482,28 @@ def test_a_slider_reports_its_value() -> None:
 
     slider = next(n for n in d.nodes if n.role == "slider")
     assert slider.value == "40%"
+
+
+def test_a_scroll_view_survives_one_large_block_of_content_centred_in_it() -> None:
+    """Mutual centring took a sign-up form's terms paragraph and its scroll view
+    for one thing, and the page stopped saying it scrolled."""
+    tree = node(
+        "Application",
+        label="Signup",
+        h=852,
+        children=[
+            node(
+                "ScrollView",
+                y=100,
+                h=660,
+                children=[
+                    node("TextField", label="Email", x=16, y=140, w=360),
+                    node("StaticText", label="Terms of Service text", x=16, y=320, w=360, h=200),
+                ],
+            ),
+            node("Button", label="Continue", x=16, y=780, w=360),
+        ],
+    )
+    d = digest_of(tree)
+    assert any(n.role == "scroll" and n.scrollable for n in d.nodes), d.render()
+    assert any(n.label == "Terms of Service text" for n in d.nodes)

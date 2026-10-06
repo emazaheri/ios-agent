@@ -489,6 +489,12 @@ def _is_noise(
     return role == "text" and text is not None and text == inherited_text
 
 
+#: Scrollable roles that hold content. A picker wheel scrolls too, but it is a
+#: control, and its merge with the `Cell` UIKit wraps it in is what removes a
+#: phantom: see `test_every_wheel_of_a_picker_keeps_its_selected_value`.
+_SCROLL_CONTAINERS = SCROLLABLE_ROLES - {"picker"}
+
+
 def _dedupe_colocated(candidates: list[_Candidate]) -> list[_Candidate]:
     """Collapse several nodes that describe one on-screen thing into one.
 
@@ -556,7 +562,15 @@ def _find_coincident(kept: list[_Candidate], candidate: _Candidate) -> int | Non
     delete the scroll container the agent needs.
     """
     text = _text_of(candidate.node)
+    scrolls = candidate.role in _SCROLL_CONTAINERS
     for index, existing in enumerate(kept):
+        # A scroll container and its content are never one thing. Mutual
+        # centring alone said they were whenever the content was one large
+        # block: a sign-up form's terms paragraph, centred 10 points from its
+        # scroll view's centre, ate the scroll view, and the page no longer
+        # said it scrolled.
+        if scrolls != (existing.role in _SCROLL_CONTAINERS):
+            continue
         rect, other = candidate.node.rect, existing.node.rect
         if _mutually_centred(rect, other):
             return index

@@ -188,8 +188,14 @@ async def scroll_a_300_row_list(session: IosSession, meter: TokenMeter) -> bool:
     await session.terminate_app(CONTACTS)
     await session.launch_app(CONTACTS, fresh=True)
     first = await meter.observe()
-    if not any(n.label == row_name(1) for n in first.nodes):
+    if not any((n.label or "").startswith(row_name(0)[:-3]) for n in first.nodes):
         return False
+    # Contacts restores its scroll position across a terminate and relaunch, so
+    # a run after another can open mid-list. Back to the top first.
+    if not any(n.label == row_name(1) for n in first.nodes):
+        top = await meter.act(session.scroll("up", until=row_name(1), max_scrolls=15))
+        if "found" not in (top.note or ""):
+            return False
     result = await meter.act(session.scroll("down", until=row_name(60), max_scrolls=15))
     return "found" in (result.note or "")
 
