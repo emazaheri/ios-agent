@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import io
+import shutil
 import sys
 
 import pytest
+from fake_device import make_session
 from trees import node, settings_screen
 
 from ios_mcp.config import Settings
 from ios_mcp.errors import ErrorCode, NotSupported, ToolchainMissing
 from ios_mcp.perception.digest import build_digest
-from ios_mcp.perception.vision import _font, _infer_scale, _scale_for, annotate
+from ios_mcp.perception.vision import _font, _infer_scale, _scale_for, annotate, fit, png_size
 from ios_mcp.wda.models import Rect, SnapshotNode
 
 PIL = pytest.importorskip("PIL")
@@ -198,3 +200,45 @@ def test_a_missing_pillow_says_so_rather_than_returning_a_bare_picture(
         annotate(png, d)
     assert exc_info.value.code is ErrorCode.TOOLCHAIN_MISSING
     assert "--extra vision" in (exc_info.value.hint or "")
+
+
+# -- the size a model is handed ----------------------------------------------------
+
+
+def test_a_native_capture_is_cut_to_the_long_edge_cap() -> None:
+    """1206x2622 on a simulator, over the 2000px that breaks a many-image request."""
+    out = fit(blank_png(1206, 2622), 1568)
+    width, height = png_size(out)  # type: ignore[misc]
+    assert height == 1568
+    assert abs(width / height - 1206 / 2622) < 0.01
+
+
+def test_landscape_keeps_its_shape() -> None:
+    assert png_size(fit(blank_png(2622, 1206), 1568))[0] == 1568  # type: ignore[index]
+
+
+def test_an_image_that_fits_is_untouched() -> None:
+    png = blank_png(400, 800)
+    assert fit(png, 1568) is png
+    assert fit(png, 0) is png
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("sips"), reason="needs macOS sips")
+def test_without_pillow_sips_does_the_cutting(monkeypatch) -> None:
+    """A plain screenshot must not need the vision extra to be safe to send."""
+    png = blank_png(1206, 2622)
+    monkeypatch.setitem(sys.modules, "PIL", None)
+    out = fit(png, 1568)
+    assert png_size(out) is not None
+    assert max(png_size(out)) == 1568  # type: ignore[arg-type]
+
+
+def test_the_size_is_read_from_the_header() -> None:
+    assert png_size(blank_png(10, 20)) == (10, 20)
+    assert png_size(b"not a png") is None
+
+
+async def test_a_screenshot_is_capped_before_it_leaves_the_session() -> None:
+    session, fake, _ = make_session(settings_screen())
+    fake.screenshot_bytes = blank_png(1320, 2868)  # an iPhone 17 Pro Max
+    assert max(png_size(await session.screenshot())) == 1568  # type: ignore[arg-type]

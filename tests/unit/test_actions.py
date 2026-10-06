@@ -519,3 +519,55 @@ async def test_the_default_signal_takes_no_screenshots() -> None:
     session, fake, _ = make_session(settings_screen())
     await session.tap(target="Wi-Fi")
     assert not any(p.endswith("/screenshot") for p in fake.paths_called())
+
+
+#: Typographic quotes, as iOS draws them.
+DECLINE = "Don" + chr(0x2019) + "t Allow"
+ALERT_TITLE = "Allow " + chr(0x201C) + "Maps" + chr(0x201D) + " to use your location?"
+
+
+def _springboard_alert(buttons: list[str]) -> dict:
+    return node(
+        "Application",
+        label="SpringBoard",
+        h=852,
+        children=[
+            node(
+                "Alert",
+                label=ALERT_TITLE,
+                x=61,
+                y=280,
+                w=270,
+                h=320,
+                children=[
+                    # Portrait coordinates, as SpringBoard reports them while the
+                    # app is in landscape: tall, narrow, and not where it is drawn.
+                    node("Button", label=label, x=44 + 56 * i, y=293, w=48, h=288)
+                    for i, label in enumerate(buttons)
+                ],
+            )
+        ],
+    )
+
+
+async def test_a_system_alert_button_is_pressed_by_name_not_by_coordinates() -> None:
+    """In landscape a coordinate tap on SpringBoard's portrait rect missed."""
+    buttons = ["Allow Once", "Allow While Using App", DECLINE]
+    session, fake, _ = make_session(_springboard_alert(buttons))
+    fake.active_bundle = "com.apple.springboard"
+    fake.alert_text = ALERT_TITLE
+    fake.alert_buttons = buttons
+
+    await session.tap(target=DECLINE)
+
+    accepted = [b for _, p, b in fake.calls if p.endswith("/alert/accept")]
+    assert accepted == [{"name": DECLINE}]
+    assert not fake.taps()
+
+
+async def test_an_ordinary_tap_never_asks_about_alerts() -> None:
+    session, fake, _ = make_session(settings_screen())
+    await session.tap(target="Wi-Fi")
+    assert len(fake.taps()) == 1
+    # One check, the one every action makes afterwards to report a new alert.
+    assert sum(p.endswith("/alert/text") for _, p, _ in fake.calls) == 1

@@ -213,6 +213,9 @@ async def decline_a_permission_alert(session: IosSession, meter: TokenMeter) -> 
         declined = await meter.act(session.tap(target=DECLINE))
         return declined.alert is None and declined.screen_changed
     finally:
+        # Terminated first: resetting the permission of a running app makes
+        # it ask again at once, which left the alert over the next run.
+        await session.terminate_app(MAPS)
         _reset_location(udid, MAPS)
 
 

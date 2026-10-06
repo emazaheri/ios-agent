@@ -15,7 +15,11 @@ with the screenshot rather than PIL's fixed bitmap default.
 
 from __future__ import annotations
 
+import io
 import logging
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from ios_mcp.errors import NotSupported, ToolchainMissing
@@ -210,3 +214,50 @@ def _infer_scale(image_width: int, digest: Digest) -> float:
     # Real devices are 1x, 2x, or 3x; snap to avoid drift from a slightly
     # inset widest element.
     return min((1.0, 2.0, 3.0), key=lambda candidate: abs(candidate - ratio))
+
+
+def fit(png: bytes, max_edge: int) -> bytes:
+    """``png`` with its long edge at most ``max_edge`` pixels, aspect kept.
+
+    Pillow when it is installed, which it is with the `vision` extra; macOS's
+    own `sips` otherwise, because a plain screenshot must not need an extra to
+    be safe to send. Returns the image unchanged when it already fits, when
+    ``max_edge`` is 0, or when neither tool can read it: an oversized image is
+    a cost, a missing one is a failure.
+    """
+    if max_edge <= 0 or max(png_size(png) or (0, 0)) <= max_edge:
+        return png
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(png)) as image:
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            image.save(out, format="PNG", optimize=True)
+            return out.getvalue()
+    except ImportError:
+        return _fit_with_sips(png, max_edge)
+
+
+def png_size(png: bytes) -> tuple[int, int] | None:
+    """Width and height from the PNG header, without decoding the image."""
+    if len(png) < 24 or png[:8] != b"\x89PNG\r\n\x1a\n" or png[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
+
+
+def _fit_with_sips(png: bytes, max_edge: int) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "screen.png"
+        path.write_bytes(png)
+        try:
+            subprocess.run(
+                ["sips", "--resampleHeightWidthMax", str(max_edge), str(path)],
+                check=True,
+                capture_output=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            logger.warning("Could not downscale a screenshot; sending it at native size")
+            return png
+        return path.read_bytes()

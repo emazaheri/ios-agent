@@ -12,6 +12,7 @@ returning a delta rather than a full digest keeps long flows cheap.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -42,14 +43,14 @@ from ios_mcp.perception.find import DEFAULT_LIMIT, FindResult, find_in_tree
 from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
 from ios_mcp.perception.roles import SETTABLE_ROLES
-from ios_mcp.perception.vision import annotate, ensure_available
+from ios_mcp.perception.vision import annotate, ensure_available, fit
 from ios_mcp.policy.audit import AuditTrail
 from ios_mcp.policy.faults import Fault, classify
 from ios_mcp.policy.gate import PolicyGate, Verdict
 from ios_mcp.policy.redact import Redactor
 from ios_mcp.policy.secrets import resolve_secret
 from ios_mcp.wda.models import AlertInfo, Rect, SnapshotNode
-from ios_mcp.wda.session import WdaSession
+from ios_mcp.wda.session import SPRINGBOARD_BUNDLE_ID, WdaSession
 
 logger = logging.getLogger(__name__)
 
@@ -197,13 +198,17 @@ class IosSession:
         And a digest older than the picture it is drawn on boxes controls where
         they used to be.
         """
+        max_edge = self.settings.screenshot.max_edge_px
         if not annotate_refs:
-            return await self.wda.screenshot()
+            return await asyncio.to_thread(fit, await self.wda.screenshot(), max_edge)
         # Before the observation, so a missing Pillow costs neither a tree
         # fetch nor a ref-table generation the caller never gets to see.
         ensure_available()
         digest = await self.observe()
-        return annotate(await self.wda.screenshot(), digest)
+        # Drawn at native size, where the points-to-pixels ratio is measured,
+        # and only then scaled down.
+        annotated = annotate(await self.wda.screenshot(), digest)
+        return await asyncio.to_thread(fit, annotated, max_edge)
 
     async def alert(self) -> AlertInfo | None:
         return await self.wda.alert()
@@ -279,10 +284,30 @@ class IosSession:
                 await self.wda.touch_and_hold(x, y, long_press_s)
             elif double:
                 await self.wda.double_tap(x, y)
-            else:
+            elif not await self._press_alert_button(resolved):
                 await self.wda.tap(x, y)
 
         return await self._act("tap", do, ref=ref, target=target, role=role, idem_key=idem_key)
+
+    async def _press_alert_button(self, resolved: Target) -> bool:
+        """Press a system alert's button by name, where coordinates cannot be trusted.
+
+        SpringBoard does not rotate on an iPhone, so with the app in landscape
+        it reports its alert in portrait coordinates: on a simulator the
+        decline button read as a 48x288 rect, and a tap at its centre missed
+        and left the alert up. WebDriverAgent's alert endpoint presses the
+        button by its label, in whatever orientation it is drawn. Checked only
+        when the screen just read was SpringBoard and the target is a button,
+        so an ordinary tap pays nothing for it.
+        """
+        last = self._last_digest
+        if resolved.role != "button" or last is None or last.app != SPRINGBOARD_BUNDLE_ID:
+            return False
+        alert = await self.wda.alert()
+        if alert is None or resolved.label not in alert.buttons:
+            return False
+        await self.wda.handle_alert("accept", resolved.label)
+        return True
 
     async def type_text(
         self,

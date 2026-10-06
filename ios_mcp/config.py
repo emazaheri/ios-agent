@@ -64,6 +64,20 @@ class SnapshotSettings(BaseModel):
     use_first_match: bool = True
 
 
+class ScreenshotSettings(BaseModel):
+    """What a screenshot handed to a model is allowed to weigh.
+
+    A native capture is 1206x2622 on an iPhone 17 simulator, over the 2000
+    pixels a vision API accepts once a request carries many images: mobile-mcp
+    #140 is that 400, and a session restart to recover from it. The long edge
+    is capped at the size Anthropic's API scales to anyway, so nothing a model
+    could have seen is lost. Refs are what an agent acts on, never pixels, so
+    no coordinate depends on the scale. 0 keeps the native size.
+    """
+
+    max_edge_px: int = Field(default=1568, ge=0)
+
+
 class DigestSettings(BaseModel):
     """Budgets and thresholds for the UI Digest."""
 
@@ -285,6 +299,7 @@ class Settings(BaseSettings):
 
     snapshot: SnapshotSettings = SnapshotSettings()
     digest: DigestSettings = DigestSettings()
+    screenshot: ScreenshotSettings = ScreenshotSettings()
     stabilize: StabilizeSettings = StabilizeSettings()
     policy: PolicySettings = PolicySettings()
     wda: WdaSettings = WdaSettings()
