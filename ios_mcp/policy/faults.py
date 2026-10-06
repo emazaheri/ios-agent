@@ -52,6 +52,9 @@ BY_CODE: Mapping[ErrorCode, Fault] = {
     ErrorCode.WDA_ERROR: Fault.DEVICE,
     # The environment interposed something nobody asked for.
     ErrorCode.UNEXPECTED_ALERT: Fault.DEVICE,
+    # The keys were sent and the field kept something else: the app or the
+    # keyboard lost them, which neither the model nor the digest could help.
+    ErrorCode.TEXT_MISMATCH: Fault.DEVICE,
     # The screen was there and the digest could not offer it.
     ErrorCode.ELEMENT_STALE: Fault.PERCEPTION,
     ErrorCode.NO_SNAPSHOT: Fault.PERCEPTION,

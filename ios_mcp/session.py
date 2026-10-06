@@ -890,7 +890,7 @@ class IosSession:
             # Text that did not land is a failed action, whatever the keyboard
             # said. Reporting it as ok is the failure this check exists for.
             ok=landed,
-            code=None if landed else "text_mismatch",
+            code=None if landed else ErrorCode.TEXT_MISMATCH.value,
             error=None if landed else note,
         )
         if already is True:

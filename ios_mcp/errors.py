@@ -35,6 +35,9 @@ class ErrorCode(StrEnum):
 
     # Layer 4: actions
     ELEMENT_NOT_INTERACTABLE = "element_not_interactable"
+    #: Typed text read back as something else. Not raised: the action returns
+    #: with `ok=False` and this code, so the screen it produced still arrives.
+    TEXT_MISMATCH = "text_mismatch"
     UNEXPECTED_ALERT = "unexpected_alert"
     TIMEOUT = "timeout"
 

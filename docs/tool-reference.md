@@ -45,7 +45,7 @@ are unsure completed.
 | Tool | Notes |
 |---|---|
 | `ios_tap` | `ref` preferred over `target`. Supports `double` and `long_press_s`. |
-| `ios_type` | Focuses the field first when given a ref or target. Never put a real credential here. |
+| `ios_type` | Focuses the field first when given a ref or target, then reads it back: text that did not land returns `ok: false` with `typed.shown`. Never put a real credential here. |
 | `ios_type_secret` | Takes a keychain reference, not a value. See [SAFETY.md](../SAFETY.md). |
 | `ios_set_value` | Switches, sliders, steppers, pickers. Prefer this over tapping a switch: it checks current state, so asking for `on` when already on does nothing rather than turning it off. |
 | `ios_scroll` | `until` stops as soon as the text appears, and gives up when the content stops moving. |
@@ -95,3 +95,7 @@ Failures arrive as JSON with a machine-readable `code`, a `hint`, and often
 Common codes: `element_not_found`, `element_ambiguous`, `element_stale`,
 `element_not_interactable`, `action_requires_approval`, `app_not_allowed`,
 `session_halted`, `device_not_ready`, `tunnel_down`, `runner_crashed`.
+
+One code arrives without an error: `text_mismatch` is recorded when typed text
+read back as something else. The action still returns its screen, with
+`ok: false` and a `typed` entry saying what the field holds.
