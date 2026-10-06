@@ -25,8 +25,9 @@ grouped.
 | [0017](0017-no-simulator-native-tree-source.md) | No simulator-native tree source | CoreSimulator read the same screens 10 to 23% faster than WDA against a 50% bar; both wait on the app serialising its tree, and on Xcode 27 the read bootstraps through XCTest anyway |
 | [0018](0018-start-the-usb-tunnel-without-sudo.md) | Start the USB tunnel without sudo; Wi-Fi stays on xcodebuild | go-ios's userspace tunnel launched 10 of 10 in 3.1 to 3.3s with no sudo; pymobiledevice3's native tunnel launched faster, then refused six in a row after a replug, because it and `remoted` evict each other by design |
 | [0019](0019-settle-on-frames-as-an-option.md) | Settle on frames, as an off-by-default option | 17 to 22% off a phone's settle time, returning early 1 time in 304 against the tree loop's 3 in 198; only after counting novel frames, since the caret and a 0.42s search pause each defeated "identical frames" |
+| [0020](0020-no-app-intents-action-tier.md) | No App Intents action tier | Settings declares no intents; typed Siri on a phone answered two App Shortcut phrases itself, with a dialog and a how-to, and reported success both times; taps are not the bottleneck at 1.14x the oracle |
 
-Nine of the nineteen are refusals. That is the point rather than an accident: the
+Ten of the twenty are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 
