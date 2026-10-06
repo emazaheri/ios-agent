@@ -58,6 +58,12 @@ ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool]]
 
 #: Fraction of a scrollable area traversed by one scroll gesture.
 _SCROLL_FRACTION = 0.6
+#: How long a scroll holds the touch before moving. WebDriverAgent presses for
+#: this long, then drags. At 0.4s a press on a Contacts row became the row's
+#: own long press and the list never moved, on 300 rows; 0.15s and below
+#: scrolled every time. Settings rows ignore a long press, which is why the
+#: golden flows never noticed.
+_SWIPE_HOLD_S = 0.1
 #: Below this identity overlap the screen is a new one, so send a full digest.
 _DELTA_OVERLAP_THRESHOLD = 0.5
 #: How far above or below the middle of a picker wheel to tap to move it by one
@@ -1048,7 +1054,7 @@ class IosSession:
                 f"Unknown direction {direction!r}", hint="Use up, down, left, or right."
             )
         x1, y1, x2, y2 = deltas[direction]
-        await self.wda.drag(x1, y1, x2, y2, 0.4)
+        await self.wda.drag(x1, y1, x2, y2, _SWIPE_HOLD_S)
 
     async def _set_slider(self, resolved: Target, value: str) -> None:
         """Drag the thumb to a fraction of the track.

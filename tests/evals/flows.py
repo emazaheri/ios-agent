@@ -8,6 +8,7 @@ They run against stock Apple apps so they need no fixture app.
 from __future__ import annotations
 
 from harness import TokenMeter
+from long_list import CONTACTS, row_name, seed
 
 from ios_mcp.errors import ActionRequiresApproval, IosAutomationError
 from ios_mcp.session import IosSession
@@ -170,6 +171,23 @@ async def policy_blocks_a_destructive_action(session: IosSession, meter: TokenMe
         session.gate.settings.confirm_destructive = False
 
 
+async def scroll_a_300_row_list(session: IosSession, meter: TokenMeter) -> bool:
+    """Read a real 300-row list and scroll to a row far below the fold.
+
+    The list is Contacts seeded with 300 people. One observe has to come back
+    in budget, and scrolling has to move it: at a 0.4s hold, every scroll here
+    was taken as a long press on a row and the list never moved.
+    """
+    seed(session.lease.device.udid)
+    await session.terminate_app(CONTACTS)
+    await session.launch_app(CONTACTS, fresh=True)
+    first = await meter.observe()
+    if not any(n.label == row_name(1) for n in first.nodes):
+        return False
+    result = await meter.act(session.scroll("down", until=row_name(60), max_scrolls=15))
+    return "found" in (result.note or "")
+
+
 #: Name -> flow. Ordered cheapest first so a broken setup fails fast.
 FLOWS = {
     "clipboard_roundtrip": clipboard_roundtrip,
@@ -183,4 +201,5 @@ FLOWS = {
     "recover_from_a_stale_ref": recover_from_a_stale_ref,
     "refuse_an_unfindable_element": refuse_an_unfindable_element,
     "policy_blocks_a_destructive_action": policy_blocks_a_destructive_action,
+    "scroll_a_300_row_list": scroll_a_300_row_list,
 }

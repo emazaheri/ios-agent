@@ -165,6 +165,15 @@ async def test_scroll_gestures_inside_the_scrollable_area() -> None:
     assert 0 < drag["toY"] < 852
 
 
+async def test_a_scroll_does_not_hold_long_enough_to_become_a_long_press() -> None:
+    """WebDriverAgent presses for `duration`, then drags. At 0.4s a Contacts row
+    took the press as its own and a 300-row list never moved."""
+    session, fake, _ = make_session(list_screen())
+    await session.scroll("down")
+    drags = [b for p, b in fake.gestures if p.endswith("dragfromtoforduration")]
+    assert drags and all(b["duration"] <= 0.15 for b in drags)
+
+
 async def test_scroll_until_stops_as_soon_as_the_text_appears() -> None:
     state = {"scrolls": 0}
 

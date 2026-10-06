@@ -67,3 +67,15 @@ The device path, the runner that drives it, and the timings that shape every set
 - **Reading a field back costs 0.4 to 0.5s on a simulator and 0.7 to 0.9s on
   a phone over Wi-Fi**, four calls on a 6s and a 12s type, measured on
   Settings search.
+- **A 0.4s hold turned every scroll in Contacts into a long press.**
+  WebDriverAgent's drag presses for its `duration`, then moves. Settings rows
+  ignore a long press, so the golden flows scrolled fine for months; on a
+  300-row Contacts list the list never moved and `scroll(until=...)` reported
+  that it had ended. Holds of 0.15s and less scrolled every time, and scrolls
+  now hold for 0.1s.
+- **A 300-row list is cheap to read and slow to cross.** Contacts with 300
+  seeded people: one observe is 166 raw nodes, 31 digest nodes and 438 tokens
+  in 1.35s, because only the rows on screen exist in the tree. Scrolling to row
+  250 took 25 scrolls and 192.6s on a simulator (173.5s settling on frames),
+  each scroll a 3.2s drag call plus a settle of two tree reads. Search is the
+  route to a known row; scrolling is the route to an unknown one.
