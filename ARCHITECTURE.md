@@ -279,7 +279,7 @@ out to be already at its floor before any agent pillar was built.
 - `tests/integration` (21: 18 against a simulator, 3 against a physical device)
   runs against real iOS, including a chaos test that kills the runner mid-flow.
   The device tests are opt-in twice: a marker, and `IOS_MCP_ALLOW_DEVICE=1`.
-- `tests/evals` (12 flows) measures tokens, wall time, action count, and
+- `tests/evals` (13 flows) measures tokens, wall time, action count, and
   resolution-tier distribution. These four numbers are the product metrics.
 - `tests/evals/agent` measures the agent itself: 19 goal-directed tasks against
   a scripted device, each declaring the action count a hand-written oracle

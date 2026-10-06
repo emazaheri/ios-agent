@@ -6,6 +6,12 @@ selection. `read_text`, `handle_alert`, `wait_for` and `screenshot` are
 deliberately absent until a task fails without them, so that adding one is a
 decision with a number behind it.
 
+`handle_alert` now has its number, and it says stay absent. In
+`answer_a_permission_alert` a location alert stands in front of the app, and
+the model read it as a screen and tapped its decline button: 3 of 3, at the
+oracle's 5 actions every run, one more than the same route without the alert.
+A real alert on a simulator clears the same way, by a plain tap.
+
 `find` is the one that was added, and ADR 0011 carries the number. It exists
 because every perception fault in the S7 measurement fell on the two
 third-party tasks, where the whole actionable pool is unlabelled ids: the

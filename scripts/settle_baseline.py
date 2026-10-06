@@ -54,7 +54,12 @@ SETTINGS_APP = "com.apple.Preferences"
 #: Flows that change something on the device, even if they put it back. The
 #: long list seeds 300 contacts, which on a phone would be someone's real
 #: address book.
-CHANGES_DEVICE = {"toggle_a_switch", "clipboard_roundtrip", "scroll_a_300_row_list"}
+CHANGES_DEVICE = {
+    "toggle_a_switch",
+    "clipboard_roundtrip",
+    "scroll_a_300_row_list",
+    "decline_a_permission_alert",
+}
 
 
 @dataclass

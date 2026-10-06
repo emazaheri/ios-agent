@@ -79,3 +79,11 @@ The device path, the runner that drives it, and the timings that shape every set
   250 took 25 scrolls and 192.6s on a simulator (173.5s settling on frames),
   each scroll a 3.2s drag call plus a settle of two tree reads. Search is the
   route to a known row; scrolling is the route to an unknown one.
+- **A permission alert is SpringBoard's screen, and a tap clears it.** With
+  Maps' location permission reset (`simctl privacy <udid> reset location`),
+  launching Maps on an iOS 27.0 simulator returned the alert in the action
+  result: "Allow “Maps” to use your location?", buttons Allow Once,
+  Allow While Using App, Don’t Allow. The digest switches to
+  `com.apple.springboard` with an `alert` node and the three buttons. A
+  plain tap on Don’t Allow clears it, so an agent with no alert verb is
+  not stuck; the apostrophe is the typographic one.

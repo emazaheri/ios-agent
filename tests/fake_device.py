@@ -43,7 +43,12 @@ class ScriptedWda(FakeWda):
     #: tree has to hear about them. Deliberately not added to `_GESTURE_PATHS`:
     #: several tests count the entries in `gestures` as taps and drags, and a
     #: launch appearing there would be counted as one.
-    _SCREEN_CHANGING_PATHS = ("/wda/apps/launch", "/wda/apps/activate")
+    _SCREEN_CHANGING_PATHS = (
+        "/wda/apps/launch",
+        "/wda/apps/activate",
+        "/alert/accept",
+        "/alert/dismiss",
+    )
 
     def _route(self, method: str, path: str, body: dict[str, Any] | None):  # type: ignore[no-untyped-def]
         response = super()._route(method, path, body)

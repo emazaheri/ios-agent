@@ -174,7 +174,7 @@ e2   switch       "Bold Text" =0 id=ENHANCE_TEXT_LEGIBILITY @(336,161)
 e3   button       "Larger Text, Off" id=LARGER_TEXT @(190,216)
 ```
 
-Measured across twelve golden flows on a real simulator: **50 to 474 tokens per
+Measured across thirteen golden flows on a real simulator: **50 to 474 tokens per
 step**, averaged over each flow. One of them is a real 300-row list, Contacts
 seeded with 300 people, where other tools report timeouts: one observe comes
 back as 166 raw nodes and 438 tokens in 1.35s, because UIKit only realises the

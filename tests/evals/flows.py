@@ -7,11 +7,17 @@ They run against stock Apple apps so they need no fixture app.
 
 from __future__ import annotations
 
+import subprocess
+
 from harness import TokenMeter
 from long_list import CONTACTS, row_name, seed
 
 from ios_mcp.errors import ActionRequiresApproval, IosAutomationError
 from ios_mcp.session import IosSession
+
+MAPS = "com.apple.Maps"
+#: Typographic apostrophe, as iOS draws it.
+DECLINE = "Don\u2019t Allow"
 
 
 async def toggle_a_switch(session: IosSession, meter: TokenMeter) -> bool:
@@ -188,6 +194,37 @@ async def scroll_a_300_row_list(session: IosSession, meter: TokenMeter) -> bool:
     return "found" in (result.note or "")
 
 
+async def decline_a_permission_alert(session: IosSession, meter: TokenMeter) -> bool:
+    """A real system alert, answered the way the bundled agent has to.
+
+    Maps asks for the location on first launch once its permission is reset.
+    The launch has to report the alert, and a plain tap on its decline button
+    has to clear it: the agent has no alert verb, so if a tap could not do
+    this the agent could not either. The permission is reset again afterwards,
+    so the next run is asked too.
+    """
+    udid = session.lease.device.udid
+    _reset_location(udid, MAPS)
+    try:
+        await session.terminate_app(MAPS)
+        opened = await meter.act(session.launch_app(MAPS, fresh=True))
+        if opened.alert is None or DECLINE not in opened.alert.buttons:
+            return False
+        declined = await meter.act(session.tap(target=DECLINE))
+        return declined.alert is None and declined.screen_changed
+    finally:
+        _reset_location(udid, MAPS)
+
+
+def _reset_location(udid: str, bundle_id: str) -> None:
+    subprocess.run(
+        ["xcrun", "simctl", "privacy", udid, "reset", "location", bundle_id],
+        check=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+
 #: Name -> flow. Ordered cheapest first so a broken setup fails fast.
 FLOWS = {
     "clipboard_roundtrip": clipboard_roundtrip,
@@ -201,5 +238,6 @@ FLOWS = {
     "recover_from_a_stale_ref": recover_from_a_stale_ref,
     "refuse_an_unfindable_element": refuse_an_unfindable_element,
     "policy_blocks_a_destructive_action": policy_blocks_a_destructive_action,
+    "decline_a_permission_alert": decline_a_permission_alert,
     "scroll_a_300_row_list": scroll_a_300_row_list,
 }

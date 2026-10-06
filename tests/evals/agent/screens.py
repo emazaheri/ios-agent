@@ -84,6 +84,12 @@ class Injection(StrEnum):
     DEAD_SWITCH = "dead_switch"
     #: `App-prefs:root=WIFI` returns success and does nothing.
     DEEP_LINK_NOOP = "deep_link_noop"
+    #: The first launch of the Cards app raises a location permission alert
+    #: over it, and nothing underneath responds until it is answered. The
+    #: shape is the one Maps raised on an iOS 27.0 simulator: SpringBoard in
+    #: front, an `Alert` titled with the question, the reason as text, and
+    #: three buttons at those positions. The app and its reason are invented.
+    PERMISSION_ALERT = "permission_alert"
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,6 +507,24 @@ PANES.update(
     }
 )
 
+#: The permission alert, as measured. The apostrophe in "Don't Allow" is the
+#: typographic one iOS draws, which a model typing a straight one has to match.
+ALERT_TITLE = "Allow \u201cCards\u201d to use your location?"
+ALERT_MESSAGE = "Your location is used to show you people nearby."
+ALLOW_ONCE = "Allow Once"
+ALLOW_WHILE_USING = "Allow While Using App"
+DONT_ALLOW = "Don\u2019t Allow"
+ALERT_BUTTONS = (ALLOW_ONCE, ALLOW_WHILE_USING, DONT_ALLOW)
+#: What granting looks like. Either Allow hands over the location.
+GRANTING = frozenset({ALLOW_ONCE, ALLOW_WHILE_USING})
+_ALERT_RECT = (61.0, 330.0, 270.0, 300.0)
+_ALERT_BUTTON_X = 61.0
+_ALERT_BUTTON_W = 270.0
+_ALERT_BUTTON_H = 44.0
+#: Button centres 56 points apart from 489, as the real one drew them.
+_ALERT_BUTTON_TOPS = (467.0, 523.0, 579.0)
+SPRINGBOARD = "com.apple.springboard"
+
 #: Which app opens on which screen, and which bundle id each app answers to.
 #: `open_app` is the only way into an app the agent did not start in, so the
 #: model has to know what launching one does.
@@ -592,6 +616,11 @@ class DeviceModel:
             card.identifier: False for pane in PANES.values() for card in pane.cards
         }
     )
+    #: Whether the permission alert is on screen, whether it has been raised
+    #: yet (iOS asks once), and which button answered it.
+    alert: bool = False
+    alert_raised: bool = False
+    permission: str | None = None
 
     def __post_init__(self) -> None:
         if Injection.STALE_START in self.injections and self.screen == "settings_root":
@@ -602,6 +631,8 @@ class DeviceModel:
     # -- what the agent sees -----------------------------------------------
 
     def tree(self) -> dict[str, Any]:
+        if self.alert:
+            return self._alert_tree()
         if self.screen == "contacts":
             return self._contacts_tree()
         if self.screen == "mail_compose":
@@ -610,6 +641,41 @@ class DeviceModel:
         if pane.cards:
             return self._cards_tree(pane)
         return self._pane_tree(pane)
+
+    def _alert_tree(self) -> dict[str, Any]:
+        """SpringBoard in front, holding the alert, as the real one reads."""
+        ax, ay, aw, ah = _ALERT_RECT
+        buttons = [
+            node(
+                "Button",
+                label=label,
+                x=_ALERT_BUTTON_X,
+                y=top,
+                w=_ALERT_BUTTON_W,
+                h=_ALERT_BUTTON_H,
+            )
+            for label, top in zip(ALERT_BUTTONS, _ALERT_BUTTON_TOPS, strict=True)
+        ]
+        alert = node(
+            "Alert",
+            label=ALERT_TITLE,
+            x=ax,
+            y=ay,
+            w=aw,
+            h=ah,
+            children=[
+                node("Other", label="Vertical scroll bar, 1 page", x=318, y=340, w=30, h=100),
+                node("StaticText", label=ALERT_MESSAGE, x=ax + 16, y=ay + 40, w=aw - 32, h=40),
+                *buttons,
+            ],
+        )
+        return node(
+            "Application",
+            label="SpringBoard",
+            name="SpringBoard",
+            h=852,
+            children=[node("Window", h=852, children=[alert])],
+        )
 
     def _wheel_node(self, wheel: Wheel) -> dict[str, Any]:
         """The wheel, wrapped in the `Picker` UIKit always wraps it in.
@@ -906,6 +972,12 @@ class DeviceModel:
     # -- what the agent does -----------------------------------------------
 
     def tap(self, x: float, y: float) -> None:
+        if self.alert:
+            # A system alert takes every touch. Only its buttons respond.
+            for label, top in zip(ALERT_BUTTONS, _ALERT_BUTTON_TOPS, strict=True):
+                if _hit((_ALERT_BUTTON_X, top, _ALERT_BUTTON_W, _ALERT_BUTTON_H), x, y):
+                    self.answer_alert(label)
+            return
         if self.screen in ("contacts", "mail_compose"):
             return  # those screens are read-only fixtures
         pane = PANES[self.screen]
@@ -1009,6 +1081,20 @@ class DeviceModel:
             return
         self.search = (self.search + text).replace("\n", "")
 
+    def answer_alert(self, button: str | None, *, accept: bool = True) -> None:
+        """Answer the alert with ``button``, or with WebDriverAgent's default.
+
+        Without a name, accept is taken as the first button and dismiss as the
+        last, which is the cancel on this alert. Only the oracle and the MCP
+        server reach this path; the bundled agent has no alert verb.
+        """
+        if not self.alert:
+            return
+        if button not in ALERT_BUTTONS:
+            button = ALERT_BUTTONS[0] if accept else ALERT_BUTTONS[-1]
+        self.permission = button
+        self.alert = False
+
     def launch(self, bundle_id: str) -> None:
         """Open an app, or activate the one already in front.
 
@@ -1025,6 +1111,13 @@ class DeviceModel:
         if current is not None and APP_BUNDLES.get(current.app) == bundle_id:
             return
         self._go(entry)
+        if (
+            Injection.PERMISSION_ALERT in self.injections
+            and bundle_id == APP_BUNDLES["Cards"]
+            and not self.alert_raised
+        ):
+            self.alert = True
+            self.alert_raised = True
 
     def press_home(self) -> None:
         self._go("settings_root")
@@ -1058,6 +1151,9 @@ def gesture_handler(model: DeviceModel) -> Callable[[str, dict[str, Any] | None]
             model.press_home()
         elif path.endswith(("/wda/apps/launch", "/wda/apps/activate")) and body:
             model.launch(str(body.get("bundleId", "")))
+        elif path.endswith(("/alert/accept", "/alert/dismiss")):
+            name = (body or {}).get("name")
+            model.answer_alert(name, accept=path.endswith("/accept"))
 
     return handle
 
@@ -1091,6 +1187,15 @@ def build_session(
         pane = PANES.get(model.screen)
         if pane is not None:
             fake.active_bundle = APP_BUNDLES.get(pane.app, fake.active_bundle)
+        # The alert is reported both ways a real one is: as the tree, with
+        # SpringBoard in front, and through WebDriverAgent's alert endpoint,
+        # which is what puts `alert` and its hint into every action result.
+        if model.alert:
+            fake.active_bundle = SPRINGBOARD
+            fake.alert_text = f"{ALERT_TITLE}\n{ALERT_MESSAGE}"
+            fake.alert_buttons = list(ALERT_BUTTONS)
+        else:
+            fake.alert_text = None
 
     def on_gesture(path: str, body: dict[str, Any] | None) -> None:
         handle_gesture(path, body)
