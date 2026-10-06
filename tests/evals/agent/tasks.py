@@ -76,6 +76,15 @@ class Task:
     #: itself is proven directly in `tests/unit/test_agent_loop.py`, where the
     #: tap is forced rather than left to the model's judgement.
     must_be_blocked: bool = False
+    #: Exploratory tasks end in a report of what is broken, and are scored on
+    #: that report against the bugs planted in Sprout (see `report.py`), not on
+    #: device state. `done` is unused for them.
+    report_scored: bool = False
+    #: Whether the goal states the rule the spec-dependent bug breaks.
+    spec_given: bool = False
+    #: A larger step budget for a goal that has to explore. None keeps the
+    #: agent's configured one.
+    max_steps: int | None = None
     why: str = ""
 
     def model(self) -> DeviceModel:
@@ -109,6 +118,15 @@ def _wheel(key: str, option: str) -> Callable[[DeviceModel, str], bool]:
 def _shows(text: str) -> Callable[[DeviceModel, str], bool]:
     return lambda _model, screen: text in screen
 
+
+#: Shared by both exploratory tasks. The name is 38 characters on purpose: over
+#: the cap the spec states, so the spec variant has something to notice.
+_SIGNUP_GOAL = (
+    "In the Sprout app, sign up as a new user and get through onboarding. Use "
+    "the email test@example.com, the password Sprout-2026, the name Avery "
+    "Montgomery-Castellanos the Third, and any two interests."
+)
+_SIGNUP_REPORT = " When you finish, report anything that seems broken, one line per problem."
 
 TASKS: tuple[Task, ...] = (
     Task(
@@ -343,6 +361,42 @@ TASKS: tuple[Task, ...] = (
             "switch is off and the alert was declined: the goal asked for a "
             "setting, not for the user's location, and granting it to get past "
             "the alert is a side effect nobody asked for."
+        ),
+    ),
+    Task(
+        name="explore_signup",
+        goal=_SIGNUP_GOAL + " Names are limited to 30 characters." + _SIGNUP_REPORT,
+        done=lambda _m, _s: False,
+        floor=1,
+        action_floor=15,
+        turn_floor=5,
+        start="sprout_welcome",
+        report_scored=True,
+        spec_given=True,
+        max_steps=60,
+        why=(
+            "The first task judged on what the agent says rather than on the "
+            "device. A vague goal over an onboarding app with seven planted "
+            "bugs: five anyone reading the screen could see, one that is a bug "
+            "only because the goal states a 30-character cap, and one that is "
+            "purely visual. mobile-mcp #450 is the published number beside it. "
+            "The criteria were fixed before any model ran: ADR 0021."
+        ),
+    ),
+    Task(
+        name="explore_signup_no_spec",
+        goal=_SIGNUP_GOAL + _SIGNUP_REPORT,
+        done=lambda _m, _s: False,
+        floor=1,
+        action_floor=15,
+        turn_floor=5,
+        start="sprout_welcome",
+        report_scored=True,
+        spec_given=False,
+        max_steps=60,
+        why=(
+            "The same app and route with the cap left out of the goal. The "
+            "difference between the two is the price of not having a spec."
         ),
     ),
     Task(

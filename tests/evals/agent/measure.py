@@ -30,6 +30,7 @@ from typing import Any
 from ios_agent.batch import LastAction, simulate_turns
 from ios_agent.config import AgentSettings
 from ios_agent.loop import operator_prompt
+from report import score as score_report
 from screens import DeviceModel
 from tasks import Task
 
@@ -124,6 +125,9 @@ class Meter:
     #: it here is what lets a turn floor be derived from the guard rather than
     #: written down beside the route and left to drift.
     outcomes: list[LastAction] = field(default_factory=list)
+    #: What the driver reported at the end, for tasks scored on a report. The
+    #: agent's `done` summary, or the oracle's written-out findings.
+    report: str = ""
 
     def charge_device(self, payload: Any) -> None:
         self.device_tokens += len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN
@@ -210,6 +214,13 @@ class RunResult:
     faults: dict[str, int] = field(default_factory=dict)
     #: Runner crashes the auto-heal absorbed. The run still passed.
     recoveries: int = 0
+    #: Report-scored tasks only: which planted bugs the report named, the
+    #: lines that complained about something else (to be read by hand), and the
+    #: report itself, kept so the hand reading can be redone.
+    planted: dict[str, bool] = field(default_factory=dict)
+    expected: tuple[str, ...] = ()
+    false_report_candidates: tuple[str, ...] = ()
+    report: str = ""
 
     @property
     def overhead(self) -> float:
@@ -273,6 +284,11 @@ class RunResult:
             out["provider_error"] = self.provider_error
         if self.refused_by:
             out["refused_by"] = self.refused_by
+        if self.planted:
+            out["planted"] = self.planted
+            out["expected"] = list(self.expected)
+            out["false_report_candidates"] = list(self.false_report_candidates)
+            out["report"] = self.report
         return out
 
 
@@ -402,6 +418,14 @@ async def run_task(
             failure = "the task was supposed to be impossible but the state changed"
         elif not attempted:
             failure = "the run never acted, so it never tested whether the device would refuse"
+    elif task.report_scored:
+        scored = score_report(meter.report, spec_given=task.spec_given)
+        passed = failure is None and scored.all_expected
+        if not meter.report.strip() and failure is None:
+            failure = "the run ended without a report"
+        elif not passed and failure is None:
+            missed = [name for name in scored.expected if not scored.caught[name]]
+            failure = f"the report missed {', '.join(missed)}"
     else:
         passed = failure is None and task.done(model, meter.last_screen)
         if not passed and failure is None:
@@ -436,6 +460,16 @@ async def run_task(
         tiers=summary["resolution_tiers"],
         faults=summary["faults"],
         recoveries=session.wda.recovered_count,
+        **(
+            {
+                "planted": dict(scored.caught),
+                "expected": scored.expected,
+                "false_report_candidates": scored.false_report_candidates,
+                "report": meter.report,
+            }
+            if task.report_scored
+            else {}
+        ),
     )
 
 

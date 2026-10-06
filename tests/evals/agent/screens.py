@@ -24,6 +24,9 @@ from enum import StrEnum
 from typing import Any
 
 from fake_device import FakeAdapter, ScriptedWda, make_session
+from sprout import BUNDLE as SPROUT_BUNDLE
+from sprout import ENTRY as SPROUT_ENTRY
+from sprout import Sprout
 from trees import form_screen, node
 
 from ios_mcp.config import Settings
@@ -535,6 +538,7 @@ APP_BUNDLES: dict[str, str] = {
 _ENTRY_SCREEN: dict[str, str] = {
     "com.apple.Preferences": "settings_root",
     "com.example.cards": "cards_feed",
+    SPROUT_BUNDLE: SPROUT_ENTRY,
 }
 
 
@@ -621,6 +625,12 @@ class DeviceModel:
     alert: bool = False
     alert_raised: bool = False
     permission: str | None = None
+    #: The planted-bug app, whose screens are named `sprout_*`.
+    sprout: Sprout = field(default_factory=Sprout)
+
+    @property
+    def in_sprout(self) -> bool:
+        return self.screen.startswith("sprout_")
 
     def __post_init__(self) -> None:
         if Injection.STALE_START in self.injections and self.screen == "settings_root":
@@ -633,6 +643,8 @@ class DeviceModel:
     def tree(self) -> dict[str, Any]:
         if self.alert:
             return self._alert_tree()
+        if self.in_sprout:
+            return self.sprout.tree(self.screen)
         if self.screen == "contacts":
             return self._contacts_tree()
         if self.screen == "mail_compose":
@@ -978,6 +990,11 @@ class DeviceModel:
                 if _hit((_ALERT_BUTTON_X, top, _ALERT_BUTTON_W, _ALERT_BUTTON_H), x, y):
                     self.answer_alert(label)
             return
+        if self.in_sprout:
+            to = self.sprout.tap(self.screen, x, y)
+            if to is not None:
+                self._go(to)
+            return
         if self.screen in ("contacts", "mail_compose"):
             return  # those screens are read-only fixtures
         pane = PANES[self.screen]
@@ -1050,6 +1067,9 @@ class DeviceModel:
         by one per drag would have been modelling something that does not
         exist. The wheel moves on taps: see `tap`.
         """
+        if self.in_sprout:
+            self.sprout.drag(self.screen, from_y, to_y)
+            return
         if self.screen != "contacts":
             return
         rows = int(abs(from_y - to_y) // _ROW_HEIGHT)
@@ -1110,6 +1130,8 @@ class DeviceModel:
         current = PANES.get(self.screen)
         if current is not None and APP_BUNDLES.get(current.app) == bundle_id:
             return
+        if self.in_sprout and bundle_id == SPROUT_BUNDLE:
+            return
         self._go(entry)
         if (
             Injection.PERMISSION_ALERT in self.injections
@@ -1133,6 +1155,7 @@ class DeviceModel:
     def _go(self, screen: str) -> None:
         self.screen = screen
         self.visited.append(screen)
+        self.sprout.leave()
         # Navigating away clears the search, as it does on a real device.
         self.search = ""
 
@@ -1187,6 +1210,11 @@ def build_session(
         pane = PANES.get(model.screen)
         if pane is not None:
             fake.active_bundle = APP_BUNDLES.get(pane.app, fake.active_bundle)
+        if model.in_sprout:
+            fake.active_bundle = SPROUT_BUNDLE
+        # Sprout's text fields are real `FakeField`s, so the keys a type sends
+        # land in the field that has focus and are read back from it.
+        fake.focused_field = model.sprout.focused_field() if model.in_sprout else None
         # The alert is reported both ways a real one is: as the tree, with
         # SpringBoard in front, and through WebDriverAgent's alert endpoint,
         # which is what puts `alert` and its hint into every action result.

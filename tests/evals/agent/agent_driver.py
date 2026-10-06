@@ -87,7 +87,7 @@ requires_a_model = pytest.mark.skipif(_unavailable is not None, reason=_unavaila
 async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     """One goal, start to finish, with the cost copied onto the meter."""
     backend = SessionBackend(session)
-    outcome = await run_goal(session, task.goal, backend=backend)
+    outcome = await run_goal(session, task.goal, backend=backend, max_steps=task.max_steps)
 
     # The backend counts at the point the call is made, which is the only
     # place that can distinguish an explicit observation from a screen that
@@ -105,3 +105,6 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     meter.model_served = outcome.model_served
     meter.charge_model(outcome.prompt_tokens, outcome.completion_tokens)
     meter.last_screen = backend.last_screen
+    # The report, for the tasks scored on one. Read from the agent's own
+    # summary, which is the one place its findings are written down.
+    meter.report = outcome.summary
