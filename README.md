@@ -4,6 +4,7 @@
 MCP server, and the library beneath both.
 
 [![CI](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-online-4f7cff.svg)](https://emazaheri.github.io/ios-agent/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)

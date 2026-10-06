@@ -1,0 +1,86 @@
+/* A blue accent close to the system tint iOS uses, on Starlight's neutral grays. */
+:root {
+	--sl-color-accent-low: #131e47;
+	--sl-color-accent: #4f7cff;
+	--sl-color-accent-high: #c6d4ff;
+	--sl-content-width: 50rem;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #dbe4ff;
+	--sl-color-accent: #2856e0;
+	--sl-color-accent-high: #12286b;
+}
+
+/* Tables carry most of the measurements here, so give them room and rhythm. */
+.sl-markdown-content table {
+	font-size: var(--sl-text-sm);
+}
+
+/* Full width where there is room; narrow screens keep Starlight's scrolling block. */
+@media (min-width: 50rem) {
+	.sl-markdown-content table {
+		display: table;
+		width: 100%;
+	}
+}
+
+.sl-markdown-content table th:empty {
+	padding: 0;
+}
+
+.sl-markdown-content img {
+	border-radius: 0.5rem;
+	border: 1px solid var(--sl-color-gray-5);
+}
+
+/* The landing page. */
+.hero-phone {
+	width: min(100%, 19rem);
+	height: auto;
+	filter: drop-shadow(0 1.5rem 3rem color-mix(in srgb, var(--sl-color-accent) 22%, transparent));
+}
+
+.stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+	gap: 1rem;
+	margin-block: 1.5rem 0.5rem;
+}
+
+.stats > div {
+	margin: 0;
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 0.75rem;
+	padding: 1rem 1.25rem;
+	background: var(--sl-color-gray-7, var(--sl-color-black));
+}
+
+.stats strong {
+	display: block;
+	font-size: var(--sl-text-3xl);
+	line-height: 1.1;
+	color: var(--sl-color-white);
+	font-variant-numeric: tabular-nums;
+}
+
+.stats span {
+	font-size: var(--sl-text-sm);
+	color: var(--sl-color-gray-3);
+}
+
+.demo {
+	margin-block: 1.5rem;
+}
+
+.demo img {
+	width: 100%;
+	border-radius: 0.75rem;
+	border: 1px solid var(--sl-color-gray-5);
+}
+
+.demo figcaption {
+	margin-top: 0.5rem;
+	font-size: var(--sl-text-sm);
+	color: var(--sl-color-gray-3);
+}

@@ -1,0 +1,123 @@
+---
+title: ios-agent
+description: Drive an iPhone or an iOS Simulator with an AI agent. A terminal app, an MCP server, and the library beneath both.
+template: splash
+editUrl: false
+hero:
+  title: Drive an iPhone with an AI agent
+  tagline: A terminal app, an MCP server, and the library beneath both. Built on Apple's XCUIAutomation, designed for agents rather than test suites, and measured on real hardware.
+  image:
+    html: |
+      <svg class="hero-phone" viewBox="0 0 300 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A phone screen read as a compact digest">
+        <rect x="6" y="6" width="288" height="548" rx="44" fill="var(--sl-color-black)" stroke="var(--sl-color-accent)" stroke-width="4"/>
+        <rect x="112" y="22" width="76" height="22" rx="11" fill="var(--sl-color-gray-6)"/>
+        <text x="30" y="84" font-family="var(--__sl-font-mono)" font-size="11" fill="var(--sl-color-gray-3)">screen: Preferences</text>
+        <text x="30" y="102" font-family="var(--__sl-font-mono)" font-size="11" fill="var(--sl-color-gray-3)">"Display &amp; Text Size"</text>
+        <g font-family="var(--__sl-font-mono)" font-size="12">
+          <rect x="22" y="124" width="256" height="40" rx="10" fill="var(--sl-color-gray-6)"/>
+          <text x="34" y="149" fill="var(--sl-color-accent)">e1</text>
+          <text x="62" y="149" fill="var(--sl-color-gray-2)">button  "Accessibility"</text>
+          <rect x="22" y="174" width="256" height="40" rx="10" fill="var(--sl-color-accent-low)" stroke="var(--sl-color-accent)" stroke-width="1.5"/>
+          <text x="34" y="199" fill="var(--sl-color-accent)">e2</text>
+          <text x="62" y="199" fill="var(--sl-color-white)">switch  "Bold Text" =0</text>
+          <rect x="22" y="224" width="256" height="40" rx="10" fill="var(--sl-color-gray-6)"/>
+          <text x="34" y="249" fill="var(--sl-color-accent)">e3</text>
+          <text x="62" y="249" fill="var(--sl-color-gray-2)">button  "Larger Text"</text>
+        </g>
+        <g font-family="var(--__sl-font-mono)" font-size="11">
+          <text x="30" y="306" fill="var(--sl-color-gray-3)">agent</text>
+          <text x="30" y="326" fill="var(--sl-color-white)">tap(e2)</text>
+          <text x="30" y="352" fill="var(--sl-color-gray-3)">result</text>
+          <text x="30" y="372" fill="var(--sl-color-white)">screen_changed=True</text>
+          <text x="30" y="392" fill="var(--sl-color-white)">e2 switch "Bold Text" =1</text>
+        </g>
+        <rect x="22" y="424" width="256" height="88" rx="14" fill="none" stroke="var(--sl-color-gray-5)" stroke-dasharray="4 5"/>
+        <text x="150" y="458" text-anchor="middle" font-family="var(--__sl-font)" font-size="13" fill="var(--sl-color-gray-2)">251 raw nodes to 12 elements</text>
+        <text x="150" y="484" text-anchor="middle" font-family="var(--__sl-font)" font-size="13" fill="var(--sl-color-gray-3)">50 to 474 tokens per step</text>
+        <rect x="110" y="530" width="80" height="5" rx="2.5" fill="var(--sl-color-gray-4)"/>
+      </svg>
+  actions:
+    - text: Get started
+      link: /ios-agent/start/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/emazaheri/ios-agent
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Tabs syncKey="entry">
+	<TabItem label="Terminal app" icon="seti:shell">
+		```bash
+		uv sync && uv run ios-agent quickstart
+		uv run ios-agent "turn on bold text"
+		```
+	</TabItem>
+	<TabItem label="MCP server" icon="seti:json">
+		```json
+		{
+		  "mcpServers": {
+		    "ios": { "command": "uv", "args": ["run", "--directory", ".", "ios-mcp", "serve"] }
+		  }
+		}
+		```
+	</TabItem>
+	<TabItem label="Python library" icon="seti:python">
+		```python
+		outcome = await run_goal(session, "turn on bold text")
+		```
+	</TabItem>
+</Tabs>
+
+<figure class="demo">
+	<img src="/ios-agent/images/demo.gif" alt="ios-agent answering a question by driving Apple Maps" loading="lazy" />
+	<figcaption>
+		One goal, start to finish, at 2.5x: 4 actions, 1 observation, 2,767 device tokens, 49.8s of real time.
+		The terminal is the agent's own transcript; the phone is an iOS Simulator being driven by it.
+	</figcaption>
+</figure>
+
+## Measured, not asserted
+
+<div class="stats">
+	<div><strong>39/39</strong><span>agent runs succeeded</span></div>
+	<div><strong>1.14x</strong><span>a hand-written oracle's actions</span></div>
+	<div><strong>1</strong><span>observation per run, the floor</span></div>
+	<div><strong>$1.50</strong><span>for all 39 runs</span></div>
+</div>
+
+13 tasks, three runs each, against an oracle whose action counts are asserted so they cannot drift. [Read the results](/ios-agent/evals/results/).
+
+## Four decisions, and everything follows from them
+
+Raw WebDriverAgent page source for a 200-row list runs to roughly 37,000 tokens. Re-reading that after every tap exhausts a context window in a handful of steps.
+
+<CardGrid>
+	<Card title="Perception is budget-aware" icon="seti:image">
+		Screens arrive as a compact digest, not accessibility XML: 251 raw nodes to 12
+		elements on a real third-party screen, 50 to 474 tokens per step.
+	</Card>
+	<Card title="Actions return the screen they produced" icon="random">
+		Half the round-trips, and a delta when the screen is similar, so a long flow
+		stays cheap.
+	</Card>
+	<Card title="Resolution runs on the host" icon="magnifier">
+		Six tiers re-find a stale ref by identity, so a retry costs zero model tokens
+		where a round-trip costs a whole turn.
+	</Card>
+	<Card title="The gate asks before acting" icon="warning">
+		Send, Pay, Delete, and anything that reaches another person need approval
+		before they happen, while the answer still means something.
+	</Card>
+</CardGrid>
+
+## Where to go next
+
+<CardGrid>
+	<LinkCard title="Installation" description="A Mac, Xcode, and three commands to a running simulator." href="/ios-agent/start/installation/" />
+	<LinkCard title="Connecting over MCP" description="31 tools and 5 resources for Claude Code, Cursor or any client." href="/ios-agent/guides/mcp/" />
+	<LinkCard title="Architecture" description="Six layers, and why the MCP server is one consumer rather than the thing itself." href="/ios-agent/concepts/architecture/" />
+	<LinkCard title="Decision records" description="Twenty-one decisions, each settled by a measurement, and half of them a no." href="/ios-agent/decisions/" />
+</CardGrid>
