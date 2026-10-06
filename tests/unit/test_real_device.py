@@ -182,6 +182,10 @@ def test_a_missing_log_still_gives_advice(tmp_path) -> None:
 
 
 class _FakeProc:
+    #: Above macOS's highest pid, so a group signal the reaper sends to it can
+    #: only fail, never reach a real process.
+    pid = 999_999
+
     def __init__(self, returncode: int | None = None) -> None:
         self.returncode = returncode
 
@@ -214,7 +218,7 @@ async def _tunnel_argv(settings: Settings, monkeypatch, *, comes_up: bool) -> li
         return _FakeProc(None if comes_up else 1)
 
     monkeypatch.setattr(module, "tunnel_for", tunnel_for)
-    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "spawn_guarded", spawn)
     monkeypatch.setattr(module, "which", lambda _name: "/usr/local/bin/ios")
     await RealDeviceAdapter(phone(), settings)._require_tunnel()
     return launched

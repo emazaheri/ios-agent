@@ -17,6 +17,7 @@ from typing import Any, Literal
 from ios_mcp.config import Settings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
+from ios_mcp.devices.reaper import spawn_guarded, stop_guarded
 from ios_mcp.devices.shell import run
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing
 
@@ -160,7 +161,7 @@ class SimulatorAdapter:
     async def _launch_prebuilt(self, xctestrun: Path, port: int) -> None:
         """Run an already-built test bundle. Seconds, rather than minutes."""
         logger.info("Starting WebDriverAgent from %s", xctestrun.name)
-        self._runner_proc = await asyncio.create_subprocess_exec(
+        self._runner_proc = await spawn_guarded(
             "xcodebuild",
             "test-without-building",
             "-xctestrun",
@@ -189,7 +190,7 @@ class SimulatorAdapter:
                 hint="Install the full Xcode, then run scripts/prepare_wda.sh.",
             )
         logger.info("Building and launching WDA from source; this takes a few minutes")
-        self._runner_proc = await asyncio.create_subprocess_exec(
+        self._runner_proc = await spawn_guarded(
             "xcodebuild",
             "-project",
             str(source),
@@ -226,12 +227,7 @@ class SimulatorAdapter:
             return False
 
     async def teardown(self) -> None:
-        if self._runner_proc and self._runner_proc.returncode is None:
-            self._runner_proc.terminate()
-            try:
-                await asyncio.wait_for(self._runner_proc.wait(), timeout=10.0)
-            except TimeoutError:
-                self._runner_proc.kill()
+        await stop_guarded(self._runner_proc)
         self._runner_proc = None
         if self._endpoint is not None:
             release_port(self._endpoint.port)

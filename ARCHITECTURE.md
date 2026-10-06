@@ -61,6 +61,14 @@ permissions, location, appearance, freezing the status bar for reproducible
 screenshots. `RealDeviceAdapter` uses `go-ios`, including the RemoteXPC tunnel
 that iOS 17+ requires.
 
+Every long-lived child (the runner, the port forward, the tunnel) is started in
+its own session and guarded by a reaper process that holds the other end of a
+pipe. When the interpreter that started them exits, cleanly or by SIGKILL, the
+pipe closes and the reaper stops each guarded process group; the server's
+lifespan also tears the pool down when its transport ends. Measured on a
+simulator, both left `xcodebuild` and the runner behind before, and the runner
+is now gone within 0.1s. `ios-mcp reset` remains for a runner nothing started.
+
 Starting WebDriverAgent differs fundamentally between the two, and this is not
 a detail that can be abstracted away:
 

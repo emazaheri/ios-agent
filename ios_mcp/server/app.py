@@ -9,6 +9,8 @@ round-trip cost for latency-critical steps.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib import metadata
 
 from fastmcp import FastMCP
@@ -59,7 +61,24 @@ def build_server(settings: Settings | None = None) -> FastMCP:
 
     # Without a version FastMCP reports its own, so a client asking what it is
     # talking to was told "4.0.0", which is the framework rather than this.
-    mcp: FastMCP = FastMCP(name="ios-automation", version=_version(), instructions=INSTRUCTIONS)
+    @asynccontextmanager
+    async def lifespan(_server: FastMCP) -> AsyncIterator[dict[str, object]]:
+        """Stop every runner this server started when the transport ends.
+
+        Nothing called `shutdown` before this, so a client that quit, which
+        over stdio is just stdin closing, left `xcodebuild` reparented to
+        launchd and the runner holding the device until `ios-mcp reset`. A
+        server that is killed outright never reaches this; the reaper in
+        `ios_mcp.devices.reaper` covers that case.
+        """
+        try:
+            yield {}
+        finally:
+            await ctx.shutdown()
+
+    mcp: FastMCP = FastMCP(
+        name="ios-automation", version=_version(), instructions=INSTRUCTIONS, lifespan=lifespan
+    )
 
     from ios_mcp.server import (
         resources,

@@ -23,6 +23,7 @@ import httpx
 from ios_mcp.config import Settings, WdaSettings
 from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
+from ios_mcp.devices.reaper import spawn_guarded, stop_guarded
 from ios_mcp.devices.shell import probe, run, which
 from ios_mcp.devices.tunnel import tunnel_for
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing, TunnelDown
@@ -100,7 +101,7 @@ class RealDeviceAdapter:
             else:
                 argv.insert(0, "sudo")
             logger.info("Starting go-ios %s tunnel", cfg.tunnel_mode)
-            self._tunnel_proc = await asyncio.create_subprocess_exec(
+            self._tunnel_proc = await spawn_guarded(
                 *argv,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -222,7 +223,7 @@ class RealDeviceAdapter:
         logger.info("Starting WebDriverAgent on %s over the network", self.info.name)
         self._log_path = Path(tempfile.mkstemp(prefix="wda-", suffix=".log")[1])
         with self._log_path.open("w") as log:
-            self._runner_proc = await asyncio.create_subprocess_exec(
+            self._runner_proc = await spawn_guarded(
                 "xcodebuild",
                 "test-without-building",
                 "-xctestrun",
@@ -283,7 +284,7 @@ class RealDeviceAdapter:
         logger.info("Starting WebDriverAgent (%s) on %s over USB", bundle_id, self.info.name)
         self._log_path = Path(tempfile.mkstemp(prefix="wda-", suffix=".log")[1])
         with self._log_path.open("w") as log:
-            self._runner_proc = await asyncio.create_subprocess_exec(
+            self._runner_proc = await spawn_guarded(
                 self._ios,
                 "runwda",
                 f"--bundleid={bundle_id}",
@@ -318,7 +319,7 @@ class RealDeviceAdapter:
 
     async def _start_forward(self, port: int) -> None:
         """Forward a host port to WDA's port 8100 on the device."""
-        self._forward_proc = await asyncio.create_subprocess_exec(
+        self._forward_proc = await spawn_guarded(
             self._ios,
             "forward",
             str(port),
@@ -369,12 +370,7 @@ class RealDeviceAdapter:
             return
 
         for proc in (self._forward_proc, self._runner_proc, self._tunnel_proc):
-            if proc and proc.returncode is None:
-                proc.terminate()
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=10.0)
-                except TimeoutError:
-                    proc.kill()
+            await stop_guarded(proc)
         self._forward_proc = None
         self._runner_proc = None
         self._tunnel_proc = None

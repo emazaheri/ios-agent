@@ -184,7 +184,7 @@ than discover it by failing.
 | `device_not_ready` | Phone untrusted, Developer Mode off, or the runner not trusted under VPN & Device Management. A profile reissued after it expired asks for Trust again. |
 | Launch fails with `deviceprocesscontrolservice` code 2 | The developer certificate is not trusted on the phone. |
 | `ApplicationVerificationFailed` on install | The bundle was modified after signing. |
-| The first run after a crash times out waiting for WebDriverAgent | A runner from the previous run is still holding the device. `uv run ios-mcp reset` lists it and `-y` stops it. |
+| The first run after a crash times out waiting for WebDriverAgent | A runner from the previous run is still holding the device. Runners stop with the process that started them, even when it is killed, so this now means one started some other way. `uv run ios-mcp reset` lists it and `-y` stops it. |
 
 ### Speed
 

@@ -87,3 +87,10 @@ The device path, the runner that drives it, and the timings that shape every set
   `com.apple.springboard` with an `alert` node and the three buttons. A
   plain tap on Don’t Allow clears it, so an agent with no alert verb is
   not stuck; the apostrophe is the typographic one.
+- **An exiting server took nothing with it.** Over stdio, an MCP client quitting
+  is just stdin closing, and nothing called the pool's shutdown; a SIGKILL runs
+  no Python at all. Either way, on a simulator, `xcodebuild` was reparented to
+  launchd and the runner kept serving inside the simulator until `ios-mcp
+  reset`. macOS has no parent-death signal, so the fix is a reaper outside the
+  process: it reads a pipe whose write end dies with the interpreter, then stops
+  the guarded process groups. Both cases now leave nothing, within 0.1s.
