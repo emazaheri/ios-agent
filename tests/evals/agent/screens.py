@@ -30,6 +30,7 @@ from sprout import Sprout
 from trees import form_screen, node
 
 from ios_mcp.config import Settings
+from ios_mcp.devices.base import AppInfo
 from ios_mcp.session import IosSession
 
 #: Where the first row sits and how tall each one is. Both the tree builder and
@@ -1230,6 +1231,13 @@ def build_session(
         push()
 
     session, fake, adapter = make_session(model.tree(), settings, on_gesture=on_gesture)
+    if model.in_sprout:
+        # Installed, as an app being tested is, and only for the runs that use
+        # it: the app list reaches the model in every opening turn, so adding
+        # it everywhere would move every other task's tokens. Left out at
+        # first, an agent told to use "the Sprout app" tried to open it, was
+        # told no such app was installed, and reported that instead.
+        adapter.apps = (*adapter.apps, AppInfo(bundle_id=SPROUT_BUNDLE, name="Sprout", kind="user"))
     push()
 
     async def open_url(url: str) -> None:

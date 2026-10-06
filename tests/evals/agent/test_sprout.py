@@ -159,3 +159,10 @@ def test_seven_bugs_in_three_classes() -> None:
     assert classes.count("self_evident") == 5
     assert classes.count("needs_spec") == 1
     assert classes.count("visual") == 1
+
+
+async def test_sprout_is_installed_for_the_runs_that_use_it() -> None:
+    """Left out, an agent told to use the Sprout app reported it missing and stopped."""
+    _, session, _ = await _sprout()
+    result = await session.open_app("Sprout")
+    assert result.ok

@@ -140,6 +140,21 @@ the disabled button as the bug.
 
 The criteria, the bugs, the scoring rules and the model are unchanged.
 
+## So was the second
+
+The second attempt ran with both fixes and was void for a third defect, also
+the fixture's: Sprout was not in the device's list of installed apps, to keep
+other tasks' opening tokens unchanged. One run did what the goal said, tried to
+open "the Sprout app", was told no such app was installed, and reported that.
+The baseline suite then refused to record the set, by design, since a run that
+never touched the device measures the infrastructure, and with it went the
+other five reports: it writes once, at the end.
+
+Sprout is now installed for the runs that use it and for no others, and the
+exploratory runs go through `tests/evals/agent/run_exploration.py`, which
+writes each run to disk as it finishes and marks an unusable one rather than
+dropping the set. Unchanged again: criteria, bugs, scoring, model.
+
 ## Also found while building it
 
 - A disabled control was unreachable by name. The digest showed `Continue
