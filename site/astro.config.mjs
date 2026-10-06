@@ -20,6 +20,13 @@ export default defineConfig({
 				'Drive an iPhone or an iOS Simulator with an AI agent. A terminal app, an MCP server, and the library beneath both.',
 			logo: { src: './src/assets/logo.svg', replacesTitle: false },
 			favicon: '/favicon.svg',
+			head: [
+				// Google Search Console ownership, for submitting the sitemap.
+				{
+					tag: 'meta',
+					attrs: { name: 'google-site-verification', content: 'QcZyAv8-qn0GQfXy1VHzlGJBy2cx1DjYuxPUb7Byqp4' },
+				},
+			],
 			customCss: ['./src/styles/theme.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/emazaheri/ios-agent' }],
 			plugins: [starlightLinksValidator({ errorOnLocalLinks: false })],
