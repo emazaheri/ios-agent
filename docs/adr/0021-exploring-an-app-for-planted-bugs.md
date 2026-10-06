@@ -1,7 +1,8 @@
 # 21. Exploring an app for planted bugs
 
-Proposed, 2026-10-06. Written, committed and pushed before any model ran
-against the task, so that the criteria cannot be fitted to the result.
+Rejected, 2026-10-06, on criteria written, committed and pushed before any
+model ran against the task, so that they could not be fitted to the result.
+Self-evident recall was 60% against a bar of 80%.
 
 ## Context
 
@@ -154,6 +155,66 @@ Sprout is now installed for the runs that use it and for no others, and the
 exploratory runs go through `tests/evals/agent/run_exploration.py`, which
 writes each run to disk as it finishes and marks an unusable one rather than
 dropping the set. Unchanged again: criteria, bugs, scoring, model.
+
+## Result
+
+The third attempt, six usable runs on `gpt-5.6-sol`, scored by the patterns
+and then read in full by hand:
+
+| bug | class | found |
+|---|---|---|
+| Done does nothing | self-evident | 6 / 6 |
+| "Profile saved", then "Name: Not set" | self-evident | 6 / 6 |
+| count one more than the chips | self-evident | 6 / 6 |
+| upload never finishes | self-evident | **0 / 6** |
+| email loses its first character | self-evident | **0 / 6** |
+| name over the stated 30-character cap | needs a spec | 3 / 3 with it, 0 / 3 without |
+| caption white on white | visual | 0 / 6 |
+
+**Self-evident recall: 18 of 30, 60%. Criterion 1 fails.** False reports: one,
+within criterion 2's limit. So, as written before the runs: exploring an app
+for its bugs is not a claim this stack makes, and it stays out of scope.
+
+| | `explore_signup` | `explore_signup_no_spec` | mobile-mcp #450 |
+|---|---|---|---|
+| observations per run | 1, 1, 1 | 1, 1, 1 | 71 screenshots |
+| actions | 33, 43, 36 | 39, 22, 27 | |
+| turns | 40, 49, 43 | 42, 25, 31 | 186 |
+| cost | $0.80, $1.10, $1.00 | $0.79, $0.30, $0.43 | $4.28 |
+
+The comparison carries #450's caveats: a Flutter app, another model and
+harness, and bugs not published in full.
+
+**Where the reading and the patterns disagreed.** Three reports described the
+count bug as "shows 3 when exactly two are enabled", with the number spelled
+out, which the pattern's digits did not match. The reading decides, and they
+are counted.
+
+**The one false report.** "Typing appends instead of replacing" calls an
+ordinary text field broken. The same line, and a line in another run, said
+Delete inserted backspace characters; that was true of the fixture, whose
+`FakeField` takes `\b` as a character where a real field deletes. It is a
+defect of the fake and not counted against the agent.
+
+**Why the two misses missed, which the rejection does not depend on.**
+
+- *Upload:* the goal did not ask for a photo, and no run chose one. Every run
+  skipped the photo screen, so the bug was never triggered. The agent
+  explored the path the goal forced and not the branches off it.
+- *Email:* the read-back reported the mismatch, but the policy layer redacts
+  email addresses, so the field read `[redacted]` and Review showed the same.
+  Nothing on screen let the agent see what was wrong, and it did not report
+  the failed type. Redaction working as designed hid the evidence.
+
+Every planted bug on the forced path was found in every run, at one
+observation per run. That is the narrower claim the numbers support, and it
+is a statement about verification, the one pillar the agent kept, rather than
+about exploration.
+
+**What would reopen it:** a goal or prompt that makes the agent exercise
+optional branches, measured against these same bugs and criteria; or a
+redaction rule that lets a read-back say *how* a redacted value differs
+without saying what it is.
 
 ## Also found while building it
 

@@ -26,9 +26,9 @@ grouped.
 | [0018](0018-start-the-usb-tunnel-without-sudo.md) | Start the USB tunnel without sudo; Wi-Fi stays on xcodebuild | go-ios's userspace tunnel launched 10 of 10 in 3.1 to 3.3s with no sudo; pymobiledevice3's native tunnel launched faster, then refused six in a row after a replug, because it and `remoted` evict each other by design |
 | [0019](0019-settle-on-frames-as-an-option.md) | Settle on frames, as an off-by-default option | 17 to 22% off a phone's settle time, returning early 1 time in 304 against the tree loop's 3 in 198; only after counting novel frames, since the caret and a 0.42s search pause each defeated "identical frames" |
 | [0020](0020-no-app-intents-action-tier.md) | No App Intents action tier | Settings declares no intents; typed Siri on a phone answered two App Shortcut phrases itself, with a dialog and a how-to, and reported success both times; taps are not the bottleneck at 1.14x the oracle |
-| [0021](0021-exploring-an-app-for-planted-bugs.md) | Exploring an app for planted bugs (proposed) | pre-registered: at least 80% of the self-evident bugs found over six runs, and no more than one false report |
+| [0021](0021-exploring-an-app-for-planted-bugs.md) | Not claimed: exploring an app for its bugs | pre-registered at 80%; 18 of 30 self-evident bugs found (60%), every one on the forced path and none off it, one false report, $0.30 to $1.10 a run against #450's $4.28 |
 
-Ten of the twenty-one are refusals. That is the point rather than an accident: the
+Eleven of the twenty-one are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
 did, on the first run and repeatedly afterwards.
 
