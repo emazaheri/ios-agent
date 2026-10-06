@@ -212,7 +212,12 @@ async def run_goal(
             model_served = str(served) if served else None
         return reply
 
-    graph = build_graph(run, metered, tools, max_steps=max_steps or cfg.max_steps)
+    # One budget for both. The action cap exists to keep the guarantee the turn
+    # budget used to give (one action per turn, so at most `max_steps` of
+    # them), and passing only the turns left it at its default: a caller that
+    # raised `max_steps` to 60 still had its run ended at 24 actions.
+    budget = max_steps or cfg.max_steps
+    graph = build_graph(run, metered, tools, max_steps=budget, max_actions=budget)
     decide = approve or refuse_everything
     # One thread per run. The checkpointer keys on it, and reusing an id across
     # runs would resume someone else's conversation.

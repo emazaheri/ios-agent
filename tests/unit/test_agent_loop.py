@@ -552,6 +552,24 @@ async def test_the_step_budget_ends_a_run_that_is_going_nowhere() -> None:
     assert model.switches["airplane"] is False
 
 
+async def test_raising_the_step_budget_raises_the_action_budget_with_it(monkeypatch) -> None:
+    """A run given 60 turns was still ended at 24 actions by a cap nobody passed."""
+    import ios_agent.loop as loop
+
+    seen: dict[str, int] = {}
+
+    def capture(*_args, **kwargs):
+        seen.update(max_steps=kwargs["max_steps"], max_actions=kwargs["max_actions"])
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(loop, "build_graph", capture)
+    session, _, _ = build_session(DeviceModel(), _settings())
+    for budget in (60, None):
+        with pytest.raises(RuntimeError, match="captured"):
+            await run_goal(session, "anything", model=ScriptedModel([]), max_steps=budget)
+        assert seen["max_actions"] == seen["max_steps"] == (budget or 24)
+
+
 async def test_an_unknown_tool_is_reported_rather_than_raised() -> None:
     """One wasted message beats a lost run."""
     model = DeviceModel()
