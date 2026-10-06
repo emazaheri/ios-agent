@@ -58,8 +58,10 @@ _W = 360.0
 _H = 44.0
 _BACK = (8.0, 44.0, 80.0, 52.0)
 _BOTTOM = 780.0
-#: Where the terms switch sits once the page has been scrolled to it.
+#: Where the terms switch sits once the page has been scrolled to it, and
+#: where it is before: past the bottom of an 852-point screen.
 _TERMS_Y = 640.0
+_BELOW_FOLD_Y = 980.0
 
 
 @dataclass
@@ -77,6 +79,9 @@ class Element:
     to: str | None = None
     action: str | None = None
     h: float = _H
+    visible: bool = True
+    #: Pinned outside the page's scroll view, like a bottom button.
+    pinned: bool = False
 
     def rect(self) -> tuple[float, float, float, float]:
         return (_X, self.y, _W, self.h)
@@ -96,6 +101,7 @@ class Element:
             w=_W,
             h=self.h,
             enabled=self.enabled,
+            visible=self.visible,
         )
         if self.placeholder is not None:
             out["placeholderValue"] = self.placeholder
@@ -176,17 +182,22 @@ class Sprout:
                 h=200,
             ),
         ]
-        if self.terms_visible:
-            out.append(
-                Element(
-                    "Switch",
-                    "I agree to the Terms",
-                    _TERMS_Y,
-                    value="1" if self.terms_accepted else "0",
-                    action="terms",
-                )
+        # Below the fold until scrolled, but in the tree all along, as UIKit
+        # keeps an off-screen control in a scroll view: present, not visible,
+        # and drawn where the content would put it.
+        out.append(
+            Element(
+                "Switch",
+                "I agree to the Terms",
+                _TERMS_Y if self.terms_visible else _BELOW_FOLD_Y,
+                value="1" if self.terms_accepted else "0",
+                action="terms",
+                visible=self.terms_visible,
             )
-        out.append(Element("Button", "Continue", _BOTTOM, enabled=ready, to="sprout_profile"))
+        )
+        out.append(
+            Element("Button", "Continue", _BOTTOM, enabled=ready, to="sprout_profile", pinned=True)
+        )
         return out
 
     def _profile(self) -> list[Element]:
@@ -267,11 +278,23 @@ class Sprout:
                     h=852,
                     children=[
                         node("NavigationBar", name=title, y=44, h=52, children=nav),
-                        *(element.tree() for element in self.elements(screen)),
+                        *self._body(screen),
                     ],
                 )
             ],
         )
+
+    def _body(self, screen: str) -> list[dict[str, Any]]:
+        """The account form scrolls, as a real one does: its content sits in a
+        scroll view the digest marks `scrollable`, the only sign there is more
+        of it, and its bottom button is pinned outside. The other screens fit.
+        """
+        elements = self.elements(screen)
+        if screen != "sprout_account":
+            return [element.tree() for element in elements]
+        page = [element.tree() for element in elements if not element.pinned]
+        pinned = [element.tree() for element in elements if element.pinned]
+        return [node("ScrollView", x=0, y=100, w=393, h=660, children=page), *pinned]
 
     @staticmethod
     def back_to(screen: str) -> str | None:
@@ -292,7 +315,7 @@ class Sprout:
         if back is not None and bx <= x <= bx + bw and by <= y <= by + bh:
             return back
         for element in self.elements(screen):
-            if not element.hit(x, y) or not element.enabled:
+            if not element.hit(x, y) or not element.enabled or not element.visible:
                 continue
             if element.to is not None:
                 return element.to

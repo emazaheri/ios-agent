@@ -108,6 +108,38 @@ zero; turns, observations, actions and cost per run, beside #450's with its
 caveats (a Flutter app, a different model and harness, and bugs not published
 in full).
 
+## The first attempt was void
+
+The six runs first made on 2026-10-06 did not run what this record
+describes, and are not the result. Two defects, both in the harness and
+neither in the model:
+
+- **The step budget was not 60.** The task raised the agent's turn budget,
+  and a separate cap on actions, which `run_goal` never passed on, stayed at
+  its default of 24. Five of the six runs ended "gave up after 24 actions".
+  The action cap now follows the turn budget.
+- **The account form did not look like one.** Its terms switch was absent from
+  the tree until the page scrolled, with no scroll view around it, so nothing
+  on the screen said there was more of it. A real UIKit form keeps an
+  off-screen control in the tree, not visible, inside a scroll view the
+  digest marks `scrollable`. The fixture now has that shape. The switch is
+  still below the fold and still out of the digest until it is scrolled to;
+  the obstacle is the same, the false absence of any sign of it is gone.
+
+Building the second fix found a third defect, in the product: a scroll view
+whose content is one large block, centred near its own centre, was merged
+into that block and dropped from the digest. That is why the real Contacts
+list showed no scrollable container either. Scroll containers no longer
+merge with their content; the golden flows cost about 20 tokens more per
+screen for it and all thirteen pass.
+
+What the void attempt showed is kept, because it is honest about the agent
+too: in every run it typed the account details, found Continue disabled, and
+neither scrolled nor reported the page as possibly longer. Two runs reported
+the disabled button as the bug.
+
+The criteria, the bugs, the scoring rules and the model are unchanged.
+
 ## Also found while building it
 
 - A disabled control was unreachable by name. The digest showed `Continue
