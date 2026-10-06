@@ -93,4 +93,7 @@ The device path, the runner that drives it, and the timings that shape every set
   launchd and the runner kept serving inside the simulator until `ios-mcp
   reset`. macOS has no parent-death signal, so the fix is a reaper outside the
   process: it reads a pipe whose write end dies with the interpreter, then stops
-  the guarded process groups. Both cases now leave nothing, within 0.1s.
+  the guarded process groups. Both cases now leave nothing, within 0.1s. On
+  an iPhone 17 Pro Max over Wi-Fi, killing `xcodebuild` also stops the runner
+  on the phone: its `/status` stopped answering in both cases. The USB route
+  (`ios runwda`, the forward, the tunnel) uses the same code and is unrun.

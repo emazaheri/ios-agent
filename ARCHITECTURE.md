@@ -67,7 +67,9 @@ pipe. When the interpreter that started them exits, cleanly or by SIGKILL, the
 pipe closes and the reaper stops each guarded process group; the server's
 lifespan also tears the pool down when its transport ends. Measured on a
 simulator, both left `xcodebuild` and the runner behind before, and the runner
-is now gone within 0.1s. `ios-mcp reset` remains for a runner nothing started.
+is now gone within 0.1s. On an iPhone over Wi-Fi the same: `xcodebuild` gone
+within 0.1s and the runner on the phone no longer answering. `ios-mcp reset`
+remains for a runner nothing started.
 
 Starting WebDriverAgent differs fundamentally between the two, and this is not
 a detail that can be abstracted away:
