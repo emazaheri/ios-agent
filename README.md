@@ -38,7 +38,7 @@ uv run ios-agent "turn on bold text"
 
 ## Contents
 
-- [Why it is built this way](#why-it-is-built-this-way)
+- [Why it is built this way](#why-it-is-built-this-way) · [Why only public APIs](#why-only-apples-public-apis)
 - [Requirements](#requirements) · [Setup](#setup)
 - [The terminal app](#the-terminal-app)
 - [Connecting your own agent over MCP](#connecting-your-own-agent-over-mcp)
@@ -61,6 +61,44 @@ of steps. Four decisions follow from that, and they are the whole design:
 | **The gate asks before acting, not after** | so the answer still means something |
 
 Everything else in the repository is downstream of those.
+
+## Why only Apple's public APIs
+
+Everything here reaches the device through XCTest, the framework Apple ships
+for UI testing, by way of WebDriverAgent. Two routes that looked faster were
+measured and turned down:
+
+| route | what it measured | |
+|---|---|---|
+| Xcode's Accessibility Inspector service, which needs no signed runner | reads by walking focus one element at a time, 60 to 80 ms each: Settings root in 3.3 to 4.4s against WebDriverAgent's 3.7s, with no frames, scrolling the screen as it reads | [ADR 0016](docs/adr/0016-no-accessibility-inspector-tree-source.md) |
+| CoreSimulator's private accessibility framework, the route idb and AXe take | 10 to 23% faster than WebDriverAgent against a 50% bar, and on Xcode 27 it starts an XCTest session to bootstrap anyway | [ADR 0017](docs/adr/0017-no-simulator-native-tree-source.md) |
+
+Neither saving was worth the exposure, and the exposure is not hypothetical.
+Xcode 27 replaced Simulator.app with Device Hub and moved
+`SimulatorKit.framework`, and tools that reach into those private pieces broke
+in public:
+
+- XcodeBuildMCP [#453](https://github.com/getsentry/XcodeBuildMCP/issues/453):
+  its bundled AXe looked for SimulatorKit where it used to be.
+- Argent [#406](https://github.com/software-mansion/argent/issues/406):
+  booting a device failed once Device Hub replaced Simulator.app, and
+  [#465](https://github.com/software-mansion/argent/issues/465): its simulator
+  server could not load SimulatorKit on macOS 27.
+- XcodeBuildMCP [#535](https://github.com/getsentry/XcodeBuildMCP/issues/535):
+  keyboard tools silently do nothing, because System Events cannot attach to
+  Device Hub.
+
+The same rename reached this project in one place: `open -a Simulator`, used
+only to show the simulator's window, stopped working. It now opens Device Hub
+by bundle id. The automation path did not change: everything it touches is
+an interface Apple documents and carries from one release to the next.
+
+Public is not painless. WebDriverAgent tracks Xcode closely, so the build is
+pinned and rebuilt by `scripts/prepare_wda.sh` rather than followed blindly. A
+phone needs a signed runner whose provisioning profile lasts seven days on a
+free Apple ID, and a Wi-Fi launch still goes through `xcodebuild`.
+`ios-mcp doctor` checks the toolchain, the runner build, the devices and the
+tunnel, and says what to fix.
 
 ## Requirements
 
