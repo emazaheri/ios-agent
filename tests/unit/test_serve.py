@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 import ios_mcp.server.app as server_app
-from ios_mcp.__main__ import _cmd_serve, http_run_options, is_loopback
+from ios_mcp.__main__ import _cmd_serve, http_run_options, is_loopback, main
 from ios_mcp.config import Settings
 
 
@@ -151,3 +151,16 @@ async def test_a_rebound_host_is_turned_away() -> None:
 
 async def test_a_foreign_origin_on_a_local_host_is_turned_away() -> None:
     assert await _status("127.0.0.1:8765", origin="http://attacker.example") == 403
+
+
+def test_bare_ios_mcp_serves(monkeypatch) -> None:
+    """The MCP registry entry and `uvx ios-mcp` both start it with no subcommand."""
+    served: list[bool] = []
+
+    class Server:
+        def run(self, **_: object) -> None:
+            served.append(True)
+
+    monkeypatch.setattr("ios_mcp.server.app.build_server", lambda *_a, **_k: Server())
+    assert main([]) == 0
+    assert served == [True]

@@ -149,10 +149,13 @@ def http_run_options(host: str, port: int) -> dict[str, Any]:
 def _cmd_serve(settings: Settings, args: argparse.Namespace) -> int:
     from ios_mcp.server.app import build_server
 
-    transport = args.transport or settings.server.transport
+    # Bare `ios-mcp` serves too, and argparse only sets these when `serve` is
+    # named. Reading them as attributes crashed before the first message,
+    # which is exactly how the MCP registry entry and `uvx ios-mcp` start it.
+    transport = getattr(args, "transport", None) or settings.server.transport
     if transport == "http":
-        host = args.host or settings.server.host
-        port = args.port or settings.server.port
+        host = getattr(args, "host", None) or settings.server.host
+        port = getattr(args, "port", None) or settings.server.port
         if not is_loopback(host):
             if not getattr(args, "allow_remote", False):
                 # Refused rather than warned: there is no authentication, and a
