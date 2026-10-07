@@ -16,7 +16,7 @@ deterministic test, and one that needs an API key and a network is not.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from importlib import resources
 from typing import Any
 
@@ -50,6 +50,22 @@ async def refuse_everything(_request: dict[str, Any]) -> bool:
 def operator_prompt() -> str:
     """The system prompt, kept in a file so it diffs like the code does."""
     return (resources.files("ios_agent") / "prompts" / "operator.md").read_text()
+
+
+def cache_writes(details: Mapping[str, Any]) -> int:
+    """Tokens written to the prompt cache, wherever the integration put them.
+
+    `cache_creation` alone is not enough. When Anthropic breaks a write down
+    by TTL, `langchain-anthropic` moves the count to `ephemeral_5m_input_tokens`
+    and `ephemeral_1h_input_tokens` and sets `cache_creation` to 0 so the total
+    is not counted twice. Reading only `cache_creation` priced every Anthropic
+    write as an ordinary input token; a real run on `claude-haiku-5-5` showed
+    it, with 102 tokens written and 0 reported.
+    """
+    return sum(
+        details.get(key) or 0
+        for key in ("cache_creation", "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+    )
 
 
 def cache_breakpoint(messages: list[AnyMessage]) -> list[AnyMessage]:
@@ -232,7 +248,7 @@ async def run_goal(
             # that does not cache, or one that does and did not say.
             details = usage.get("input_token_details") or {}
             cache_read_tokens += details.get("cache_read") or 0
-            cache_write_tokens += details.get("cache_creation") or 0
+            cache_write_tokens += cache_writes(details)
         # What the provider says it served, which `AgentSettings.model` cannot
         # say: that is an alias, and the thing behind it moves. Read from the
         # first reply that names one and not overwritten, so a report says what
