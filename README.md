@@ -239,7 +239,7 @@ extra:
 
 ```bash
 uv sync --extra openai
-IOS_AGENT_PROVIDER=openai IOS_AGENT_MODEL=gpt-5.6-sol uv run ios-agent "..."
+IOS_AGENT_PROVIDER=openai IOS_AGENT_MODEL=gpt-6.1-sol uv run ios-agent "..."
 ```
 
 Anthropic, OpenAI, Azure OpenAI, Gemini, Vertex AI, Bedrock, Groq, Mistral and
