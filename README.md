@@ -247,16 +247,51 @@ a local Ollama model are all supported. See [agent/README.md](agent/README.md).
 
 ## Connecting your own agent over MCP
 
-31 tools and 5 resources, over stdio or HTTP. Add to `.mcp.json` (already
-present here for Claude Code):
+31 tools and 5 resources, over stdio or HTTP. The server runs from your clone,
+where WebDriverAgent was built, so every client starts it the same way:
+`uv run --directory <path to this clone> ios-mcp serve`. Use the absolute path;
+desktop apps do not start in your project directory.
+
+**Claude Code.** Inside this repository it is already set up, through
+`.mcp.json`. From anywhere else:
+
+```bash
+claude mcp add ios -s user -- uv run --directory /path/to/ios-agent ios-mcp serve
+```
+
+**Cursor** (`~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project) and
+**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+take the same block:
 
 ```json
 {
   "mcpServers": {
-    "ios": { "command": "uv", "args": ["run", "--directory", ".", "ios-mcp", "serve"] }
+    "ios": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/ios-agent", "ios-mcp", "serve"]
+    }
   }
 }
 ```
+
+**VS Code** (`.vscode/mcp.json`) calls the key `servers`:
+
+```json
+{
+  "servers": {
+    "ios": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/ios-agent", "ios-mcp", "serve"]
+    }
+  }
+}
+```
+
+A client that supports MCP elicitation asks you directly before anything the
+approval gate stops; one that does not gets the decision handed back with a
+signature to pass on retry. See
+[Approvals and secrets](docs/approvals-and-secrets.md).
 
 Then ask for what you want in plain language. The server ships an `ios_operator`
 prompt that teaches the observe/act/verify loop, so clients do not have to

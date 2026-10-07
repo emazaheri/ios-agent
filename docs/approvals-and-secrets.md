@@ -18,8 +18,7 @@ being typed. Nothing gated reaches the device until someone says yes.
 
 ## In an MCP client that can ask
 
-Clients that support MCP elicitation, Claude Code among them, show the
-question themselves:
+A client that supports MCP elicitation shows the question itself:
 
 ```
 Allow type?
