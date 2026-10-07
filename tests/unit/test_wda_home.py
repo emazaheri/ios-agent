@@ -61,3 +61,32 @@ def test_the_build_script_ships_inside_the_package() -> None:
     assert PREPARE_SCRIPT.is_file()
     assert Path(home_module.__file__).parent in PREPARE_SCRIPT.parents
     assert "WDA_HOME" in PREPARE_SCRIPT.read_text()
+
+
+def test_the_device_runner_is_the_one_at_the_top_of_the_home(tmp_path: Path) -> None:
+    """DerivedData holds an unsigned simulator build of the same name.
+
+    Searching the whole tree could report that one, and with it a phone that
+    had a signed runner as having none.
+    """
+    from ios_mcp.devices.doctor import _discover_wda_app
+
+    cfg = Settings()
+    cfg.wda.home = tmp_path
+    sim_build = (
+        tmp_path / "DerivedData" / "Debug-iphonesimulator" / "WebDriverAgentRunner-Runner.app"
+    )
+    sim_build.mkdir(parents=True)
+    assert _discover_wda_app(cfg) is None
+
+    device = tmp_path / "WebDriverAgentRunner-Runner.app"
+    device.mkdir()
+    assert _discover_wda_app(cfg) == device
+
+
+def test_a_simulator_build_leaves_the_device_runner_alone() -> None:
+    """Read from the script: only a device build may write the top-level app."""
+    script = PREPARE_SCRIPT.read_text()
+    simulator_exit = script.index('if [ "$TARGET" = "simulator" ]; then\n  XCTESTRUN=')
+    copy = script.index('ditto "$RUNNER" "$DEST"')
+    assert simulator_exit < copy, "a simulator build reaches the copy over the device runner"

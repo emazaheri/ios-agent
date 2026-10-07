@@ -157,6 +157,22 @@ RUNNER="$PRODUCTS/WebDriverAgentRunner-Runner.app"
   exit 1
 }
 
+# The top-level runner is the device runner: the phone adapter installs it, and
+# a simulator never reads it, since it starts from the .xctestrun in
+# DerivedData. Copying the simulator build here replaced a signed device runner
+# with an unsigned one, so a simulator build that followed a device build left
+# the phone undrivable until it was signed again.
+if [ "$TARGET" = "simulator" ]; then
+  XCTESTRUN="$(ls -t "$DERIVED"/Build/Products/WebDriverAgentRunner_iphonesimulator*.xctestrun 2>/dev/null | head -1)"
+  [ -n "$XCTESTRUN" ] || {
+    echo "error: no simulator .xctestrun under $DERIVED/Build/Products" >&2
+    exit 1
+  }
+  echo
+  echo "Simulator runner ready at: $XCTESTRUN"
+  exit 0
+fi
+
 DEST="$VENDOR/WebDriverAgentRunner-Runner.app"
 rm -rf "$DEST"
 # ditto, not cp -R: it preserves the extended attributes and resource forks a

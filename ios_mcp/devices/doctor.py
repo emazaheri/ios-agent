@@ -656,10 +656,14 @@ def _is_network_only(device: DeviceInfo) -> bool:
 
 
 def _discover_wda_app(cfg: Settings) -> Path | None:
-    """The signed runner app used on physical devices."""
-    for candidate in wda_home(cfg).glob("**/WebDriverAgentRunner-Runner.app"):
-        return candidate
-    return None
+    """The signed runner app used on physical devices.
+
+    The one at the top of the WDA home, which is the one the device adapter
+    installs. A search of the whole tree also matched DerivedData's simulator
+    build, unsigned, and could report a ready phone as having no runner.
+    """
+    candidate = wda_home(cfg) / "WebDriverAgentRunner-Runner.app"
+    return candidate if candidate.is_dir() else None
 
 
 def _discover_xctestrun(cfg: Settings) -> Path | None:
