@@ -14,6 +14,11 @@ from typing import Any, cast
 from ios_mcp.config import PolicySettings
 
 _PLACEHOLDER = "[redacted]"
+_SECRET_PLACEHOLDER = "[secret]"
+
+#: A secret shorter than this is not scrubbed from screens. Every occurrence of
+#: a two-character value would go, which wrecks a screen to protect very little.
+MIN_SECRET_CHARS = 4
 
 
 @dataclass
@@ -22,6 +27,7 @@ class Redactor:
 
     settings: PolicySettings
     _compiled: list[re.Pattern[str]] = field(default_factory=list)
+    _secrets: list[str] = field(default_factory=list)
     redactions: int = 0
 
     def __post_init__(self) -> None:
@@ -29,12 +35,34 @@ class Redactor:
 
     @property
     def active(self) -> bool:
-        return bool(self._compiled)
+        return bool(self._compiled or self._secrets)
+
+    def remember_secret(self, value: str) -> bool:
+        """Scrub `value` from everything this session returns from now on.
+
+        A secret typed into an ordinary field, rather than a password field
+        that shows dots, comes straight back: as the field's value in the next
+        screen, and in anything the app echoes ("No results for ..."). Kept
+        for the life of the session, because the screen keeps showing it.
+        Returns False for a value too short to scrub safely.
+        """
+        if len(value) < MIN_SECRET_CHARS:
+            return False
+        if value not in self._secrets:
+            self._secrets.append(value)
+            # Longest first, so a secret that contains another is replaced whole.
+            self._secrets.sort(key=len, reverse=True)
+        return True
 
     def text(self, value: str | None) -> str | None:
-        if not value or not self._compiled:
+        if not value or not self.active:
             return value
         out = value
+        for secret in self._secrets:
+            count = out.count(secret)
+            if count:
+                out = out.replace(secret, _SECRET_PLACEHOLDER)
+                self.redactions += count
         for pattern in self._compiled:
             out, count = pattern.subn(_PLACEHOLDER, out)
             self.redactions += count

@@ -373,3 +373,74 @@ async def test_text_that_did_not_land_reaches_an_mcp_client_as_a_failure(
         result = payload(await client.call_tool("ios_type", {"text": "hello world"}))
     assert result["ok"] is False
     assert result["typed"] == {"status": "mismatch", "shown": "o world"}
+
+
+# -- approval through the server's own handler ---------------------------------
+#
+# The tests above set `on_approval = None` by hand. The server never does: every
+# session it opens asks through elicitation. These use that handler as it ships,
+# because a client without elicitation once got "The user declined" back, and
+# the signature path the tests above prove was unreachable over the protocol.
+
+
+def _server_with_real_approval(monkeypatch, holder):
+    from ios_mcp.server.context import _elicit_approval
+
+    mcp = build_server(Settings())
+    ctx = mcp.ios_context
+
+    async def fake_open(device=None, *, app=None, fresh=False):
+        session, fake, _ = make_session(form_screen())
+        session.on_approval = _elicit_approval
+        holder["fake"] = fake
+        ctx.session = session
+        return session
+
+    monkeypatch.setattr(ctx, "open", fake_open)
+    return mcp
+
+
+async def test_a_client_that_cannot_be_asked_gets_a_signature(monkeypatch) -> None:
+    holder: dict = {}
+    mcp = _server_with_real_approval(monkeypatch, holder)
+
+    async with Client(mcp) as client:
+        await client.call_tool("ios_open_session", {})
+        with pytest.raises(ToolError) as exc_info:
+            await client.call_tool("ios_tap", {"target": "Send"})
+        error = json.loads(str(exc_info.value))
+        assert error["error"] == "action_requires_approval"
+        assert holder["fake"].taps() == [], "acted without anyone being asked"
+
+        result = payload(
+            await client.call_tool(
+                "ios_tap", {"target": "Send", "approve": error["details"]["signature"]}
+            )
+        )
+
+    assert result["ok"] is True
+    assert len(holder["fake"].taps()) == 1
+
+
+@pytest.mark.parametrize(("answer", "taps"), [("decline", 0), ("cancel", 0), ("accept", 1)])
+async def test_a_client_that_can_be_asked_decides(monkeypatch, answer: str, taps: int) -> None:
+    from fastmcp.client.elicitation import ElicitResult
+
+    holder: dict = {}
+    mcp = _server_with_real_approval(monkeypatch, holder)
+    asked: list[str] = []
+
+    async def handler(message, response_type, params, context):
+        asked.append(message)
+        return ElicitResult(action=answer)
+
+    async with Client(mcp, elicitation_handler=handler) as client:
+        await client.call_tool("ios_open_session", {})
+        result = await client.call_tool("ios_tap", {"target": "Send"}, raise_on_error=False)
+
+    assert len(asked) == 1
+    assert asked[0].startswith("Allow tap on "), asked[0]
+    assert "Send" in asked[0]
+    assert len(holder["fake"].taps()) == taps
+    if not taps:
+        assert json.loads(result.content[0].text)["error"] == "action_rejected_by_policy"
