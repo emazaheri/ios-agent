@@ -53,12 +53,13 @@ So the front end sits beside the agent rather than inside it, and the
 dependencies point one way: `ios-tui` -> `ios-agent` -> `ios-mcp`. See
 `docs/adr/0008-the-front-end-is-a-third-distribution.md`.
 
-## Choosing a model
+## The model, and the checks before a run
 
-`IOS_AGENT_PROVIDER` and `IOS_AGENT_MODEL`, in the environment or in `.env`,
-same as `ios-agent` the library. A real environment variable beats the file.
+The model is chosen exactly as for the library: see
+[Choosing a model](../agent/README.md#choosing-a-model). What follows is only
+what the app adds.
 
-Provider credentials go in `.env` beside them. They reach the vendor SDK
+Provider credentials go in `.env` beside the model settings. They reach the vendor SDK
 through `export_provider_credentials`, because pydantic-settings reads `.env`
 into a settings object rather than into the process environment, and the SDK
 looks in the environment.
