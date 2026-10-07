@@ -46,7 +46,7 @@ uv run ios-agent "turn on bold text"
 - [What the model sees](#what-the-model-sees) · [Safety](#safety)
 - [Measured on real hardware](#measured-on-real-hardware)
 - [Why it is built this way](#why-it-is-built-this-way) · [Why only public APIs](#why-only-apples-public-apis)
-- [Development](#development) · [Contributing](#contributing)
+- [Tracing](#tracing) · [Development](#development) · [Contributing](#contributing)
 
 ## What you can do with it
 
@@ -506,10 +506,42 @@ sandboxed apps even with user consent. XCUIAutomation only executes inside an
 XCTest runner started by `testmanagerd`, which is driven from a host. So the
 engine has to live on a Mac, which is why this project has no iOS app.
 
+## Tracing
+
+Every agent run can be recorded as OpenTelemetry spans: one for the run, one
+per graph node, per model call and per tool call, carrying the task id, step,
+tool name, tokens in and out, cost, resolution tier and verifier result. Off by
+default, and off builds nothing.
+
+```bash
+uv sync --extra tracing
+IOS_AGENT_TRACING=otel uv run ios-agent "turn on bold text"       # any OTLP backend
+IOS_AGENT_TRACING=langsmith uv run ios-agent "turn on bold text"  # needs LANGSMITH_API_KEY
+```
+
+`otel` reads the standard `OTEL_EXPORTER_OTLP_*` variables, so Phoenix,
+Langfuse or a collector is one endpoint away. To view traces locally with
+Phoenix:
+
+```bash
+uvx --from arize-phoenix phoenix serve       # UI and OTLP on http://localhost:6006
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006 IOS_AGENT_TRACING=otel \
+  uv run ios-agent "turn on bold text"
+```
+
+Spans carry counts and names, never prompts, screens or replies, and every
+span is passed through the session's redactor on its way out, so a value typed
+with `ios_type_secret` cannot reach a trace; a test plants one and reads the
+exported spans back. Measured over the 22 agent tasks, replayed with tracing
+off and on, it changed no token and added 0.06 ms per span. See
+[docs/adr/0023](docs/adr/0023-tracing-as-an-off-by-default-option.md), and
+`uv run pytest tests/evals/agent --trace-agent otel` to trace an eval run and
+record each trace id beside its result.
+
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 827 tests, no device, no model
+uv run pytest tests/unit          # 856 tests, no device, no model
 uv run pytest tests/tui           # 234 tests, the terminal front end
 uv run pytest tests/integration   # 18 simulator + 3 device tests
 uv run pytest tests/evals -s      # golden flows, with cost per flow

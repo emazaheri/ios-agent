@@ -25,9 +25,10 @@ from langchain.messages import AIMessage, AnyMessage, HumanMessage, SystemMessag
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from ios_agent.batch import stop_after
+from ios_agent.batch import LastAction, stop_after
 from ios_agent.state import AgentState
 from ios_agent.tools import Run
+from ios_agent.tracing import NULL_TRACER, SpanHandle, Tracer
 
 #: A model that has taken this many turns without finishing has lost the
 #: thread. Recovering from that is a planning problem, which is slice 3.
@@ -53,12 +54,18 @@ def build_graph(
     max_steps: int = DEFAULT_MAX_STEPS,
     max_actions: int = DEFAULT_MAX_ACTIONS,
     checkpointer: Any | None = None,
+    tracer: Tracer = NULL_TRACER,
 ) -> Any:
-    """Wire one goal into a graph. One run, one graph; they share no state."""
+    """Wire one goal into a graph. One run, one graph; they share no state.
+
+    `tracer` opens a span per node and per tool call. The default records
+    nothing, and the graph runs the same code either way.
+    """
     by_name = {t.name: t for t in tools}
 
     async def agent(state: AgentState) -> dict[str, list[AnyMessage]]:
-        reply = await call_model(state["messages"])
+        with tracer.span("agent", "chain", {"ios_agent.step": run.turns + 1}):
+            reply = await call_model(state["messages"])
         # Counted here rather than in `next_step` so the number is model calls,
         # which is what a turn costs. `next_step` returns END before its own
         # checks when the model called `done`, so counting there silently
@@ -69,6 +76,10 @@ def build_graph(
         return {"messages": [reply]}
 
     async def act(state: AgentState) -> dict[str, list[AnyMessage]]:
+        with tracer.span("act", "chain", {"ios_agent.step": run.turns}):
+            return await _act(state)
+
+    async def _act(state: AgentState) -> dict[str, list[AnyMessage]]:
         last = state["messages"][-1]
         assert isinstance(last, AIMessage)
         out: list[AnyMessage] = []
@@ -90,7 +101,21 @@ def build_graph(
             # The whole ToolCall, not just its args: the action tools take
             # their idempotency key from the call id, and LangChain only
             # injects it when handed the full call. Passing args alone raises.
-            result = await chosen.ainvoke(call)
+            with tracer.span(
+                f"execute_tool {call['name']}",
+                "tool",
+                {
+                    "gen_ai.operation.name": "execute_tool",
+                    "gen_ai.tool.name": call["name"],
+                    "gen_ai.tool.call.id": call["id"],
+                    "gen_ai.tool.call.arguments": call["args"],
+                    "ios_agent.step": run.turns,
+                },
+            ) as span:
+                errors = len(run.errors)
+                result = await chosen.ainvoke(call)
+                if tracer.enabled:
+                    _describe_tool_call(span, run, before, errors)
             out.append(
                 result
                 if isinstance(result, ToolMessage)
@@ -177,6 +202,24 @@ def build_graph(
     # project and LangGraph checkpoints persist data rather than execution, so
     # a disk-backed saver would imply a guarantee it does not give.
     return builder.compile(checkpointer=checkpointer or InMemorySaver())
+
+
+def _describe_tool_call(span: SpanHandle, run: Run, before: LastAction | None, errors: int) -> None:
+    """What the call did to the device, read off the record the backend keeps.
+
+    Only a fresh record belongs to this call: `observe`, `find` and `done`
+    leave `last_action` alone, and reading it then would credit them with the
+    previous action's verdict. `batch.py` explains the sequence number.
+    """
+    last = run.backend.last_action
+    if last is not None and last.seq != (before.seq if before else 0):
+        span.set("ios_agent.ok", last.ok)
+        span.set("ios_agent.screen_changed", last.screen_changed)
+        span.set("ios_agent.refused", last.refused)
+        span.set("ios_agent.verifier.result", last.judgement)
+        span.set("ios_agent.resolution.tier", last.tier)
+    if len(run.errors) > errors:
+        span.set("ios_agent.tool_error", run.errors[-1])
 
 
 def opening_messages(

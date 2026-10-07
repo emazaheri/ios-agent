@@ -31,6 +31,14 @@ ollama = ["langchain-ollama>=1.1"]
 groq = ["langchain-groq>=1.1"]
 mistralai = ["langchain-mistralai>=1.1"]
 bedrock_converse = ["langchain-aws>=1.7"]
+# Tracing is off unless `IOS_AGENT_TRACING` asks for it, and the base install
+# carries none of this. Only the SDK and one exporter: `opentelemetry-api`
+# alone records nothing, and OTLP over HTTP is what LangSmith, Phoenix and
+# Langfuse all accept. See docs/adr/0023.
+tracing = [
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+]
 
 [build-system]
 requires = ["hatchling"]

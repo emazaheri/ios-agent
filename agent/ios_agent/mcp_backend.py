@@ -184,7 +184,14 @@ class McpBackend:
         refusal = self.verifier.check(key)
         if refusal is not None:
             self.stats.refusals += 1
-            self._record(key[0], ok=False, screen_changed=False, alert=False, refused=True)
+            self._record(
+                key[0],
+                ok=False,
+                screen_changed=False,
+                alert=False,
+                refused=True,
+                judgement=refusal.judgement.value,
+            )
             return str(refusal.note)
 
         payload = await self._call(tool, args)
@@ -195,22 +202,33 @@ class McpBackend:
         if not payload.get("from_cache"):
             self.stats.actions += 1
         self._charge(payload)
+        verdict = self.verifier.record(key, _AsResult(payload))
+        target = payload.get("target")
         self._record(
             key[0],
             ok=bool(payload.get("ok")),
             screen_changed=bool(payload.get("screen_changed")),
             alert=payload.get("alert") is not None,
             refused=False,
+            judgement=verdict.judgement.value,
+            tier=target.get("resolved_via") if isinstance(target, dict) else None,
         )
 
-        verdict = self.verifier.record(key, _AsResult(payload))
         self.stats.changes = self.verifier.changes
         self.stats.satisfied = self.verifier.satisfied
         rendered = self._render(payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 
     def _record(
-        self, verb: str, *, ok: bool, screen_changed: bool, alert: bool, refused: bool
+        self,
+        verb: str,
+        *,
+        ok: bool,
+        screen_changed: bool,
+        alert: bool,
+        refused: bool,
+        judgement: str | None = None,
+        tier: str | None = None,
     ) -> None:
         """The same record `SessionBackend` keeps, from the wire payload.
 
@@ -226,6 +244,8 @@ class McpBackend:
             alert=alert,
             refused=refused,
             seq=self._seq,
+            judgement=judgement,
+            tier=tier,
         )
 
     async def _call(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:

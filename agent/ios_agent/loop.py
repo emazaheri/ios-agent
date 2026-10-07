@@ -28,6 +28,7 @@ from ios_agent.config import AgentSettings, export_provider_credentials
 from ios_agent.graph import build_graph, opening_messages
 from ios_agent.state import Outcome
 from ios_agent.tools import Run, build_tools
+from ios_agent.tracing import NULL_TRACER, SpanHandle, Tracer, scrub_with, tracer_for
 from ios_mcp.session import IosSession
 
 ModelFactory = Callable[[list[Any]], Callable[[list[AnyMessage]], Awaitable[AIMessage]]]
@@ -170,15 +171,26 @@ async def run_goal(
     approve: Approver | None = None,
     max_steps: int | None = None,
     route: ModelFactory | None = None,
+    task_id: str | None = None,
+    tracer: Tracer | None = None,
 ) -> Outcome:
     """Drive one goal to a stopping point and report what it cost.
 
     A destructive action pauses the graph rather than being decided for the
     person whose phone it is. `approve` is asked and the graph resumes with the
     answer; without one, everything destructive is refused.
+
+    `task_id` labels the run's trace; `tracer` replaces the one
+    `settings.tracing` would build, which is how a test reads spans back.
     """
     cfg = settings or AgentSettings()
     run = Run(backend=backend or SessionBackend(session), goal=goal)
+    trace = tracer or (NULL_TRACER if cfg.tracing == "off" else tracer_for(cfg.tracing))
+    # Tracing redacts with the session's own redactor and refuses to run
+    # without one. A trace that could not be scrubbed is not worth exporting.
+    redactor = getattr(session, "redactor", None)
+    if redactor is None:
+        trace = NULL_TRACER
     tools = build_tools(run)
     call_model = (model or chat_model(cfg))(tools)
     large_name = cfg.model
@@ -235,7 +247,20 @@ async def run_goal(
             on_small = False
         caller = call_small if on_small and call_small is not None else call_model
         name = (small_name if on_small else large_name) or large_name
-        reply = await caller(messages)
+        with trace.span(
+            f"chat {name}",
+            "llm",
+            {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.provider.name": cfg.provider,
+                "gen_ai.request.model": name,
+                "ios_agent.step": run.turns + 1,
+                "ios_agent.routed_to_small_model": on_small,
+            },
+        ) as span:
+            reply = await caller(messages)
+            if trace.enabled:
+                _describe_model_call(span, reply, cfg)
         usage = reply.usage_metadata
         if usage:
             prompt_tokens += usage.get("input_tokens", 0)
@@ -267,12 +292,49 @@ async def run_goal(
     # them), and passing only the turns left it at its default: a caller that
     # raised `max_steps` to 60 still had its run ended at 24 actions.
     budget = max_steps or cfg.max_steps
-    graph = build_graph(run, metered, tools, max_steps=budget, max_actions=budget)
+    graph = build_graph(run, metered, tools, max_steps=budget, max_actions=budget, tracer=trace)
     decide = approve or refuse_everything
     # One thread per run. The checkpointer keys on it, and reusing an id across
     # runs would resume someone else's conversation.
     config = {"configurable": {"thread_id": f"{id(run):x}"}}
 
+    with (
+        trace.bind(scrub_with(redactor)),
+        trace.span(
+            "ios_agent.run",
+            "agent",
+            {
+                "ios_agent.task_id": task_id or config["configurable"]["thread_id"],
+                "ios_agent.goal": goal,
+                "gen_ai.provider.name": cfg.provider,
+                "gen_ai.request.model": cfg.model,
+                "ios_agent.max_steps": budget,
+            },
+        ) as span,
+    ):
+        outcome = await _drive(session, goal, run, graph, config, decide)
+        outcome.prompt_tokens = prompt_tokens
+        outcome.completion_tokens = completion_tokens
+        outcome.cache_read_tokens = cache_read_tokens
+        outcome.cache_write_tokens = cache_write_tokens
+        outcome.model_served = model_served
+        outcome.tokens_by_model = {k: (v[0], v[1]) for k, v in tokens_by_model.items()}
+        outcome.escalated_at_turn = escalated_at
+        outcome.trace_id = trace.trace_id()
+        if trace.enabled:
+            _describe_run(span, outcome, cfg)
+    return outcome
+
+
+async def _drive(
+    session: IosSession,
+    goal: str,
+    run: Run,
+    graph: Any,
+    config: dict[str, Any],
+    decide: Approver,
+) -> Outcome:
+    """Run the graph to its end, answering every interrupt on the way."""
     apps, current = await _device_context(session)
     step: Any = {"messages": opening_messages(operator_prompt(), goal, apps, current)}
     while True:
@@ -318,12 +380,70 @@ async def run_goal(
         turns=run.turns,
         approvals_asked=run.approvals_asked,
         stats=stats,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        cache_read_tokens=cache_read_tokens,
-        cache_write_tokens=cache_write_tokens,
-        model_served=model_served,
         contradicted=contradicted,
-        tokens_by_model={k: (v[0], v[1]) for k, v in tokens_by_model.items()},
-        escalated_at_turn=escalated_at,
     )
+
+
+def _cost(cfg: AgentSettings, prompt: int, completion: int, read: int = 0, write: int = 0) -> float:
+    """Dollars at the configured rates, priced the way the eval harness prices.
+
+    `read` and `write` are already inside `prompt`, so they replace part of it
+    at their own rates rather than adding to it.
+    """
+    per_read, per_write = cfg.cache_prices
+    return (
+        (prompt - read - write) * cfg.usd_per_mtok_in
+        + read * per_read
+        + write * per_write
+        + completion * cfg.usd_per_mtok_out
+    ) / 1_000_000
+
+
+def _describe_model_call(span: SpanHandle, reply: AIMessage, cfg: AgentSettings) -> None:
+    """Tokens, cost and the tools asked for. Never the text of the reply."""
+    usage = reply.usage_metadata
+    prompt = usage.get("input_tokens", 0) if usage else 0
+    completion = usage.get("output_tokens", 0) if usage else 0
+    details = (usage.get("input_token_details") if usage else None) or {}
+    read = details.get("cache_read") or 0
+    write = cache_writes(details)
+    span.set("gen_ai.response.model", (reply.response_metadata or {}).get("model_name"))
+    span.set("gen_ai.usage.input_tokens", prompt)
+    span.set("gen_ai.usage.output_tokens", completion)
+    # The same two numbers under the names Phoenix reads.
+    span.set("llm.token_count.prompt", prompt)
+    span.set("llm.token_count.completion", completion)
+    span.set("gen_ai.usage.cache_read.input_tokens", read)
+    span.set("gen_ai.usage.cache_creation.input_tokens", write)
+    span.set("ios_agent.cost_usd", _cost(cfg, prompt, completion, read, write))
+    span.set("ios_agent.tool_calls", [c["name"] for c in reply.tool_calls])
+
+
+def _describe_run(span: SpanHandle, outcome: Outcome, cfg: AgentSettings) -> None:
+    stats = outcome.stats
+    span.set("gen_ai.response.model", outcome.model_served)
+    # Not `gen_ai.usage.*`, which the model-call spans already carry: Phoenix
+    # and LangSmith add those up across a trace, and totals under the same
+    # names here would count every token twice.
+    span.set("ios_agent.usage.input_tokens", outcome.prompt_tokens)
+    span.set("ios_agent.usage.output_tokens", outcome.completion_tokens)
+    span.set("ios_agent.usage.cache_read_tokens", outcome.cache_read_tokens)
+    span.set("ios_agent.usage.cache_write_tokens", outcome.cache_write_tokens)
+    span.set(
+        "ios_agent.cost_usd",
+        _cost(
+            cfg,
+            outcome.prompt_tokens,
+            outcome.completion_tokens,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
+        ),
+    )
+    span.set("ios_agent.turns", outcome.turns)
+    span.set("ios_agent.actions", stats.actions)
+    span.set("ios_agent.observations", stats.observations)
+    span.set("ios_agent.refusals", stats.refusals)
+    span.set("ios_agent.succeeded", outcome.succeeded)
+    span.set("ios_agent.verified", outcome.verified)
+    span.set("ios_agent.stopped_because", outcome.stopped_because)
+    span.set("ios_agent.escalated_at_turn", outcome.escalated_at_turn)

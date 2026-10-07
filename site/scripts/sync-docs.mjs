@@ -43,6 +43,7 @@ const README_SECTIONS = {
 	'What the model sees': 'concepts/what-the-model-sees',
 	'Safety': null,
 	'Measured on real hardware': 'built/results',
+	'Tracing': 'guides/tracing',
 	'Development': 'project/development',
 	'Why the automation runs on a host, not on the phone': 'concepts/design',
 	'Contributing': null,
@@ -89,6 +90,11 @@ const README_PAGES = {
 		title: 'Measured results',
 		description: 'Success, observations, actions, turns and cost across the agent tasks, and the same goal verified on a physical iPhone.',
 		order: 1,
+	},
+	'guides/tracing': {
+		title: 'Trace a run',
+		description: 'Record every agent run as OpenTelemetry spans and read them in Phoenix, LangSmith or any OTLP backend, with secrets scrubbed before export.',
+		order: 9,
 	},
 	'project/development': {
 		title: 'Development',

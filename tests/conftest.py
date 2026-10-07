@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from fake_wda import FakeWda
 from ios_agent.config import AgentSettings
@@ -7,6 +9,29 @@ from ios_agent.config import AgentSettings
 from ios_mcp.config import Settings
 from ios_mcp.wda.client import WdaClient
 from ios_mcp.wda.session import WdaSession
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    # Not `--trace`, which pytest already spends on dropping into pdb.
+    parser.addoption(
+        "--trace-agent",
+        choices=("off", "otel", "langsmith"),
+        default=None,
+        help="trace every agent run as OpenTelemetry spans and record each trace id "
+        "beside its result; the same as setting IOS_AGENT_TRACING",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """The flag is the environment variable, set once for the whole run.
+
+    Through the environment rather than a fixture because `AgentSettings`
+    reads it wherever a run is built, so the eval drivers need no plumbing and
+    a run outside pytest traces the same way.
+    """
+    mode = config.getoption("--trace-agent")
+    if mode is not None:
+        os.environ["IOS_AGENT_TRACING"] = mode
 
 
 @pytest.fixture(autouse=True)

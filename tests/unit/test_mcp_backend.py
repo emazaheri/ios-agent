@@ -363,3 +363,53 @@ async def test_a_ref_reaches_the_server_as_a_ref(served: Any) -> None:
 
     assert "failed" not in reply.splitlines()[0], reply
     assert fake.taps()
+
+
+async def test_both_backends_record_the_same_verdict_and_tier(served) -> None:
+    """Tracing reads these two off the record, so the transports must agree."""
+    client, _model, session, _fake = served
+    over_mcp = McpBackend(client)
+    direct = SessionBackend(session)
+
+    await over_mcp.tap("Accessibility", idem_key="m1")
+    await direct.tap("Back", idem_key="d1")
+
+    assert over_mcp.last_action is not None and direct.last_action is not None
+    assert over_mcp.last_action.judgement == direct.last_action.judgement == "progressed"
+    assert over_mcp.last_action.tier is not None
+    assert over_mcp.last_action.tier == direct.last_action.tier
+
+
+async def test_a_traced_goal_over_mcp_reads_tier_and_verdict_off_the_wire(served) -> None:
+    """The whole loop over the protocol, traced, as a client of the server would run it."""
+    from ios_agent.config import AgentSettings
+    from ios_agent.loop import run_goal
+    from ios_agent.tracing import build_tracer
+    from scripted_model import ScriptedModel
+
+    exporter_module = pytest.importorskip("opentelemetry.sdk.trace.export.in_memory_span_exporter")
+    client, _model, session, _fake = served
+    exporter = exporter_module.InMemorySpanExporter()
+    script = [
+        [("observe", {})],
+        [("tap", {"target": "Accessibility"})],
+        [("tap", {"target": "Display & Text Size"})],
+        [("set_value", {"value": "on", "target": "Bold Text"})],
+        [("done", {"succeeded": True, "summary": "Bold Text is on"})],
+    ]
+
+    outcome = await run_goal(
+        session,
+        "Turn on Bold Text",
+        model=ScriptedModel(script),
+        backend=McpBackend(client),
+        settings=AgentSettings(_env_file=None),
+        tracer=build_tracer("otel", exporter=exporter),
+    )
+
+    assert outcome.verified
+    tools = [s for s in exporter.get_finished_spans() if s.name.startswith("execute_tool ")]
+    acted = [dict(s.attributes or {}) for s in tools if s.name != "execute_tool observe"]
+    acted = [a for a in acted if a["gen_ai.tool.name"] != "done"]
+    assert [a["ios_agent.verifier.result"] for a in acted] == ["progressed"] * 3
+    assert all(a["ios_agent.resolution.tier"] for a in acted)

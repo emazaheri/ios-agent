@@ -94,6 +94,9 @@ class Outcome:
     #: Set when the agent claimed success and nothing it did moved the device.
     #: See `verified`, which is the field to read.
     contradicted: bool = False
+    #: The OpenTelemetry trace this run was recorded under, as 32 hex digits,
+    #: or None when tracing is off.
+    trace_id: str | None = None
 
     @property
     def verified(self) -> bool:
