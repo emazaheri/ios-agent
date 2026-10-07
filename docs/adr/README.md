@@ -29,7 +29,7 @@ grouped.
 | [0021](0021-exploring-an-app-for-planted-bugs.md) | Not claimed: exploring an app for its bugs | pre-registered at 80%; 18 of 30 self-evident bugs found (60%), every one on the forced path and none off it, one false report, $0.30 to $1.10 a run against #450's $4.28 |
 | [0022](0022-cache-the-prompt-prefix.md) | Cache the prompt prefix | pre-registered at 60% of the same runs priced uncached; not yet run |
 | [0023](0023-tracing-as-an-off-by-default-option.md) | Tracing, as an off-by-default option | 894 spans over 22 replayed tasks added 54 ms in total, 0.06 ms a span, with the model shown identical bytes in all 220 replays; off because a trace sends what the redactor does not scrub off the machine |
-| [0024](0024-count-false-success-claims.md) | Count false success claims | pre-registered as a measurement with no bar; not yet run |
+| [0024](0024-count-false-success-claims.md) | Count false success claims | pre-registered as a measurement; 0 false successes in 103 claims on `gpt-6.1-sol`; 3 under-claims on one task traced to an action diff that ignored labels, and fixed |
 
 Eleven of the twenty-four are refusals. That is the point rather than an accident: the
 eval harness was built before the agent so it could overturn the design, and it
