@@ -106,11 +106,21 @@ class GoalRunner:
         #: Carried across goals so a new goal's screen pane does not start
         #: blank. The backend itself is rebuilt every time; this is only text.
         self._last_screen = ""
+        self._ended_on = ""
 
     @property
     def last_screen(self) -> str:
-        """The most recent screen any goal ended on, carried across goals."""
+        """The last whole screen the model read, carried across goals.
+
+        Not always where the device is: an action that changed little returns
+        only the change. `ended_on` is where the device is.
+        """
         return self._last_screen
+
+    @property
+    def ended_on(self) -> str:
+        """The screen the device was on when the latest goal stopped."""
+        return self._ended_on or self._last_screen
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -145,6 +155,7 @@ class GoalRunner:
         self._pool = None
         self.session = None
         self._last_screen = ""
+        self._ended_on = ""
         self.device = device
         return await self.start()
 
@@ -196,6 +207,7 @@ class GoalRunner:
             raise
         finally:
             self._last_screen = backend.last_screen
+            self._ended_on = backend.ended_on
 
         self.sink.emit(
             GoalFinished(

@@ -115,6 +115,9 @@ class SessionBackend:
         self.session = session
         self.stats = BackendStats()
         self.last_screen = ""
+        #: The screen the device is on after the latest observation or action,
+        #: which `last_screen` is not when an action returned a delta.
+        self.ended_on = ""
         self.last_action: LastAction | None = None
         self._seq = 0
         #: Judges each action from the screen it returned. Never re-reads the
@@ -128,6 +131,7 @@ class SessionBackend:
         self.stats.observations += 1
         self._charge(digest.to_dict())
         self.last_screen = digest.render()
+        self.ended_on = self.last_screen
         return self.last_screen
 
     async def find(self, text: str) -> str:
@@ -298,6 +302,12 @@ class SessionBackend:
         if result.digest is not None:
             self.last_screen = result.digest.render()
             lines.append(self.last_screen)
+        # The screen the action left, whether the model was shown all of it or
+        # only what changed. `last_screen` is deliberately the last one the
+        # model read whole; reporting that as where a run ended showed a switch
+        # unflipped after the run had flipped it.
+        if result.screen is not None:
+            self.ended_on = result.screen.render()
         return "\n".join(lines)
 
     def _charge(self, payload: object) -> None:

@@ -83,6 +83,11 @@ class EventBackend:
         self._inner.last_screen = value
 
     @property
+    def ended_on(self) -> str:
+        """Where the device is now; see the direct backend. Read-only."""
+        return str(getattr(self._inner, "ended_on", "") or self._inner.last_screen)
+
+    @property
     def last_action(self) -> LastAction | None:
         return self._inner.last_action
 

@@ -79,6 +79,10 @@ class ActionResult:
     #: type costs no extra tokens.
     readback: Readback | None = None
     note: str | None = None
+    #: The whole screen the action left, also when `digest` is None because a
+    #: delta said what changed. Never serialised, so it costs no tokens: it is
+    #: for a caller that shows the screen, which a delta alone cannot rebuild.
+    screen: Digest | None = field(default=None, compare=False, repr=False)
     #: See `Digest.scrub`. The target and the alert carry screen text of their
     #: own, so the whole payload is scrubbed rather than only the screen in it.
     scrub: Scrubber | None = field(default=None, compare=False, repr=False)

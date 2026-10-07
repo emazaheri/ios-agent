@@ -137,6 +137,7 @@ class _StubRunner:
     def __init__(self, outcome: Outcome) -> None:
         self._outcome = outcome
         self.last_screen = "screen: com.apple.Preferences"
+        self.ended_on = self.last_screen
         self.closed = False
 
     def __call__(self, *_args: object, **_kwargs: object) -> _StubRunner:
