@@ -507,3 +507,26 @@ def test_a_scroll_view_survives_one_large_block_of_content_centred_in_it() -> No
     d = digest_of(tree)
     assert any(n.role == "scroll" and n.scrollable for n in d.nodes), d.render()
     assert any(n.label == "Terms of Service text" for n in d.nodes)
+
+
+def _with_keyboard(tree: dict) -> dict:
+    """The tree with the system keyboard up, laid out as iOS 27 reports it."""
+    keys = [
+        node("Key", label=letter, x=8 + 39 * i, y=610, w=34, h=42)
+        for i, letter in enumerate("QWERTYUIOP")
+    ] + [node("Button", label="return", x=290, y=760, w=96, h=42)]
+    keyboard = node("Keyboard", x=0, y=590, h=262, children=keys)
+    return {**tree, "children": [*tree.get("children", []), keyboard]}
+
+
+def test_the_keyboard_is_one_line_not_one_per_key() -> None:
+    """A single type on a simulator returned 34 key lines in its change."""
+    plain = digest_of(form_screen())
+    typing = digest_of(_with_keyboard(form_screen()))
+
+    roles = [n.role for n in typing.nodes]
+    assert roles.count("keyboard") == 1
+    assert "key" not in roles
+    assert not any(n.label == "return" for n in typing.nodes)
+    assert len(typing.nodes) == len(plain.nodes) + 1
+    assert [n.label for n in typing.nodes if n.role != "keyboard"] == [n.label for n in plain.nodes]

@@ -396,6 +396,14 @@ def _collect(
     the digest.
     """
     role = role_of(node.type)
+    if role == "keyboard":
+        # The system keyboard, one line rather than one per key. Typing never
+        # taps keys: the type action sends text to the focused field, and
+        # return and dismiss are hardware buttons. Every key was reaching the
+        # model all the same, 34 lines in the change after a single type on an
+        # iOS 27 simulator. The line keeps "a keyboard is up", which is the
+        # part that decides anything, and find still reads every key.
+        return [_Candidate(node=node, role=role, depth=depth)] if node.visible else []
     keep = not _is_noise(node, role, settings, screen, inherited_text) and not _is_wrapper(
         node, role
     )
