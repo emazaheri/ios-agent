@@ -14,7 +14,8 @@ from typing import Any
 from ios_mcp.config import Settings, set_settings
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The whole command line, apart from `main` so docs/cli.md can be held to it."""
     parser = argparse.ArgumentParser(prog="ios-mcp", description="iOS automation MCP server")
     parser.add_argument("--config", type=Path, default=None, help="Path to a TOML config file")
     parser.add_argument("--log-level", default=None)
@@ -54,8 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     reset.add_argument(
         "-y", "--yes", action="store_true", help="Stop what was found, rather than listing it."
     )
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     settings = Settings.load(args.config)
     if args.log_level:

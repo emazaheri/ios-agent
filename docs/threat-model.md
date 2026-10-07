@@ -36,7 +36,10 @@ owner's real accounts, so a digest can hold anything on screen. What limits it:
   returned as captured, unredacted, because redacting an image needs a model of
   where things are on it and this project does not have one.
 - Secrets are passed by reference and read from the host keychain, so a
-  password never enters a prompt, a tool result or the audit trail.
+  password never enters a prompt or the audit trail. Typed into a field that
+  is not a password field, it is scrubbed as `[secret]` from every screen
+  returned afterwards, except in a screenshot and when shorter than four
+  characters.
 - Apps holding payment data are blocked by default (Wallet, Stocks), and an
   allowlist narrows a session to named apps.
 

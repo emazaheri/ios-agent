@@ -88,3 +88,24 @@ def test_the_safety_config_example_only_names_real_settings() -> None:
 
     unknown = keys - set(PolicySettings.model_fields)
     assert not unknown, f"SAFETY.md documents settings that do not exist: {sorted(unknown)}"
+
+
+# -- the command line reference -----------------------------------------------
+
+
+def test_every_ios_mcp_command_and_flag_is_in_the_cli_reference() -> None:
+    from cli_docs import missing_from_doc
+
+    from ios_mcp.__main__ import build_parser
+
+    assert missing_from_doc(build_parser()) == [], "docs/cli.md does not mention these"
+
+
+def test_the_library_guide_imports_only_the_public_surface() -> None:
+    """The guide is what an outside agent copies, so it may name only what is kept stable."""
+    from tests.unit.test_layering import _PUBLIC_SURFACE
+
+    guide = (_ROOT / "docs" / "library.md").read_text()
+    imported = set(re.findall(r"^from (ios_mcp[\w.]*) import", guide, flags=re.MULTILINE))
+    assert imported, "the guide no longer shows any imports to check"
+    assert imported <= _PUBLIC_SURFACE, f"not public: {sorted(imported - _PUBLIC_SURFACE)}"
