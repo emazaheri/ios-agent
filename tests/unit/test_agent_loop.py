@@ -350,6 +350,27 @@ async def test_every_action_carries_an_idempotency_key() -> None:
     assert "Replayed from the idempotency cache" in replay
 
 
+async def test_where_a_run_ended_follows_an_action_that_returned_a_delta() -> None:
+    """Found on a simulator: the run printed Bold Text =0 after turning it on.
+
+    A switch flip changes one line, so the action returns a delta instead of a
+    screen. `last_screen` stays the last screen the model read whole, which the
+    terminal app shows on purpose; `ended_on` is where the device is.
+    """
+    model = DeviceModel()
+    session, _, _ = build_session(model, _settings())
+    backend = SessionBackend(session)
+    await backend.observe()
+
+    reply = await backend.set_value("on", "Airplane Mode", idem_key="k1")
+
+    assert "screen:" not in reply, "the action returned a whole screen, so this proves nothing"
+    line = next(x for x in backend.ended_on.splitlines() if "Airplane Mode" in x)
+    assert "=1" in line, line
+    shown = next(x for x in backend.last_screen.splitlines() if "Airplane Mode" in x)
+    assert "=0" in shown, "last_screen should still be what the model last read whole"
+
+
 async def test_the_loop_stops_when_the_session_halts() -> None:
     """Halting lives in the policy layer and the agent obeys it.
 

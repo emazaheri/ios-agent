@@ -421,7 +421,7 @@ async def _run_plain(settings: Settings, args: argparse.Namespace) -> int:
             print(f"    {entry.seq:>2}. {entry.action:<12} {str(target)[:40]:<40} {outcome_text}")
 
         print("\n  the screen it ended on")
-        for line in runner.last_screen.splitlines()[:20]:
+        for line in runner.ended_on.splitlines()[:20]:
             print(f"    {line}")
 
         # The agent's own claim is not evidence, and this is where that stopped

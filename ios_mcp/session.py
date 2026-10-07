@@ -1089,6 +1089,7 @@ class IosSession:
             alert=alert,
             recovered=recovered,
             note=note,
+            screen=after,
             scrub=self.redactor,
         )
 
