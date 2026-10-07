@@ -40,10 +40,7 @@ class DigestDelta:
         for node in self.removed:
             lines.append(f"- {node.render()}")
         for before, after in self.changed:
-            lines.append(
-                f"~ {after.render()}   (was "
-                f"{before.value if before.value is not None else 'unset'})"
-            )
+            lines.append(f"~ {after.render()}   (was {_was(before, after)})")
         return scrubbed(self.scrub, "\n".join(lines))
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,4 +144,25 @@ def _identity(node: DigestNode) -> str:
 
 
 def _state_of(node: DigestNode) -> tuple[Any, ...]:
-    return (node.value, node.enabled, node.selected, int(node.rect.y) // 4)
+    """What can change about an element while it stays the same element.
+
+    The label is here because an element with an identifier keeps its identity
+    when its label changes, and apps say a great deal through that label: a
+    card reading "Liked" after a tap, a button turning from Follow to
+    Following. Without it the tap's screen fingerprint moved and its delta
+    said "no visible change", so an agent that had liked a card reported that
+    it could not confirm it (ADR 0024's first run). An element with no
+    identifier is keyed on its label, so for those a new label is still a
+    removal and an addition, as before.
+    """
+    return (node.label, node.value, node.enabled, node.selected, int(node.rect.y) // 4)
+
+
+def _was(before: DigestNode, after: DigestNode) -> str:
+    """The part of the old state worth reading: its label if that moved, else its value."""
+    parts: list[str] = []
+    if before.label != after.label:
+        parts.append(f'"{before.label or ""}"')
+    if before.value != after.value or not parts:
+        parts.append(before.value if before.value is not None else "unset")
+    return " ".join(parts)

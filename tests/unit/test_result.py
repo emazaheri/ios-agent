@@ -66,6 +66,30 @@ def test_the_rendered_delta_is_readable() -> None:
     assert "Airplane Mode" in text
 
 
+def test_a_relabelled_element_shows_as_changed() -> None:
+    """A card reading "Liked" after a tap is the same element with a new label.
+
+    Keyed on its identifier, so neither added nor removed, and before this it
+    was not changed either: the tap's delta said "no visible change" while
+    the screen had plainly moved.
+    """
+    base = settings_screen()
+    relabelled = settings_screen()
+    # Wi-Fi, a cell that stands on its own. Airplane Mode's cell is folded
+    # into its switch, which would test the folding instead.
+    row = relabelled["children"][1]["children"][1]
+    assert row.get("name") == "wifi_cell"
+    row["label"] = f"{row['label']}. Liked"
+
+    delta = diff_digests(digest_of(base), digest_of(relabelled))
+
+    assert not delta.added and not delta.removed
+    assert len(delta.changed) == 1
+    text = delta.render()
+    assert "Liked" in text
+    assert '(was "' in text, "the old label is what says what changed"
+
+
 def test_an_empty_delta_says_so_in_words() -> None:
     assert DigestDelta().render() == "no visible change"
 
