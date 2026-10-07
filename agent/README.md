@@ -90,4 +90,7 @@ uv run pytest tests/evals/agent -m model -s  # with a model in the loop
 The second skips with a reason naming the configured model when no provider is
 reachable. Token cost is priced at Claude Opus 5's rates by default; set
 `IOS_AGENT_USD_PER_MTOK_IN` and `IOS_AGENT_USD_PER_MTOK_OUT` for anything else,
-since nothing here can know what a given vendor charges.
+since nothing here can know what a given vendor charges. Cached prompt tokens
+are priced apart, at `IOS_AGENT_USD_PER_MTOK_CACHE_READ` and
+`IOS_AGENT_USD_PER_MTOK_CACHE_WRITE`, which default to Anthropic's 5-minute
+multipliers of the input price.

@@ -180,11 +180,14 @@ async def run_goal(
 
     prompt_tokens = 0
     completion_tokens = 0
+    cache_read_tokens = 0
+    cache_write_tokens = 0
     model_served: str | None = None
     tokens_by_model: dict[str, list[int]] = {}
 
     async def metered(messages: list[AnyMessage]) -> AIMessage:
         nonlocal prompt_tokens, completion_tokens, model_served, escalated_at
+        nonlocal cache_read_tokens, cache_write_tokens
         on_small = call_small is not None and escalated_at is None
         if on_small and trouble():
             escalated_at = run.turns
@@ -199,6 +202,12 @@ async def run_goal(
             spent = tokens_by_model.setdefault(name, [0, 0])
             spent[0] += usage.get("input_tokens", 0)
             spent[1] += usage.get("output_tokens", 0)
+            # Already inside `input_tokens`, so these split the total rather
+            # than add to it. Either key can be absent or None: a provider
+            # that does not cache, or one that does and did not say.
+            details = usage.get("input_token_details") or {}
+            cache_read_tokens += details.get("cache_read") or 0
+            cache_write_tokens += details.get("cache_creation") or 0
         # What the provider says it served, which `AgentSettings.model` cannot
         # say: that is an alias, and the thing behind it moves. Read from the
         # first reply that names one and not overwritten, so a report says what
@@ -270,6 +279,8 @@ async def run_goal(
         stats=stats,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
         model_served=model_served,
         contradicted=contradicted,
         tokens_by_model={k: (v[0], v[1]) for k, v in tokens_by_model.items()},

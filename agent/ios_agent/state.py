@@ -59,6 +59,17 @@ class Outcome:
     stats: BackendStats = field(default_factory=BackendStats)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: How much of `prompt_tokens` the provider read from its prompt cache,
+    #: and how much it wrote there. A breakdown of `prompt_tokens`, not an
+    #: addition to it: LangChain counts both inside `input_tokens` already, so
+    #: every recorded total stays comparable with the ones before caching.
+    #:
+    #: They exist because the totals alone price a cached token like any other.
+    #: OpenAI caches a repeated prefix on its own, and Anthropic does once
+    #: `prompt_cache` asks it to, so without these the harness could not see
+    #: a cache hit and every dollar figure overstated what a run cost.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     #: What the provider said it actually ran, or None when it did not say and
     #: when no model was in the loop at all.
     #:

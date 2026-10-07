@@ -217,6 +217,7 @@ def _write_report(backend: Any, outcome: Any, elapsed: float, device_state: str 
                 "device_tokens": backend.stats.device_tokens,
                 "prompt_tokens": outcome.prompt_tokens,
                 "completion_tokens": outcome.completion_tokens,
+                "cache_read_tokens": outcome.cache_read_tokens,
                 "seconds": round(elapsed, 1),
                 "agent_claimed": outcome.succeeded,
                 "device_state_after": device_state,

@@ -118,6 +118,7 @@ async def _run(session: IosSession, goal: str) -> SessionBackend:
             "device_tokens": backend.stats.device_tokens,
             "prompt_tokens": outcome.prompt_tokens,
             "completion_tokens": outcome.completion_tokens,
+            "cache_read_tokens": outcome.cache_read_tokens,
             "claimed": outcome.succeeded,
             "summary": outcome.summary[:200],
         }

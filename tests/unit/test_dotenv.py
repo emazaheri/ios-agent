@@ -66,10 +66,13 @@ def test_a_price_in_dotenv_reaches_the_eval_harness(in_a_directory_with_dotenv: 
     """
     from measure import token_prices
 
-    per_in, per_out = token_prices()
+    per_in, per_out, per_read, per_write = token_prices()
 
     assert per_in * 1_000_000 == 4.0
     assert per_out * 1_000_000 == 20.0
+    # Unset cache prices follow the input price, not Opus's.
+    assert per_read * 1_000_000 == pytest.approx(0.4)
+    assert per_write * 1_000_000 == pytest.approx(5.0)
 
 
 def test_nested_settings_come_through_the_double_underscore(

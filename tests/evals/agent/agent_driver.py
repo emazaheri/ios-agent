@@ -103,7 +103,12 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     # oracle's to declare and this column is what gets measured against it.
     meter.turns = outcome.turns
     meter.model_served = outcome.model_served
-    meter.charge_model(outcome.prompt_tokens, outcome.completion_tokens)
+    meter.charge_model(
+        outcome.prompt_tokens,
+        outcome.completion_tokens,
+        outcome.cache_read_tokens,
+        outcome.cache_write_tokens,
+    )
     meter.last_screen = backend.last_screen
     # The report, for the tasks scored on one. Read from the agent's own
     # summary, which is the one place its findings are written down.
