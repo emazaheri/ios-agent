@@ -208,3 +208,9 @@ def test_no_tui_without_a_goal_is_a_usage_error(capsys) -> None:
 
     assert _cmd_run(Settings(), args) == 2
     assert "needs a goal" in capsys.readouterr().err
+
+
+def test_every_ios_agent_command_and_flag_is_in_the_cli_reference() -> None:
+    from cli_docs import missing_from_doc
+
+    assert missing_from_doc(build_parser()) == [], "docs/cli.md does not mention these"

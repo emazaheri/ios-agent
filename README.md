@@ -15,7 +15,7 @@ Claude Code or any MCP client, or as a Python library.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-1031%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1040%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -52,11 +52,12 @@ uv run ios-agent "turn on bold text"
 
 | You want to | Start with |
 |---|---|
-| Hand an agent a goal and watch it work | `uv run ios-agent "turn on bold text"` |
+| Hand an agent a goal and watch it work | `uv run ios-agent "turn on bold text"`, walked through in the [quickstart](docs/quickstart.md) |
+| Check that a change to your own app works | [docs/check-your-app.md](docs/check-your-app.md) |
 | Give Claude Code, Cursor or any MCP client hands on a device | `ios-mcp serve`, [one entry in `.mcp.json`](#connecting-your-own-agent-over-mcp) |
 | Run it against your own iPhone, over a cable or Wi-Fi | [docs/real-device-setup.md](docs/real-device-setup.md), then `uv run ios-agent --pick "..."` |
 | Drive a device by hand, with no API key, to see what an agent would see | `uv run ios-agent manual` |
-| Build your own agent on top, without the protocol in between | `await run_goal(session, "...")` or `IosSession` directly |
+| Build your own agent on top, without the protocol in between | `await run_goal(session, "...")` or `IosSession` directly, see [docs/library.md](docs/library.md) |
 
 Typical goals: check that a change you just made works in the running app,
 change a setting, read an answer out of an app that has no API, or walk a flow
@@ -112,7 +113,8 @@ reports success while nothing happened. Here:
   person (Like, Follow, Share, Message) need approval **before** they happen.
   With no one to ask, they are refused.
 - Passwords come from the Mac's keychain and go straight to the device. They
-  never enter a prompt, a tool result or the audit trail.
+  never enter a prompt or the audit trail, and once typed, every screen the
+  session returns shows `[secret]` in their place.
 - Card numbers and email addresses are redacted before any client sees the
   screen, and every action is recorded in an exportable audit trail.
 
@@ -303,7 +305,9 @@ Automating someone's real phone is not test automation. On by default:
 - Without an approver the run is unattended and everything the gate would ask
   about is **refused**, because an unanswerable question is not consent.
 - `ios_type_secret` reads a value from the host keychain and sends it straight
-  to the device. It never enters a prompt, a tool result, or the audit trail.
+  to the device. It never enters a prompt or the audit trail, and is scrubbed
+  as `[secret]` from every screen returned after it is typed. Use password
+  fields: a screenshot is not scrubbed.
 - Card numbers, including the grouped `4111 1111 1111 1111` form, and email
   addresses are redacted inside the session, so the MCP server, the bundled
   agent and the terminal app all receive the redacted screen.
@@ -456,8 +460,8 @@ engine has to live on a Mac, which is why this project has no iOS app.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 798 tests, no device, no model
-uv run pytest tests/tui           # 233 tests, the terminal front end
+uv run pytest tests/unit          # 806 tests, no device, no model
+uv run pytest tests/tui           # 234 tests, the terminal front end
 uv run pytest tests/integration   # 18 simulator + 3 device tests
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui
@@ -510,7 +514,7 @@ ios-mcp    library + MCP server   depends on neither
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 1031 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 1040 offline tests on Linux and macOS.
 
 ## License
 

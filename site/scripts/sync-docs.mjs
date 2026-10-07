@@ -63,7 +63,7 @@ const README_PAGES = {
 	'start/installation': {
 		title: 'Installation',
 		description: 'What a Mac needs to drive a simulator or a phone, and the three commands that set it up.',
-		order: 4,
+		order: 5,
 	},
 	'concepts/design': {
 		title: 'Design decisions',
@@ -101,12 +101,19 @@ const README_PAGES = {
 // that heading names a package rather than saying what the page is.
 const FILES = [
 	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 3 },
+	{ src: 'docs/quickstart.md', slug: 'start/quickstart', order: 4 },
+	{ src: 'docs/check-your-app.md', slug: 'guides/check-your-app', order: 3 },
+	{ src: 'docs/approvals-and-secrets.md', slug: 'guides/approvals-and-secrets', order: 5 },
+	{ src: 'docs/library.md', slug: 'guides/library', title: 'Build on the library', order: 6 },
+	{ src: 'docs/troubleshooting.md', slug: 'guides/troubleshooting', order: 8 },
 	{ src: 'docs/real-device-setup.md', slug: 'guides/physical-device', title: 'Use a physical iPhone', order: 4 },
 	{ src: 'agent/README.md', slug: 'guides/agent', title: 'Choose a model', order: 7 },
 	{ src: 'ARCHITECTURE.md', slug: 'concepts/architecture', order: 1 },
+	{ src: 'docs/how-it-was-built.md', slug: 'built/agent', title: 'The agent: kept and rejected', order: 2 },
 	{ src: 'SAFETY.md', slug: 'concepts/safety', order: 4 },
 	{ src: 'docs/threat-model.md', slug: 'concepts/threat-model', order: 5 },
 	{ src: 'docs/tool-reference.md', slug: 'reference/tools', title: 'MCP tools and resources', order: 1 },
+	{ src: 'docs/cli.md', slug: 'reference/cli', order: 2 },
 	{ src: 'CONTRIBUTING.md', slug: 'project/contributing', order: 2 },
 	{ src: 'SECURITY.md', slug: 'project/security', order: 3 },
 	{ src: 'tui/README.md', slug: 'project/ios-tui', title: 'Inside ios-tui', order: 4 },
@@ -135,8 +142,15 @@ PAGES.set('README.md', 'start/introduction');
 PAGES.set('docs/adr', 'decisions');
 PAGES.set('docs/realities', 'realities');
 PAGES.set('docs/images', null);
+PAGES.set('.env.example', 'reference/configuration');
 
 const pageUrl = (slug) => `${BASE}/${slug}/`;
+
+// README section anchors, mapped to wherever each section lands on the site.
+// Filled by syncReadme, which runs before any other file is rewritten, so a
+// link to `README.md#measured-on-real-hardware` from another page lands on
+// the measurements rather than on the introduction.
+const README_ANCHORS = new Map();
 
 function rewriteTarget(target, fromFile) {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#') || target.startsWith('/')) {
@@ -146,6 +160,9 @@ function rewriteTarget(target, fromFile) {
 	const repoPath = posix.normalize(posix.join(posix.dirname(fromFile), path)).replace(/\/$/, '');
 	if (repoPath.startsWith('docs/images/')) {
 		return `${BASE}/images/${repoPath.slice('docs/images/'.length)}`;
+	}
+	if (repoPath === 'README.md' && README_ANCHORS.has(hash.slice(1))) {
+		return README_ANCHORS.get(hash.slice(1));
 	}
 	if (PAGES.has(repoPath) && PAGES.get(repoPath)) {
 		return pageUrl(PAGES.get(repoPath)) + hash;
@@ -293,14 +310,13 @@ function syncReadme() {
 	// dropped and spaces as hyphens; a section that is a page's only one has
 	// no heading of its own, so its anchor becomes the page itself.
 	const anchor = (name) => name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
-	const anchors = new Map();
 	for (const [slug, list] of pages) {
 		for (const { name } of list) {
-			if (name !== 'intro') anchors.set(anchor(name), list.length === 1 ? pageUrl(slug) : `${pageUrl(slug)}#${anchor(name)}`);
+			if (name !== 'intro') README_ANCHORS.set(anchor(name), list.length === 1 ? pageUrl(slug) : `${pageUrl(slug)}#${anchor(name)}`);
 		}
 	}
 	const rewriteAnchors = (text) =>
-		text.replace(/\]\(#([\w-]+)\)/g, (whole, id) => (anchors.has(id) ? `](${anchors.get(id)})` : whole));
+		text.replace(/\]\(#([\w-]+)\)/g, (whole, id) => (README_ANCHORS.has(id) ? `](${README_ANCHORS.get(id)})` : whole));
 
 	for (const [slug, sections] of pages) {
 		// A page made of one section already carries it as its title, so the
@@ -316,14 +332,107 @@ function syncReadme() {
 	}
 }
 
+// The configuration reference is `.env.example` itself, read rather than
+// restated: `tests/unit/test_dotenv.py` already fails when that file and the
+// settings models disagree, so a page built from it inherits the guard. Each
+// `# ---` banner opens a section, the comment above a setting describes it, and
+// a commented-out setting is one that is off, or shown only as an example.
+function syncEnvExample() {
+	const lines = readFileSync(join(REPO, '.env.example'), 'utf8').split('\n');
+	const intro = [];
+	const sections = [];
+	let section = null;
+	let comment = [];
+	let inBanner = false;
+	const setting = /^(#\s*)?([A-Z][A-Z0-9_]*)=(.*)$/;
+	const prose = (text) =>
+		text
+			.map((l) => (/^ {2,}\S/.test(l) ? `\`${l.trim()}\`` : l.trim()))
+			.join(' ')
+			.replace(/\s+/g, ' ')
+			.replace(/\|/g, '\\|')
+			.trim();
+
+	for (const raw of lines) {
+		const line = raw.trimEnd();
+		if (/^# -{10,}$/.test(line)) {
+			if (!inBanner) {
+				section = { title: '', text: [], rows: [] };
+				sections.push(section);
+			}
+			inBanner = !inBanner;
+			comment = [];
+			continue;
+		}
+		const match = setting.exec(line);
+		if (match && match[2] !== 'IOS_MCP_SECRET_' && !/^#\s{2,}/.test(line)) {
+			const [, off, name, value] = match;
+			section?.rows.push({ name, value, off: Boolean(off), notes: prose(comment) });
+			comment = [];
+			continue;
+		}
+		if (line.startsWith('#')) {
+			const text = line.replace(/^# ?/, '');
+			if (inBanner) {
+				if (!section.title) section.title = text.replace(/\.$/, '').split('. ')[0];
+				section.text.push(text);
+			} else if (!section) {
+				intro.push(text);
+			} else {
+				comment.push(text);
+			}
+			continue;
+		}
+		if (!line && section && comment.length) {
+			// A comment with no setting under it belongs to the section.
+			section.rows.push({ note: prose(comment) });
+			comment = [];
+		}
+	}
+
+	const body = [
+		'Every setting the server and the agent read, generated from `.env.example`, which a test holds to the settings models.',
+		'',
+		prose(intro.filter((l) => !l.startsWith('Copy to'))),
+		'',
+		'Copy `.env.example` to `.env` to change any of them. A value marked *not set* is commented out there: either the default shown for reference, or an example to fill in.',
+	];
+	for (const { title, text, rows } of sections) {
+		const rest = text.join('\n').slice(text[0].split('. ')[0].length).replace(/^\.?\s*/, '');
+		body.push('', `## ${title}`, '');
+		if (rest.trim()) body.push(prose(rest.split('\n')), '');
+		const table = rows.filter((r) => r.name);
+		if (table.length) {
+			body.push('| Setting | Value | Notes |', '|---|---|---|');
+			for (const { name, value, off, notes } of table) {
+				const shown = value ? `\`${value.replace(/\|/g, '\\|')}\`` : '';
+				body.push(`| \`${name}\` | ${off ? `${shown} *not set*`.trim() : shown} | ${notes} |`);
+			}
+		}
+		for (const { note } of rows.filter((r) => r.note)) body.push('', note);
+	}
+	return write(
+		'reference/configuration',
+		frontmatter({
+			title: 'Configuration',
+			description: 'Every IOS_MCP_* and IOS_AGENT_* setting, its value, and what it changes, generated from .env.example.',
+			editSrc: '.env.example',
+			order: 3,
+		}) +
+			body.join('\n') +
+			'\n',
+	);
+}
+
 export function sync() {
 	for (const dir of GENERATED_DIRS) rmSync(join(CONTENT, dir), { recursive: true, force: true });
 	rmSync(PUBLIC_IMAGES, { recursive: true, force: true });
 
 	syncReadme();
+	syncEnvExample();
 	const written = FILES.map(syncFile);
 	cpSync(join(REPO, 'docs/images'), PUBLIC_IMAGES, { recursive: true });
-	return written.length + Object.keys(README_PAGES).length;
+	return written.length + Object.keys(README_PAGES).length + 1;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
