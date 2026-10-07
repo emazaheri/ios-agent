@@ -20,7 +20,7 @@ FROM python:3.12-slim
 # directory's periodic re-check is worse than one that is explicitly stale.
 # Moved by scripts/release.py with every other version, and checked by
 # tests/unit/test_version.py. It sat at 0.1.1 for three releases before that.
-RUN pip install --no-cache-dir ios-mcp==0.5.0
+RUN pip install --no-cache-dir ios-mcp==0.6.0
 
 # Not root, since nothing here needs to be.
 RUN useradd --create-home --uid 1000 app
