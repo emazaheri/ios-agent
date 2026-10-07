@@ -1,14 +1,21 @@
 # ios-agent
 
-**Drive an iPhone or an iOS Simulator with an AI agent.** A terminal app, an
-MCP server, and the library beneath both.
+**Give an AI agent an iPhone. It checks every step it takes.**
+
+ios-agent lets an AI agent use an iOS Simulator or a real iPhone, over a cable
+or Wi-Fi. Every action returns the screen it produced, so the agent can tell
+when a tap did nothing or typed text did not land. Screens arrive as a few
+hundred tokens rather than tens of thousands. Anything that sends, pays,
+deletes or reaches another person asks first. It uses only Apple's public
+APIs, so an Xcode update does not break it. Use it from the terminal, from
+Claude Code or any MCP client, or as a Python library.
 
 [![CI](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/emazaheri/ios-agent/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-online-4f7cff.svg)](https://emazaheri.github.io/ios-agent/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-943%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1031%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -17,12 +24,6 @@ driving time, then taps through to walking and transit and scrolls to read the
 detail: 4 actions, 1 observation, 2,767 device tokens, 49.8s of real time. The
 terminal is the agent's own transcript; the phone is an iOS Simulator being
 driven by it.</sub>
-
-Built on Apple's XCUIAutomation through WebDriverAgent. It runs on a Mac and
-drives a simulator or a tethered phone. It is designed for **agents rather than
-test suites**: screens arrive as a compact digest instead of raw accessibility
-XML, actions hand back the screen they produced, and anything irreversible asks
-first.
 
 ```bash
 uv sync && uv run ios-agent quickstart
@@ -39,67 +40,131 @@ uv run ios-agent "turn on bold text"
 
 ## Contents
 
-- [Why it is built this way](#why-it-is-built-this-way) · [Why only public APIs](#why-only-apples-public-apis)
+- [What you can do with it](#what-you-can-do-with-it) · [Features](#features) · [Who it is for](#who-it-is-for)
 - [Requirements](#requirements) · [Setup](#setup)
-- [The terminal app](#the-terminal-app)
-- [Connecting your own agent over MCP](#connecting-your-own-agent-over-mcp)
-- [What the model sees](#what-the-model-sees)
-- [Safety](#safety)
+- [The terminal app](#the-terminal-app) · [Connecting your own agent over MCP](#connecting-your-own-agent-over-mcp)
+- [What the model sees](#what-the-model-sees) · [Safety](#safety)
 - [Measured on real hardware](#measured-on-real-hardware)
+- [Why it is built this way](#why-it-is-built-this-way) · [Why only public APIs](#why-only-apples-public-apis)
 - [Development](#development) · [Contributing](#contributing)
 
-## Why it is built this way
+## What you can do with it
 
-Raw WebDriverAgent page source for a 200-row list runs to roughly **37,000
-tokens**. Re-reading that after every tap exhausts a context window in a handful
-of steps. Four decisions follow from that, and they are the whole design:
-
-| | |
+| You want to | Start with |
 |---|---|
-| **Perception is budget-aware** | 251 raw nodes to 12 elements on a real third-party screen; 50 to 472 tokens per step |
-| **Actions return the screen they produced** | halves round-trips, and returns a *delta* when the screen is similar |
-| **Resolution runs on the host** | six tiers, so a retry costs zero model tokens where a round-trip costs a whole turn |
-| **The gate asks before acting, not after** | so the answer still means something |
+| Hand an agent a goal and watch it work | `uv run ios-agent "turn on bold text"` |
+| Give Claude Code, Cursor or any MCP client hands on a device | `ios-mcp serve`, [one entry in `.mcp.json`](#connecting-your-own-agent-over-mcp) |
+| Run it against your own iPhone, over a cable or Wi-Fi | [docs/real-device-setup.md](docs/real-device-setup.md), then `uv run ios-agent --pick "..."` |
+| Drive a device by hand, with no API key, to see what an agent would see | `uv run ios-agent manual` |
+| Build your own agent on top, without the protocol in between | `await run_goal(session, "...")` or `IosSession` directly |
 
-Everything else in the repository is downstream of those.
+Typical goals: check that a change you just made works in the running app,
+change a setting, read an answer out of an app that has no API, or walk a flow
+on a phone you cannot hand to a test suite.
 
-## Why only Apple's public APIs
+## Features
 
-Everything here reaches the device through XCTest, the framework Apple ships
-for UI testing, by way of WebDriverAgent. Two routes that looked faster were
-measured and turned down:
+### It knows when an action did not work
 
-| route | what it measured | |
-|---|---|---|
-| Xcode's Accessibility Inspector service, which needs no signed runner | reads by walking focus one element at a time, 60 to 80 ms each: Settings root in 3.3 to 4.4s against WebDriverAgent's 3.7s, with no frames, scrolling the screen as it reads | [ADR 0016](docs/adr/0016-no-accessibility-inspector-tree-source.md) |
-| CoreSimulator's private accessibility framework, the route idb and AXe take | 10 to 23% faster than WebDriverAgent against a 50% bar, and on Xcode 27 it starts an XCTest session to bootstrap anyway | [ADR 0017](docs/adr/0017-no-simulator-native-tree-source.md) |
+The most common complaint about agent tools for phones is an action that
+reports success while nothing happened. Here:
 
-Neither saving was worth the exposure, and the exposure is not hypothetical.
-Xcode 27 replaced Simulator.app with Device Hub and moved
-`SimulatorKit.framework`, and tools that reach into those private pieces broke
-in public:
+- **Every action returns the screen it produced**, with `screen_changed`, so a
+  tap that did nothing is visible at once. A real no-op reports
+  `screen_changed=False` on a physical iPhone too, not only on a simulator.
+- **Typed text is read back from the field.** Text that did not land returns
+  `ok: false` with what the field shows, rather than being reported as typed.
+- **The agent names elements, never coordinates.** It passes a ref like `e2`;
+  if the screen moved, the host re-finds the same element by identity through
+  six tiers, and refuses when a ref now points at something else.
+- **Switches are set, not toggled.** Asking for `on` when a switch is already on
+  does nothing, instead of turning it off.
+- **Retries are safe.** Idempotency keys mean an agent framework that replays a
+  step does not tap Send twice.
 
-- XcodeBuildMCP [#453](https://github.com/getsentry/XcodeBuildMCP/issues/453):
-  its bundled AXe looked for SimulatorKit where it used to be.
-- Argent [#406](https://github.com/software-mansion/argent/issues/406):
-  booting a device failed once Device Hub replaced Simulator.app, and
-  [#465](https://github.com/software-mansion/argent/issues/465): its simulator
-  server could not load SimulatorKit on macOS 27.
-- XcodeBuildMCP [#535](https://github.com/getsentry/XcodeBuildMCP/issues/535):
-  keyboard tools silently do nothing, because System Events cannot attach to
-  Device Hub.
+### It works on a real iPhone, over a cable or Wi-Fi
 
-The same rename reached this project in one place: `open -a Simulator`, used
-only to show the simulator's window, stopped working. It now opens Device Hub
-by bundle id. The automation path did not change: everything it touches is
-an interface Apple documents and carries from one release to the next.
+- Verified on an iPhone 17 Pro Max on iOS 26.6, over USB and over Wi-Fi, at
+  the same action count as the simulator.
+- `ios-agent doctor` checks the toolchain, the runtimes, the tunnel and the
+  runner's signing expiry, and gives a **remedy for each failure**.
+- The device runner stops with the process that started it, a SIGKILL
+  included, so a crashed run does not hold the phone. `ios-mcp reset` clears
+  anything else.
+- The device picker never pre-selects a physical phone, and `/device` switches
+  devices mid-session.
 
-Public is not painless. WebDriverAgent tracks Xcode closely, so the build is
-pinned and rebuilt by `scripts/prepare_wda.sh` rather than followed blindly. A
-phone needs a signed runner whose provisioning profile lasts seven days on a
-free Apple ID, and a Wi-Fi launch still goes through `xcodebuild`.
-`ios-mcp doctor` checks the toolchain, the runner build, the devices and the
-tunnel, and says what to fix.
+### It is cheap on tokens
+
+- Screens arrive as a compact digest, not accessibility XML: **251 raw nodes to
+  12 elements** on a real third-party screen, **50 to 474 tokens per step**
+  across thirteen golden flows.
+- When the next screen is similar, an action returns only what changed.
+- A 300-row Contacts list comes back in one observation of 438 tokens.
+- `ios_find` searches the full tree for anything the digest left out, so
+  compaction never hides a control for good.
+- The bundled agent looks at the screen **once per run**, because every action
+  already hands back the screen it produced.
+
+### It asks before anything risky
+
+- Send, Pay, Buy, Delete, Confirm, Sign Out, and anything that reaches another
+  person (Like, Follow, Share, Message) need approval **before** they happen.
+  With no one to ask, they are refused.
+- Passwords come from the Mac's keychain and go straight to the device. They
+  never enter a prompt, a tool result or the audit trail.
+- Card numbers and email addresses are redacted before any client sees the
+  screen, and every action is recorded in an exportable audit trail.
+
+### It keeps working when Xcode updates
+
+Everything goes through XCTest, the framework Apple ships for UI testing.
+Faster routes through private frameworks were measured and turned down, and
+Xcode 27 broke several tools that took them. See
+[Why only Apple's public APIs](#why-only-apples-public-apis).
+
+### Three ways in, and any model
+
+- **A terminal app** that streams the model's reasoning beside the screen it is
+  reading, with actions, tokens and cost on screen as they climb.
+- **An MCP server**: 31 tools, 5 resources and an `ios_operator` prompt, over
+  stdio or HTTP. See the [tool reference](docs/tool-reference.md).
+- **A Python library**, `IosSession`, that the server and the agent both sit
+  on, so your own agent can skip the protocol.
+- Anthropic, OpenAI, Azure OpenAI, Gemini, Vertex AI, Bedrock, Groq, Mistral or
+  a local Ollama model, switched by two environment variables.
+
+### It is measured, and you can rerun the numbers
+
+39 of 39 agent runs succeeded at **1.14x the actions a hand-written oracle
+needs**, for $1.50 in total. Golden flows track tokens, time and how each
+element was found, and CI fails if the free series moves without a recorded
+reason. See [Measured on real hardware](#measured-on-real-hardware).
+
+### What it does not do
+
+- **No Android**, no other platforms, no builds or profiling.
+- **Flutter canvases and WebViews have no tree to read.** The digest says so
+  and points at a screenshot, rather than returning a screen that looks empty.
+  See [ADR 0007](docs/adr/0007-report-unreachable-content-rather-than-reaching-it.md).
+- **The approval gate is not a defence against instructions planted in a
+  screen.** See [ADR 0013](docs/adr/0013-no-defence-against-instructions-planted-in-screen-content.md).
+- A physical iPhone needs a signed runner, and a free Apple ID's profile lasts
+  seven days.
+
+## Who it is for
+
+- **People building agents** that need iOS hands, from Claude Code, Cursor or
+  any MCP client.
+- **iOS developers** who want their coding agent to check a change on a
+  simulator or on their own phone.
+- **Anyone studying agent engineering.** The eval harness and the
+  [decision records](docs/adr/) show what was measured, and what was turned
+  down because the numbers said no.
+
+If you need Android, React Native profiling, Xcode builds, or many devices in
+parallel, another tool will suit you better. The documentation site has
+[an honest comparison](docs/comparison.md).
 
 ## Requirements
 
@@ -304,7 +369,7 @@ about a fake. The same goal, `turn on Bold Text`, across all three tiers:
 
 | | actions | observations | digest |
 |---|---|---|---|
-| scripted fake | 3 | 1 | — |
+| scripted fake | 3 | 1 | n/a |
 | iOS 27.0 simulator | 4 | 1 | 166 raw nodes → 15 elements, 272 tokens |
 | **iPhone, iOS 26.6, Wi-Fi** | **3** | **1** | 140 raw nodes → 15 elements, 243 tokens |
 
@@ -327,11 +392,72 @@ Hardware is opt-in twice over, by the `device` marker and
 `IOS_MCP_ALLOW_DEVICE=1`, because hardware being present is not consent to
 change settings on it.
 
+## Why it is built this way
+
+Raw WebDriverAgent page source for a 200-row list runs to roughly **37,000
+tokens**. Re-reading that after every tap exhausts a context window in a handful
+of steps. Four decisions follow from that, and they are the whole design:
+
+| | |
+|---|---|
+| **Perception is budget-aware** | 251 raw nodes to 12 elements on a real third-party screen; 50 to 472 tokens per step |
+| **Actions return the screen they produced** | halves round-trips, and returns a *delta* when the screen is similar |
+| **Resolution runs on the host** | six tiers, so a retry costs zero model tokens where a round-trip costs a whole turn |
+| **The gate asks before acting, not after** | so the answer still means something |
+
+Everything else in the repository is downstream of those.
+
+## Why only Apple's public APIs
+
+Everything here reaches the device through XCTest, the framework Apple ships
+for UI testing, by way of WebDriverAgent. Two routes that looked faster were
+measured and turned down:
+
+| route | what it measured | |
+|---|---|---|
+| Xcode's Accessibility Inspector service, which needs no signed runner | reads by walking focus one element at a time, 60 to 80 ms each: Settings root in 3.3 to 4.4s against WebDriverAgent's 3.7s, with no frames, scrolling the screen as it reads | [ADR 0016](docs/adr/0016-no-accessibility-inspector-tree-source.md) |
+| CoreSimulator's private accessibility framework, the route idb and AXe take | 10 to 23% faster than WebDriverAgent against a 50% bar, and on Xcode 27 it starts an XCTest session to bootstrap anyway | [ADR 0017](docs/adr/0017-no-simulator-native-tree-source.md) |
+
+Neither saving was worth the exposure, and the exposure is not hypothetical.
+Xcode 27 replaced Simulator.app with Device Hub and moved
+`SimulatorKit.framework`, and tools that reach into those private pieces broke
+in public:
+
+- MobileBuildMCP, then named XcodeBuildMCP, [#453](https://github.com/getsentry/MobileBuildMCP/issues/453):
+  its bundled AXe looked for SimulatorKit where it used to be.
+- Argent [#406](https://github.com/software-mansion/argent/issues/406):
+  booting a device failed once Device Hub replaced Simulator.app, and
+  [#465](https://github.com/software-mansion/argent/issues/465): its simulator
+  server could not load SimulatorKit on macOS 27.
+- MobileBuildMCP [#535](https://github.com/getsentry/MobileBuildMCP/issues/535):
+  keyboard tools silently do nothing, because System Events cannot attach to
+  Device Hub.
+
+The same rename reached this project in one place: `open -a Simulator`, used
+only to show the simulator's window, stopped working. It now opens Device Hub
+by bundle id. The automation path did not change: everything it touches is
+an interface Apple documents and carries from one release to the next.
+
+Public is not painless. WebDriverAgent tracks Xcode closely, so the build is
+pinned and rebuilt by `scripts/prepare_wda.sh` rather than followed blindly. A
+phone needs a signed runner whose provisioning profile lasts seven days on a
+free Apple ID, and a Wi-Fi launch still goes through `xcodebuild`.
+`ios-mcp doctor` checks the toolchain, the runner build, the devices and the
+tunnel, and says what to fix.
+
+## Why the automation runs on a host, not on the phone
+
+An iOS app cannot automate other apps on the device it runs on. The sandbox
+blocks cross-process access, and the Accessibility API is unavailable to
+sandboxed apps even with user consent. XCUIAutomation only executes inside an
+XCTest runner started by `testmanagerd`, which is driven from a host. So the
+engine has to live on a Mac, which is why this project has no iOS app.
+
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 731 tests, no device, no model
-uv run pytest tests/tui           # 212 tests, the terminal front end
+uv run pytest tests/unit          # 798 tests, no device, no model
+uv run pytest tests/tui           # 233 tests, the terminal front end
 uv run pytest tests/integration   # 18 simulator + 3 device tests
 uv run pytest tests/evals -s      # golden flows, with cost per flow
 uv run ruff check . && uv run mypy ios_mcp agent/ios_agent tui/ios_tui
@@ -380,19 +506,11 @@ ios-agent  goal-directed agent    depends on ios-mcp
 ios-mcp    library + MCP server   depends on neither
 ```
 
-## Why the automation runs on a host, not on the phone
-
-An iOS app cannot automate other apps on the device it runs on. The sandbox
-blocks cross-process access, and the Accessibility API is unavailable to
-sandboxed apps even with user consent. XCUIAutomation only executes inside an
-XCTest runner started by `testmanagerd`, which is driven from a host. So the
-engine has to live on a Mac, which is why this project has no iOS app.
-
 ## Contributing
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 943 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 1031 offline tests on Linux and macOS.
 
 ## License
 
