@@ -52,7 +52,7 @@ are unsure completed.
 | `ios_swipe` | One swipe, for carousels and swipe-to-reveal. |
 | `ios_drag` | Between two refs, for reordering. |
 | `ios_press_button` | Hardware (`home`, `volumeUp`, `siri`) and keyboard (`enter`, `tab`, `delete`, `dismiss_keyboard`). |
-| `ios_handle_alert` | Read the alert text before choosing. |
+| `ios_handle_alert` | Read the alert text before choosing. Checks the alert actually went: if the press is ignored it taps the button in the tree, and if the alert still stands the result is `ok: false`. |
 | `ios_halt` / `ios_resume` | Stop and restart a session deliberately. |
 
 ## Environment
@@ -96,6 +96,8 @@ Common codes: `element_not_found`, `element_ambiguous`, `element_stale`,
 `element_not_interactable`, `action_requires_approval`, `app_not_allowed`,
 `session_halted`, `device_not_ready`, `tunnel_down`, `runner_crashed`.
 
-One code arrives without an error: `text_mismatch` is recorded when typed text
-read back as something else. The action still returns its screen, with
-`ok: false` and a `typed` entry saying what the field holds.
+Two codes arrive without an error, because the screen the action left is the
+useful part. `text_mismatch` is recorded when typed text read back as
+something else; the result has `ok: false` and a `typed` entry saying what the
+field holds. `alert_not_handled` is recorded when an alert is still showing
+after it was pressed; the result has `ok: false` and the alert.

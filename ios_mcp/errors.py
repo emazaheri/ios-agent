@@ -38,6 +38,9 @@ class ErrorCode(StrEnum):
     #: Typed text read back as something else. Not raised: the action returns
     #: with `ok=False` and this code, so the screen it produced still arrives.
     TEXT_MISMATCH = "text_mismatch"
+    #: An alert still standing after it was pressed. Not raised, for the same
+    #: reason as above: the screen it left is the useful part.
+    ALERT_NOT_HANDLED = "alert_not_handled"
     UNEXPECTED_ALERT = "unexpected_alert"
     TIMEOUT = "timeout"
 
