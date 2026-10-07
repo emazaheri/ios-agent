@@ -113,8 +113,8 @@ def register(mcp: FastMCP, cfg: Settings, ctx: ServerContext) -> None:
             str,
             Field(
                 description=(
-                    "A URL or deep link, e.g. App-prefs:root=WIFI (iOS 26 Settings) "
-                    "or https://example.com"
+                    "A URL or deep link, e.g. maps://?q=coffee or https://example.com. "
+                    "From iOS 26 a Settings link opens Settings but not the pane it names."
                 )
             ),
         ],

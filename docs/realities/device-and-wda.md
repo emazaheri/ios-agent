@@ -47,6 +47,9 @@ The device path, the runner that drives it, and the timings that shape every set
 - **iOS 26 retired `prefs:` for `App-prefs:`.** Sub-pane URLs like
   `App-prefs:root=WIFI` return success and do nothing, and `App-prefs:root`
   does not reset Settings out of a sub-pane, so tests terminate the app.
+  iOS 27 behaves the same, including the `App-prefs:ACCESSIBILITY&path=...`
+  form, which landed on the Settings root from a fresh launch. `open_url` now
+  attaches a note saying so rather than reporting a plain success.
 - **`pageSourceExcludedAttributes` does nothing on `format=json`.** Appium
   documents it as the fix for expensive attribute computation. Measured: 750 ms
   with, 743 ms without, `isVisible` present either way. It is no longer sent,
