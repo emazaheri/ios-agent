@@ -803,6 +803,7 @@ class IosSession:
                 target=None,
                 started=started,
                 args={"url": url},
+                note=_ignored_settings_pane(url, self.lease.device.os_version),
             )
 
     async def app_state(self, bundle_id: str) -> int:
@@ -1312,6 +1313,30 @@ def _within(inner: Rect, outer: Rect) -> bool:
         and inner.y >= outer.y - 1
         and inner.x + inner.width <= outer.x + outer.width + 1
         and inner.y + inner.height <= outer.y + outer.height + 1
+    )
+
+
+def _ignored_settings_pane(url: str, os_version: str) -> str | None:
+    """A note when a Settings link names a pane iOS will not open.
+
+    From iOS 26, `App-prefs:root=WIFI` and `App-prefs:ACCESSIBILITY&path=...`
+    open Settings and ignore the pane: wherever Settings already was, at its
+    root on a fresh launch. The call succeeds, so without this the caller is
+    told only that the screen changed. Recorded on iOS 26, and seen again on
+    an iOS 27 simulator with the `ACCESSIBILITY&path=` form.
+    """
+    scheme, _, rest = url.partition(":")
+    if scheme.lower() not in ("app-prefs", "prefs") or rest in ("", "root"):
+        return None
+    try:
+        major = int(os_version.split(".")[0])
+    except ValueError:
+        return None
+    if major < 26:
+        return None
+    return (
+        f"iOS {major} opens Settings but ignores the pane in a Settings link, so "
+        "this is wherever Settings already was. Tap through to the pane instead."
     )
 
 

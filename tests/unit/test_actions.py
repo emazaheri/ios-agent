@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from fake_device import make_session
 from fake_wda import FakeField
@@ -351,6 +353,29 @@ async def test_open_url_uses_simctl_on_a_simulator() -> None:
     session, _, adapter = make_session(settings_screen(), kind="simulator")
     await session.open_url("prefs:root=WIFI")
     assert adapter.urls_opened == ["prefs:root=WIFI"]
+
+
+@pytest.mark.parametrize(
+    ("url", "os_version", "noted"),
+    [
+        ("App-prefs:root=WIFI", "26.6", True),
+        ("App-prefs:ACCESSIBILITY&path=DISPLAY_AND_TEXT", "27.0", True),
+        ("App-prefs:root", "27.0", False),
+        ("App-prefs:root=WIFI", "18.2", False),
+        ("maps://?q=coffee", "27.0", False),
+    ],
+)
+async def test_a_settings_pane_link_says_ios_ignored_the_pane(
+    url: str, os_version: str, noted: bool
+) -> None:
+    """It opens Settings and reports success; the pane it named never opens."""
+    session, _, _ = make_session(settings_screen(), kind="simulator")
+    session.lease.device = replace(session.lease.device, os_version=os_version)
+
+    result = await session.open_url(url)
+
+    assert result.ok
+    assert ("ignores the pane" in (result.note or "")) is noted
 
 
 async def test_setting_permissions_is_refused_on_a_real_device() -> None:

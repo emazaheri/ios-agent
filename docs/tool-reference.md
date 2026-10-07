@@ -25,7 +25,7 @@ are unsure completed.
 | `ios_list_apps` | Bundle identifiers, filterable by `user`/`system`/`all`. |
 | `ios_launch_app` | `fresh=true` restarts rather than resuming. |
 | `ios_terminate_app` | Force-quit. |
-| `ios_open_url` | Deep links. Usually the cheapest way to reach a screen. On iOS 26 use `App-prefs:root`, not the retired `prefs:`. |
+| `ios_open_url` | Deep links. Usually the cheapest way to reach a screen. Settings is the exception: from iOS 26 `App-prefs:root` opens it, but a pane such as `App-prefs:root=WIFI` is ignored, and the result says so in its `note`. |
 | `ios_install_app` | From a local `.app` or `.ipa`. |
 
 ## Perception
