@@ -257,7 +257,14 @@ class SessionBackend:
         refusal = self.verifier.check(key)
         if refusal is not None:
             self.stats.refusals += 1
-            self._record(key[0], ok=False, screen_changed=False, alert=False, refused=True)
+            self._record(
+                key[0],
+                ok=False,
+                screen_changed=False,
+                alert=False,
+                refused=True,
+                judgement=refusal.judgement.value,
+            )
             return str(refusal.note)
 
         result = await call()
@@ -271,22 +278,32 @@ class SessionBackend:
             self.stats.actions += 1
         payload = result.to_dict()
         self._charge(payload)
+        verdict = self.verifier.record(key, result)
         self._record(
             key[0],
             ok=result.ok,
             screen_changed=result.screen_changed,
             alert=result.alert is not None,
             refused=False,
+            judgement=verdict.judgement.value,
+            tier=result.target.resolved_via if result.target else None,
         )
 
-        verdict = self.verifier.record(key, result)
         self.stats.changes = self.verifier.changes
         self.stats.satisfied = self.verifier.satisfied
         rendered = self._render(result, payload)
         return f"{rendered}\n{verdict.note}" if verdict.note else rendered
 
     def _record(
-        self, verb: str, *, ok: bool, screen_changed: bool, alert: bool, refused: bool
+        self,
+        verb: str,
+        *,
+        ok: bool,
+        screen_changed: bool,
+        alert: bool,
+        refused: bool,
+        judgement: str | None = None,
+        tier: str | None = None,
     ) -> None:
         """Note what just happened, for the batch guard above the graph.
 
@@ -303,6 +320,8 @@ class SessionBackend:
             alert=alert,
             refused=refused,
             seq=self._seq,
+            judgement=judgement,
+            tier=tier,
         )
 
     def _render(self, result: ActionResult, payload: dict[str, object]) -> str:

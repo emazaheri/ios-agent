@@ -67,8 +67,9 @@ dev = [
     # Installed for the test run so the eval suite can drive both, not because
     # ios-mcp needs it. Both provider extras are here so the evals can be run
     # against either without a resync; the agent itself commits to none, and
-    # `IOS_AGENT_PROVIDER` picks one at runtime.
-    "ios-agent[anthropic,openai]",
+    # `IOS_AGENT_PROVIDER` picks one at runtime. `tracing` is here so the test
+    # that plants a secret can export spans to memory and read them back.
+    "ios-agent[anthropic,openai,tracing]",
     # Installed so `tests/tui` can import `ios_tui` without a `pythonpath`
     # entry. The front end is a real distribution, so it is installed like one
     # rather than reached through a path hack.

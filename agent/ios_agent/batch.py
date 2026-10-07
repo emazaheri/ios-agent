@@ -124,6 +124,10 @@ class LastAction:
     refused: bool
     #: Bumped on every recorded outcome. See the freshness note above.
     seq: int
+    #: The verifier's judgement of this action, and the resolution tier that
+    #: found its element. Read by tracing only; the guard never looks at them.
+    judgement: str | None = None
+    tier: str | None = None
 
 
 def stop_after(

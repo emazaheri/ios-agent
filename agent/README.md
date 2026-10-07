@@ -99,3 +99,47 @@ since nothing here can know what a given vendor charges. Cached prompt tokens
 are priced apart, at `IOS_AGENT_USD_PER_MTOK_CACHE_READ` and
 `IOS_AGENT_USD_PER_MTOK_CACHE_WRITE`, which default to Anthropic's 5-minute
 multipliers of the input price.
+
+## Tracing
+
+Off by default. `IOS_AGENT_TRACING=otel` or `langsmith`, after
+`uv sync --extra tracing`, records every run as OpenTelemetry spans:
+
+| span | carries |
+|---|---|
+| `ios_agent.run` | task id, goal, model, total tokens in and out, cached and written to cache (as `ios_agent.usage.*`, so a viewer summing the trace does not count them twice), cost, turns, actions, verified |
+| `agent`, `act` | one per graph node execution, with its step |
+| `chat <model>` | step, tokens in and out, cache reads and writes, cost, the tools the reply asked for |
+| `execute_tool <name>` | step, arguments, resolution tier, verifier result, any error |
+
+Names follow OpenTelemetry's `gen_ai.*` conventions, and each span also says
+what kind it is in Phoenix's and LangSmith's vocabulary, so all three draw model
+and tool calls as such.
+
+**One tracer.** `langsmith` sends the same spans to LangSmith's OTLP endpoint,
+using `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` and `LANGSMITH_ENDPOINT`. It
+does not use LangChain's own tracer, and switches it off for the run even when
+`LANGSMITH_TRACING` is set: that tracer would record every model call a second
+time, with the whole transcript, by a path the redactor never sees.
+
+**Redaction.** Every span is rewritten by the session's redactor as it ends,
+name, attributes, events and status alike, and a span that ends with no
+redactor bound is dropped. Secrets typed with `type_secret` and the configured
+patterns are scrubbed exactly as they are from the transcript.
+
+**Phoenix, locally:**
+
+```bash
+uvx --from arize-phoenix phoenix serve       # http://localhost:6006
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006 IOS_AGENT_TRACING=otel \
+  uv run ios-agent "turn on bold text"
+```
+
+**An endpoint that is down** never slows a run: spans are exported on a
+background thread. It is reported once, as one warning naming the endpoint,
+rather than on every retry, and the process waits up to
+`OTEL_EXPORTER_OTLP_TIMEOUT` (10 seconds by default) at exit before giving the
+last batch up.
+
+**Evals.** `--trace-agent otel` (or `langsmith`) traces every agent run in the
+suite and writes each run's `trace_id` beside its result in the report.

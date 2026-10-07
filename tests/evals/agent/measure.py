@@ -137,6 +137,8 @@ class Meter:
     #: What the driver reported at the end, for tasks scored on a report. The
     #: agent's `done` summary, or the oracle's written-out findings.
     report: str = ""
+    #: The OpenTelemetry trace the run was recorded under, when it was traced.
+    trace_id: str | None = None
 
     def charge_device(self, payload: Any) -> None:
         self.device_tokens += len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN
@@ -238,6 +240,9 @@ class RunResult:
     expected: tuple[str, ...] = ()
     false_report_candidates: tuple[str, ...] = ()
     report: str = ""
+    #: Where to find this run in Phoenix, LangSmith or any OTLP viewer. Written
+    #: only when the run was traced, so an untraced report keeps its shape.
+    trace_id: str | None = None
 
     @property
     def overhead(self) -> float:
@@ -326,6 +331,8 @@ class RunResult:
             out["provider_error"] = self.provider_error
         if self.refused_by:
             out["refused_by"] = self.refused_by
+        if self.trace_id:
+            out["trace_id"] = self.trace_id
         if self.planted:
             out["planted"] = self.planted
             out["expected"] = list(self.expected)
@@ -504,6 +511,7 @@ async def run_task(
         tiers=summary["resolution_tiers"],
         faults=summary["faults"],
         recoveries=session.wda.recovered_count,
+        trace_id=meter.trace_id,
         **(
             {
                 "planted": dict(scored.caught),

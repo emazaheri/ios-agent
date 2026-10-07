@@ -161,6 +161,12 @@ class AgentSettings(BaseSettings):
             self.usd_per_mtok_in * _CACHE_WRITE_MULTIPLIER if write is None else write,
         )
 
+    #: OpenTelemetry spans for every run: `otel` exports to whatever the
+    #: standard `OTEL_EXPORTER_OTLP_*` variables name, `langsmith` to LangSmith
+    #: with `LANGSMITH_API_KEY`. Off by default, and `off` builds nothing. Needs
+    #: `uv sync --extra tracing`. See `ios_agent/tracing.py` and docs/adr/0023.
+    tracing: Literal["off", "otel", "langsmith"] = "off"
+
     def chat_kwargs(self) -> dict[str, Any]:
         """The keyword arguments to hand the provider, and nothing more.
 
