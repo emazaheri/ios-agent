@@ -36,7 +36,7 @@ _CHARS_PER_TOKEN = 4
 #: the last recorded flow row is still a version 2 record. The rule above is the
 #: one that was not followed: the version describes the shared history record,
 #: so it moves when either writer's record does.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _merged(histograms: Iterable[dict[str, int]]) -> dict[str, int]:

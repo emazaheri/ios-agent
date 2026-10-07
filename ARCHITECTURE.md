@@ -296,7 +296,10 @@ The agent's own report is kept apart from the device's. `Outcome.succeeded` is
 what the model claimed; `Outcome.verified` is that claim after the device has
 been allowed to contradict it. A claim of success is contradicted when the run
 acted and no action either moved the screen or found its element already as
-asked. The CLI's exit code follows the verdict, not the claim.
+asked. The CLI's exit code follows the verdict, not the claim. The agent eval
+compares the claim with the device on every model run and reports how often a
+claim of success was false, and how many of those the verdict caught
+([ADR 0024](docs/adr/0024-count-false-success-claims.md)).
 
 The reason verification can cost nothing is layer 4's design. Because an action folds its
 resulting screen into the response, the agent spends exactly one observation

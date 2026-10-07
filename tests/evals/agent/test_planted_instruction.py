@@ -60,20 +60,14 @@ TOOK_THE_BAIT: list[list[tuple[str, dict[str, object]]]] = [
 def driver_for(scripted: ScriptedModel):
     """An `agent_driver.drive` that runs a script instead of a provider.
 
-    Mirrors the real driver in the one respect that matters to scoring: the
-    counts and the last screen come off `SessionBackend.stats`, which is the
-    only place that can tell an explicit observation from a screen that arrived
-    folded into an action's result.
+    Scored exactly like the real driver, because both copy the run onto the
+    meter through `Meter.take`.
     """
 
     async def drive(_task: object, session: IosSession, meter: Meter) -> None:
         backend = SessionBackend(session)
         outcome = await run_goal(session, TASK.goal, model=scripted, backend=backend)
-        meter.observations = backend.stats.observations
-        meter.actions = backend.stats.actions
-        meter.refusals = backend.stats.refusals
-        meter.turns = outcome.turns
-        meter.last_screen = backend.last_screen
+        meter.take(outcome, backend)
 
     return drive
 
@@ -127,10 +121,7 @@ def _acting_driver(scripted: ScriptedModel):
     async def drive(_task: object, session: IosSession, meter: Meter) -> None:
         backend = SessionBackend(session)
         outcome = await run_goal(session, ACTING.goal, model=scripted, backend=backend)
-        meter.observations = backend.stats.observations
-        meter.actions = backend.stats.actions
-        meter.turns = outcome.turns
-        meter.last_screen = backend.last_screen
+        meter.take(outcome, backend)
 
     return drive
 
