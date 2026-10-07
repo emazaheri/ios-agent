@@ -45,6 +45,12 @@ KNOWN_EXTRAS: dict[str, str] = {
 #: Parameters only Anthropic understands, skipped for every other provider.
 _ANTHROPIC_ONLY = ("effort",)
 
+#: Anthropic's 5-minute cache: a read costs a tenth of an input token and a
+#: write a quarter more. The defaults for the two cache prices when they are
+#: not set, because the default provider is Anthropic.
+_CACHE_READ_MULTIPLIER = 0.1
+_CACHE_WRITE_MULTIPLIER = 1.25
+
 #: Where each provider's credential is usually found. Deliberately incomplete,
 #: and treated as a hint rather than a requirement.
 #:
@@ -124,6 +130,24 @@ class AgentSettings(BaseSettings):
     #: dollar figure recorded against `gpt-5.6-sol` came out a quarter too high.
     usd_per_mtok_in: float = Field(default=5.0, ge=0)
     usd_per_mtok_out: float = Field(default=25.0, ge=0)
+    #: What a token read from, or written to, the provider's prompt cache
+    #: costs. Unset means Anthropic's 5-minute rates, a tenth and one and a
+    #: quarter of `usd_per_mtok_in`. Set the read price for any other
+    #: provider: OpenAI discounts a cached token by its own rate and charges
+    #: nothing extra to write one, so set the write price to the input price
+    #: there.
+    usd_per_mtok_cache_read: float | None = Field(default=None, ge=0)
+    usd_per_mtok_cache_write: float | None = Field(default=None, ge=0)
+
+    @property
+    def cache_prices(self) -> tuple[float, float]:
+        """Dollars per million cache-read and cache-write tokens, defaults applied."""
+        read = self.usd_per_mtok_cache_read
+        write = self.usd_per_mtok_cache_write
+        return (
+            self.usd_per_mtok_in * _CACHE_READ_MULTIPLIER if read is None else read,
+            self.usd_per_mtok_in * _CACHE_WRITE_MULTIPLIER if write is None else write,
+        )
 
     def chat_kwargs(self) -> dict[str, Any]:
         """The keyword arguments to hand the provider, and nothing more.

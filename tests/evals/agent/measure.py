@@ -42,15 +42,21 @@ from ios_mcp.session import IosSession
 _CHARS_PER_TOKEN = 4
 
 
-def token_prices() -> tuple[float, float]:
-    """Dollars per input token and per output token, as configured.
+def token_prices() -> tuple[float, float, float, float]:
+    """Dollars per input, output, cache-read and cache-write token, as configured.
 
     Read from `AgentSettings`, which loads `.env` the way every other setting
     is loaded. This used to read `os.environ` at import, which a `.env` never
     reaches, so the documented override did nothing. See `usd_per_mtok_in`.
     """
     cfg = AgentSettings()
-    return cfg.usd_per_mtok_in / 1_000_000, cfg.usd_per_mtok_out / 1_000_000
+    read, write = cfg.cache_prices
+    return (
+        cfg.usd_per_mtok_in / 1_000_000,
+        cfg.usd_per_mtok_out / 1_000_000,
+        read / 1_000_000,
+        write / 1_000_000,
+    )
 
 
 #: Bumped when the report shape changes in a way a reader must notice. Shared
@@ -107,6 +113,9 @@ class Meter:
     device_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: Parts of `prompt_tokens`, priced at the provider's cache rates.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     replans: int = 0
     #: Repeats refused by verification before reaching the device. Reported so
     #: an agent that merely swapped device actions for refused turns cannot
@@ -132,9 +141,13 @@ class Meter:
     def charge_device(self, payload: Any) -> None:
         self.device_tokens += len(json.dumps(payload, default=str)) // _CHARS_PER_TOKEN
 
-    def charge_model(self, prompt: int, completion: int) -> None:
+    def charge_model(
+        self, prompt: int, completion: int, cache_read: int = 0, cache_write: int = 0
+    ) -> None:
         self.prompt_tokens += prompt
         self.completion_tokens += completion
+        self.cache_read_tokens += cache_read
+        self.cache_write_tokens += cache_write
 
     async def observe(self, **kwargs: Any) -> Any:
         digest = await self.session.observe(**kwargs)
@@ -187,6 +200,10 @@ class RunResult:
     #: What the provider said it served on this run. None for the oracle and
     #: for a provider that does not say.
     model_served: str | None = None
+    #: Parts of `prompt_tokens` the provider read from, or wrote to, its
+    #: prompt cache. Zero for the oracle and for a run that cached nothing.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     #: Model calls this run actually made. Zero for the oracle, which has no
     #: model: it is the agent's number, and the one batching exists to move.
     turns: int = 0
@@ -246,7 +263,29 @@ class RunResult:
 
     @property
     def usd(self) -> float:
-        per_in, per_out = token_prices()
+        """Priced the way the provider bills it: a cached token is not an input token.
+
+        Before cache reads were counted, every prompt token was priced at the
+        full input rate, which overstated any run whose provider cached.
+        """
+        per_in, per_out, per_read, per_write = token_prices()
+        uncached = self.prompt_tokens - self.cache_read_tokens - self.cache_write_tokens
+        return (
+            uncached * per_in
+            + self.cache_read_tokens * per_read
+            + self.cache_write_tokens * per_write
+            + self.completion_tokens * per_out
+        )
+
+    @property
+    def usd_uncached(self) -> float:
+        """What the same run would have cost had nothing been cached.
+
+        Caching changes the price of a token, not what the model is shown, so
+        the counts are the same either way and one run can be priced both
+        ways. ADR 0022's rule compares these two on the same runs.
+        """
+        per_in, per_out, _, _ = token_prices()
         return self.prompt_tokens * per_in + self.completion_tokens * per_out
 
     def to_dict(self) -> dict[str, Any]:
@@ -272,8 +311,11 @@ class RunResult:
             out["model_tokens"] = {
                 "prompt": self.prompt_tokens,
                 "completion": self.completion_tokens,
+                "cache_read": self.cache_read_tokens,
+                "cache_write": self.cache_write_tokens,
             }
             out["usd"] = round(self.usd, 4)
+            out["usd_uncached"] = round(self.usd_uncached, 4)
         if self.replans:
             out["replans"] = self.replans
         if self.refusals:
@@ -449,6 +491,8 @@ async def run_task(
         device_tokens=meter.device_tokens,
         prompt_tokens=meter.prompt_tokens,
         completion_tokens=meter.completion_tokens,
+        cache_read_tokens=meter.cache_read_tokens,
+        cache_write_tokens=meter.cache_write_tokens,
         replans=meter.replans,
         refusals=meter.refusals,
         model_served=meter.model_served,
@@ -661,7 +705,18 @@ def write_report(
             "refusals": sum(a.refusals for a in attempts),
             "prompt_tokens": sum(a.prompt_tokens for a in attempts),
             "completion_tokens": sum(a.completion_tokens for a in attempts),
+            "cache_read_tokens": sum(a.cache_read_tokens for a in attempts),
+            "cache_write_tokens": sum(a.cache_write_tokens for a in attempts),
+            # The share of prompt tokens served from cache. The number ADR
+            # 0022 exists to move, and the one that says what an older,
+            # cache-blind figure actually cost.
+            "cache_hit_rate": round(
+                sum(a.cache_read_tokens for a in attempts)
+                / max(sum(a.prompt_tokens for a in attempts), 1),
+                3,
+            ),
             "usd": round(sum(a.usd for a in attempts), 4),
+            "usd_uncached": round(sum(a.usd_uncached for a in attempts), 4),
             "seconds": round(sum(a.seconds for a in attempts), 1),
             "resolution_tiers": _merged(a.tiers for a in attempts),
             "faults": _merged(a.faults for a in attempts),
