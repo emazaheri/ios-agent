@@ -26,6 +26,7 @@ from ios_mcp.devices.ports import free_port, release_port
 from ios_mcp.devices.reaper import spawn_guarded, stop_guarded
 from ios_mcp.devices.shell import probe, run, which
 from ios_mcp.devices.tunnel import tunnel_for
+from ios_mcp.devices.wda_home import prepare_command, wda_home
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing, TunnelDown
 
 logger = logging.getLogger(__name__)
@@ -213,11 +214,11 @@ class RealDeviceAdapter:
                 ),
             )
 
-        xctestrun = self.settings.wda.xctestrun_path or _discover_device_xctestrun()
+        xctestrun = self.settings.wda.xctestrun_path or _discover_device_xctestrun(self.settings)
         if xctestrun is None:
             raise ToolchainMissing(
                 "No prebuilt WebDriverAgent test bundle for a physical device",
-                hint="Build one with `scripts/prepare_wda.sh device`.",
+                hint=f"Build one with `{prepare_command('device')}`.",
             )
 
         logger.info("Starting WebDriverAgent on %s over the network", self.info.name)
@@ -307,7 +308,7 @@ class RealDeviceAdapter:
         configured = self.settings.wda.bundle_id
         if configured != WdaSettings().bundle_id:
             return configured
-        app = self.settings.wda.runner_app_path or _discover_runner_app()
+        app = self.settings.wda.runner_app_path or _discover_runner_app(self.settings)
         if app is None:
             return configured
         try:
@@ -467,16 +468,16 @@ class RealDeviceAdapter:
 _SERVER_URL = re.compile(r"ServerURLHere->(http://[^<\s]+)<-ServerURLHere")
 
 
-def _discover_runner_app() -> Path | None:
-    """The signed runner `scripts/prepare_wda.sh device` leaves in vendor/wda."""
-    candidate = Path("vendor/wda/WebDriverAgentRunner-Runner.app")
+def _discover_runner_app(settings: Settings) -> Path | None:
+    """The signed runner `ios-mcp prepare-wda device` leaves in the WDA home."""
+    candidate = wda_home(settings) / "WebDriverAgentRunner-Runner.app"
     return candidate if candidate.is_dir() else None
 
 
 def _runwda_hint(bundle_id: str) -> str:
     return (
         f"Check that {bundle_id} is installed and trusted on the device. "
-        "Build it with scripts/prepare_wda.sh device, install it with "
+        f"Build it with `{prepare_command('device')}`, install it with "
         "`ios install --path <app>`, then trust the developer under "
         "Settings > General > VPN & Device Management. iOS refuses to "
         "launch a free-account app until that is done, and asks again when a "
@@ -490,10 +491,10 @@ def _tail(path: Path | None, limit: int = 300) -> str:
     return path.read_text(errors="replace")[-limit:]
 
 
-def _discover_device_xctestrun() -> Path | None:
+def _discover_device_xctestrun(settings: Settings) -> Path | None:
     """A prebuilt test bundle for real hardware, not the simulator."""
     candidates = sorted(
-        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphoneos*.xctestrun"),
+        wda_home(settings).glob("**/WebDriverAgentRunner_iphoneos*.xctestrun"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

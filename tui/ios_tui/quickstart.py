@@ -30,19 +30,12 @@ importable without it.
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import sys
-from pathlib import Path
 
 from ios_mcp.config import Settings
 from ios_mcp.devices.discovery import create_simulator
 from ios_mcp.devices.doctor import DoctorReport, run_doctor
-
-#: Written next to the package rather than found by searching upward: a clone
-#: has it here, and an installed wheel does not have it at all, which is a
-#: difference worth reporting rather than papering over.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PREPARE_WDA = _REPO_ROOT / "scripts" / "prepare_wda.sh"
+from ios_mcp.devices.wda_home import prepare_command, run_prepare, wda_home
 
 
 class Quickstart:
@@ -161,25 +154,19 @@ class Quickstart:
             return True
 
         self.step("Building WebDriverAgent")
-        if not _PREPARE_WDA.exists():
-            self.fail(
-                "No prepare_wda.sh beside this package.",
-                "Quickstart builds from a clone of the repository:",
-                "  git clone https://github.com/emazaheri/ios-agent",
-                "  cd ios-agent && uv run ios-agent quickstart",
-            )
-            return False
-
+        # The script ships inside ios_mcp, so this works from a wheel as well
+        # as a clone. It used to be found beside this package, which only a
+        # clone has, and an installed copy was told to go and clone one.
+        self.say(f"Into {wda_home(self.settings).resolve()}.")
         self.say("About 20 seconds, including the clone, and only ever done once.")
         if not self.ask("Build it now?"):
-            self.say(f"Not built. {_PREPARE_WDA} simulator does it by hand.")
+            self.say(f"Not built. `{prepare_command('simulator')}` does it by hand.")
             return False
 
-        result = subprocess.run([str(_PREPARE_WDA), "simulator"], cwd=_REPO_ROOT, check=False)
-        if result.returncode != 0:
+        if run_prepare(self.settings, "simulator") != 0:
             self.fail(
                 "The build failed.",
-                f"Run it directly to see why: {_PREPARE_WDA} simulator",
+                f"Run it directly to see why: {prepare_command('simulator')}",
             )
             return False
         self.say("Built.")

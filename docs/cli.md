@@ -87,6 +87,22 @@ how an MCP client and the registry entry start it.
 | `--port PORT` | HTTP only. Default `8765`. |
 | `--allow-remote` | Let HTTP bind an address other than loopback. The server has no authentication, so anyone who can reach the port can drive the device. See the [threat model](threat-model.md). |
 
+### `prepare-wda`
+
+Build WebDriverAgent, once, where the server looks for it. Clones
+appium/WebDriverAgent at a pinned tag and builds it in about 20 seconds for
+the simulator. A device build signs it with your team and reads `TEAM_ID`,
+`UDID` and `WDA_BUNDLE_ID` from the environment.
+
+| Option | What it does |
+|---|---|
+| `target` | `simulator` (the default) or `device`. |
+
+The build goes into the WDA home: `IOS_MCP_WDA__HOME` when set, else a
+clone's `vendor/wda` when run from one, else
+`~/Library/Application Support/ios-mcp/wda`. Inside a clone,
+`./scripts/prepare_wda.sh` does the same.
+
 ### `devices`, `doctor`, `reset`
 
 See [the shared commands](#shared-commands) below.

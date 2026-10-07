@@ -30,7 +30,7 @@ below.
 | `xcode` fails | Only the Command Line Tools are installed. Install the full Xcode, then `sudo xcode-select -s /Applications/Xcode.app`. |
 | `simulators` fails: no runtime | Xcode ships without one. `xcodebuild -downloadPlatform iOS`, about 8 GB. |
 | `simulators` fails: a runtime but no device | `ios-agent` offers to create one, which takes under a second; or `xcrun simctl create`. |
-| `wda-bundle` fails | WebDriverAgent is not built. `./scripts/prepare_wda.sh simulator`, or `ios-agent quickstart`, which builds it in about 20 seconds. |
+| `wda-bundle` fails | WebDriverAgent is not built. `ios-mcp prepare-wda simulator` builds it in about 20 seconds, into the directory the remedy names; `ios-agent quickstart` offers the same. In a clone, `./scripts/prepare_wda.sh simulator` still works. |
 | `model` warns | No credential this project can see. Bedrock, Vertex and an `ant auth login` profile resolve their own, so a warning is not always a problem. `manual` mode needs no model at all. See [Choose a model](../agent/README.md). |
 | The simulator runs but no window appears | Expected with `IOS_MCP_SIMULATOR__SHOW_WINDOW=false`. On Xcode 27 the window is Device Hub, not Simulator.app; automation does not need it either way. |
 

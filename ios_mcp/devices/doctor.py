@@ -22,6 +22,7 @@ from ios_mcp.devices.base import DeviceInfo
 from ios_mcp.devices.shell import probe, which
 from ios_mcp.devices.simulator import SIMULATOR_UI_BUNDLE_ID
 from ios_mcp.devices.tunnel import list_tunnels
+from ios_mcp.devices.wda_home import prepare_command, wda_home
 
 Status = Literal["ok", "warn", "fail", "skip"]
 
@@ -514,8 +515,8 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
     a device needs the signed runner .app, which go-ios installs and launches
     through testmanagerd.
     """
-    xctestrun = cfg.wda.xctestrun_path or _discover_xctestrun()
-    runner = cfg.wda.runner_app_path or _discover_wda_app()
+    xctestrun = cfg.wda.xctestrun_path or _discover_xctestrun(cfg)
+    runner = cfg.wda.runner_app_path or _discover_wda_app(cfg)
 
     if xctestrun is None and runner is None:
         return Check(
@@ -523,9 +524,10 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
             "warn",
             "no WebDriverAgent build found",
             remedy=(
-                "Run `scripts/prepare_wda.sh simulator` (or `device` with your TEAM_ID) "
-                "to build one into vendor/wda/. Nothing can be automated without it."
+                f"Run `{prepare_command('simulator')}` (or `device` with your TEAM_ID) "
+                f"to build one into {wda_home(cfg)}. Nothing can be automated without it."
             ),
+            data={"home": str(wda_home(cfg))},
         )
 
     data: dict[str, Any] = {}
@@ -562,7 +564,7 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
                     "warn" if simulator_ready else "fail",
                     detail,
                     remedy=(
-                        "Re-sign with scripts/prepare_wda.sh device. Free Apple IDs "
+                        f"Re-sign with `{prepare_command('device')}`. Free Apple IDs "
                         "get 7-day profiles; a paid Developer Program membership "
                         "gets a year."
                     ),
@@ -573,7 +575,7 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
                     "wda-bundle",
                     "warn",
                     f"the device runner's provisioning profile expires in {days} day(s)",
-                    remedy="Re-sign soon with scripts/prepare_wda.sh device.",
+                    remedy=f"Re-sign soon with `{prepare_command('device')}`.",
                     data=data,
                 )
 
@@ -582,7 +584,7 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
             "wda-bundle",
             "warn",
             "a WebDriverAgent build exists but is not usable",
-            remedy="Re-run scripts/prepare_wda.sh for the target you want.",
+            remedy=f"Re-run `{prepare_command('simulator')}` or `device` for the target you want.",
             data=data,
         )
 
@@ -590,7 +592,7 @@ async def _check_wda_bundle(cfg: Settings) -> Check:
     remedy = (
         None
         if xctestrun is not None
-        else "Run `scripts/prepare_wda.sh simulator` to enable Simulator automation."
+        else f"Run `{prepare_command('simulator')}` to enable Simulator automation."
     )
     if "device runner ready" not in parts:
         parts.append("no signed device runner")
@@ -653,17 +655,17 @@ def _is_network_only(device: DeviceInfo) -> bool:
     return any("network" in b for b in device.blockers)
 
 
-def _discover_wda_app() -> Path | None:
+def _discover_wda_app(cfg: Settings) -> Path | None:
     """The signed runner app used on physical devices."""
-    for candidate in Path("vendor/wda").glob("**/WebDriverAgentRunner-Runner.app"):
+    for candidate in wda_home(cfg).glob("**/WebDriverAgentRunner-Runner.app"):
         return candidate
     return None
 
 
-def _discover_xctestrun() -> Path | None:
+def _discover_xctestrun(cfg: Settings) -> Path | None:
     """The prebuilt test bundle used on simulators."""
     candidates = sorted(
-        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
+        wda_home(cfg).glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
