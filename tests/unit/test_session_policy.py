@@ -218,6 +218,28 @@ async def test_typing_destructive_text_does_prompt() -> None:
         await session.type_text("delete my account", target="Body")
 
 
+async def test_approving_typed_text_approves_that_text_only() -> None:
+    """The signature once ignored the text: `type:Body` for every phrase.
+
+    Approving "delete my account" then approved "delete everything" into the
+    same field, and with no target, into any field that had focus.
+    """
+    session, fake, _ = make_session(form_screen())
+    await session.observe()
+
+    with pytest.raises(ActionRequiresApproval) as first:
+        await session.type_text("delete my account", target="Body")
+    session.approve(first.value.details["signature"])
+
+    await session.type_text("delete my account", target="Body")
+    assert "delete my account" in fake.typed()
+
+    with pytest.raises(ActionRequiresApproval) as second:
+        await session.type_text("delete everything", target="Body")
+    assert second.value.details["signature"] != first.value.details["signature"]
+    assert "delete everything" not in first.value.details["signature"], "the text leaked"
+
+
 async def test_repeated_failures_halt_the_session() -> None:
     session, _, _ = make_session(settings_screen())
     await session.observe()

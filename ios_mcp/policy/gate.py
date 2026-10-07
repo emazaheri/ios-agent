@@ -11,6 +11,7 @@ the operation is still preventable rather than reported afterwards.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -138,9 +139,20 @@ class PolicyGate:
 
     # -- approval ----------------------------------------------------------
 
-    def signature(self, action: str, target: Target | None) -> str:
+    def signature(self, action: str, target: Target | None, *, text: str | None = None) -> str:
+        """Names one specific action, which is all an approval may cover.
+
+        Text being typed is part of it. Without it, typing "delete my account"
+        into the focused field signed as `type:-`, so approving that once
+        approved every later destructive phrase typed anywhere focused. The
+        text is hashed so a signature, which travels through tool results and
+        transcripts, does not repeat it.
+        """
         name = (target.identifier or target.label or target.ref) if target else "-"
-        return f"{action}:{name}"
+        if text is None:
+            return f"{action}:{name}"
+        digest = hashlib.sha256(text.encode()).hexdigest()[:12]
+        return f"{action}:{name}:{digest}"
 
     def is_approved(self, signature: str) -> bool:
         return signature in self.approved

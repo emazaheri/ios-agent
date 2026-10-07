@@ -951,7 +951,7 @@ class IosSession:
         if not verdict.needs_approval:
             return
 
-        signature = self.gate.signature(action, target)
+        signature = self.gate.signature(action, target, text=text)
         if self.gate.is_approved(signature):
             return
 

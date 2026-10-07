@@ -41,8 +41,8 @@ device:
 {
   "error": "action_requires_approval",
   "message": "type on \"delete\" matches the destructive rule 'delete'",
-  "hint": "Confirm with the user, then repeat the call with approve='type:-'.",
-  "details": {"signature": "type:-", "verdict": {"risk": "destructive", "reason": "..."}}
+  "hint": "Confirm with the user, then repeat the call with approve='type:-:6197595503f0'.",
+  "details": {"signature": "type:-:6197595503f0", "verdict": {"risk": "destructive", "reason": "..."}}
 }
 ```
 
@@ -50,13 +50,17 @@ Ask the person, then repeat the same call with `approve` set to the
 signature. The repeat runs. This is also the hook for your own
 human-in-the-loop layer.
 
+A signature names one action: the verb, the element, and for typing, a hash
+of the text. Approving "delete" typed into a field does not approve
+"delete everything" typed into the same field.
+
 ## In the terminal app
 
 `ios-agent` refuses everything gated unless you pass `--approve`, because a
 run nobody is watching cannot be asked. With it, the run stops and asks:
 
 ```
-  ? type_text on type:-
+  ? allow type_text
     type on "delete" matches the destructive rule 'delete'
   Allow this one action? [y/N]
 ```
