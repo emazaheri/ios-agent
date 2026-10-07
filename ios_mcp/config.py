@@ -196,6 +196,10 @@ class WdaSettings(BaseModel):
     #: Wi-Fi, a device farm, a runner started by hand. When set, the server
     #: connects rather than launching anything, and never tears it down.
     base_url: str | None = None
+    #: Where the WebDriverAgent checkout and builds live. Unset, a clone's
+    #: vendor/wda when the server runs from one, else a per-user directory.
+    #: See ios_mcp/devices/wda_home.py.
+    home: Path | None = None
     #: Prebuilt runner app, used on physical devices.
     runner_app_path: Path | None = None
     #: Prebuilt .xctestrun bundle, used on simulators.

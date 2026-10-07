@@ -19,6 +19,7 @@ from ios_mcp.devices.base import AppInfo, DeviceInfo, WdaEndpoint
 from ios_mcp.devices.ports import free_port, release_port
 from ios_mcp.devices.reaper import spawn_guarded, stop_guarded
 from ios_mcp.devices.shell import run
+from ios_mcp.devices.wda_home import prepare_command, wda_home
 from ios_mcp.errors import DeviceNotReady, NotSupported, ToolchainMissing
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ class SimulatorAdapter:
         port = free_port(*self.settings.wda.port_range)
         base_url = f"http://{self.settings.wda.host}:{port}"
 
-        xctestrun = self.settings.wda.xctestrun_path or _discover_xctestrun()
+        xctestrun = self.settings.wda.xctestrun_path or _discover_xctestrun(self.settings)
         if xctestrun is not None:
             await self._launch_prebuilt(xctestrun, port)
         else:
@@ -175,19 +176,20 @@ class SimulatorAdapter:
 
     async def _launch_from_source(self, port: int) -> None:
         """Build and run WDA from a checkout. Slow; prefer a prebuilt bundle."""
-        source = Path("vendor/wda/WebDriverAgent/WebDriverAgent.xcodeproj")
+        home = wda_home(self.settings)
+        source = home / "WebDriverAgent" / "WebDriverAgent.xcodeproj"
         if not source.exists():
             raise ToolchainMissing(
                 "No WebDriverAgent build is available for the simulator",
                 hint=(
-                    "Run scripts/prepare_wda.sh to build one into vendor/wda/. "
+                    f"Run `{prepare_command('simulator')}` to build one into {home}. "
                     "It clones appium/WebDriverAgent and builds it once."
                 ),
             )
         if shutil.which("xcodebuild") is None:
             raise ToolchainMissing(
                 "xcodebuild is required to run WebDriverAgent",
-                hint="Install the full Xcode, then run scripts/prepare_wda.sh.",
+                hint=f"Install the full Xcode, then run `{prepare_command('simulator')}`.",
             )
         logger.info("Building and launching WDA from source; this takes a few minutes")
         self._runner_proc = await spawn_guarded(
@@ -322,10 +324,10 @@ def _env() -> dict[str, str]:
     return dict(os.environ)
 
 
-def _discover_xctestrun() -> Path | None:
-    """Find a prebuilt simulator test bundle produced by scripts/prepare_wda.sh."""
+def _discover_xctestrun(settings: Settings) -> Path | None:
+    """Find a prebuilt simulator test bundle produced by `ios-mcp prepare-wda`."""
     candidates = sorted(
-        Path("vendor/wda").glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
+        wda_home(settings).glob("**/WebDriverAgentRunner_iphonesimulator*.xctestrun"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )

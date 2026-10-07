@@ -40,6 +40,18 @@ def build_parser() -> argparse.ArgumentParser:
     devices = sub.add_parser("devices", help="List simulators and attached devices")
     devices.add_argument("--json", action="store_true")
 
+    prepare = sub.add_parser(
+        "prepare-wda",
+        help="Build WebDriverAgent, once, where the server looks for it",
+        description=(
+            "Clones appium/WebDriverAgent at a pinned tag and builds it into the WDA "
+            "home: IOS_MCP_WDA__HOME, else a clone's vendor/wda, else "
+            "~/Library/Application Support/ios-mcp/wda. A device build reads TEAM_ID, "
+            "UDID and WDA_BUNDLE_ID from the environment."
+        ),
+    )
+    prepare.add_argument("target", choices=["simulator", "device"], nargs="?", default="simulator")
+
     reset = sub.add_parser(
         "reset",
         help="Find WebDriverAgent processes a crashed run left behind",
@@ -72,6 +84,14 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     command = args.command or "serve"
+    if command == "prepare-wda":
+        from ios_mcp.devices.wda_home import run_prepare, wda_home
+
+        print(
+            f"Building WebDriverAgent for {args.target} into {wda_home(settings).resolve()}",
+            flush=True,
+        )
+        return run_prepare(settings, args.target)
     if command == "doctor":
         return _cmd_doctor(settings, json_out=args.json)
     if command == "devices":

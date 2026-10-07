@@ -247,10 +247,24 @@ a local Ollama model are all supported. See [agent/README.md](agent/README.md).
 
 ## Connecting your own agent over MCP
 
-31 tools and 5 resources, over stdio or HTTP. The server runs from your clone,
-where WebDriverAgent was built, so every client starts it the same way:
-`uv run --directory <path to this clone> ios-mcp serve`. Use the absolute path;
-desktop apps do not start in your project directory.
+31 tools and 5 resources, over stdio or HTTP.
+
+**Without a clone**, from PyPI. Build WebDriverAgent once, into
+`~/Library/Application Support/ios-mcp/wda`, then point any client at `uvx`:
+
+```bash
+uvx ios-mcp prepare-wda simulator      # about 20 seconds, once
+uvx ios-mcp doctor                     # says what, if anything, is missing
+```
+
+```json
+{ "mcpServers": { "ios": { "command": "uvx", "args": ["ios-mcp"] } } }
+```
+
+**From a clone**, which is what the rest of this README assumes, every client
+starts it the same way: `uv run --directory <path to this clone> ios-mcp serve`.
+Use the absolute path; desktop apps do not start in your project directory.
+The clone's build in `vendor/wda` is found from there.
 
 **Claude Code.** Inside this repository it is already set up, through
 `.mcp.json`. From anywhere else:
