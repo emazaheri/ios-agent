@@ -207,3 +207,33 @@ def test_cache_prices_can_be_set_for_another_provider(monkeypatch: pytest.Monkey
     monkeypatch.setenv("IOS_AGENT_USD_PER_MTOK_CACHE_WRITE", "4")
 
     assert AgentSettings(_env_file=None).cache_prices == (1.0, 4.0)  # type: ignore[call-arg]
+
+
+def test_a_write_split_by_ttl_is_still_counted() -> None:
+    """Through `langchain-anthropic`'s own conversion, not a hand-written dict.
+
+    When Anthropic reports a write per TTL, the integration zeroes
+    `cache_creation` and puts the count under `ephemeral_5m_input_tokens`.
+    Reading only the first counted none of it; a real run caught that, after
+    a hand-written test like the ones above had passed.
+    """
+    from anthropic.types import CacheCreation, Usage
+    from ios_agent.loop import cache_writes
+    from langchain_anthropic.chat_models import _create_usage_metadata
+
+    usage = _create_usage_metadata(
+        Usage(
+            input_tokens=4,
+            output_tokens=25,
+            cache_read_input_tokens=2246,
+            cache_creation_input_tokens=102,
+            cache_creation=CacheCreation(
+                ephemeral_5m_input_tokens=102, ephemeral_1h_input_tokens=0
+            ),
+        )
+    )
+    details = usage["input_token_details"]
+
+    assert details["cache_creation"] == 0
+    assert cache_writes(details) == 102
+    assert usage["input_tokens"] == 4 + 2246 + 102
