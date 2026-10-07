@@ -163,6 +163,14 @@ short-lived OIDC credential, which is the difference between a secret that can
 leak and one that does not exist. It needs a `pypi` environment on the
 repository and a trusted publisher configured on PyPI for this workflow.
 
+Once PyPI has accepted the upload, the same workflow publishes `server.json` to
+the MCP registry, again with the workflow's OIDC token rather than anyone's
+login, and only then opens the GitHub Release. The registry entry sat at 0.1.1
+through five releases while publishing it was a manual step. The
+`mcp-publisher` it downloads is pinned to a version and checked against that
+release's checksum; bump `PUBLISHER_VERSION` and `PUBLISHER_SHA256` in the
+workflow together.
+
 `ios-agent` and `ios-tui` carry `Private :: Do Not Upload`, so PyPI refuses
 them even if a broad `uv publish` is run from the root.
 

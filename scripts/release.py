@@ -221,8 +221,9 @@ def main() -> int:
         "  git add -u && git commit\n"
         f"  git tag -a v{now} -m 'ios-mcp {now}'\n"
         f"  git push origin main && git push origin v{now}\n\n"
-        "The tag push publishes to PyPI and opens a GitHub Release whose notes\n"
-        "are the commit body above, so write it as the announcement it becomes.\n"
+        "The tag push publishes to PyPI, then to the MCP registry, and opens a\n"
+        "GitHub Release whose notes are the commit body above, so write it as\n"
+        "the announcement it becomes.\n"
         "The PyPI half cannot be undone and PyPI never accepts a re-upload of a\n"
         "version, so read the diff first."
     )
