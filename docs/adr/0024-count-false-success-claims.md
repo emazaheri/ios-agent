@@ -101,8 +101,10 @@ the expected text. The oracle writes its answers out so its own series does not
 move.
 
 `agent-model` rows on either side of the second commit are therefore not
-comparable on `passed`. The commit is named in the history so the break is
-visible.
+comparable on `passed`. That commit is "A false claim fails the task it
+claims", and the first `agent-model` row recorded after it should say so in
+its note. No `agent-model` row recorded before it carries a claim, so none of
+them can be rescored.
 
 ## Results
 

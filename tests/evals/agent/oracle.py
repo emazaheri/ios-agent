@@ -30,6 +30,10 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     if solution is None:
         raise KeyError(f"no oracle for task {task.name!r}")
     await solution(session, meter)
+    # A question is scored on the answer given, and the oracle knows it. This
+    # is the one thing it says, and it is not a claim: it calls no `done`.
+    if task.answer is not None:
+        meter.report = task.answer
 
 
 async def _enable_bold_text(session: IosSession, meter: Meter) -> None:
