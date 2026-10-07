@@ -244,6 +244,32 @@ commits to no vendor. An optional cascade (`IOS_AGENT_ROUTE_MODEL`, off by
 default) starts a run on a smaller model and moves to the configured one at the
 first sign of trouble; see `docs/adr/0015-route-routine-turns-to-a-small-model.md`.
 
+```mermaid
+flowchart TB
+    start(["START<br/>system prompt + goal"])
+    agent["agent node<br/>one model call,<br/>one turn"]
+    next{"next_step"}
+    act["act node<br/>each tool call in order,<br/>through the backend"]
+    human["operator<br/>approves or refuses"]
+    after{"after_act"}
+    finish(["END"])
+
+    start --> agent --> next
+    next -->|"tool calls"| act
+    next -->|"done, stopped,<br/>out of budget,<br/>or no tool call"| finish
+    act -.->|"risky action:<br/>interrupt()"| human
+    human -.->|"resume re-runs<br/>the node"| act
+    act --> after
+    after -->|"not ended"| agent
+    after -->|"done or stopped"| finish
+```
+
+Both edges ask whether the run has ended before anything else, so a finished
+run never pays for one more model call. The budget is 24 turns and 24 actions,
+`DEFAULT_MAX_STEPS` and `DEFAULT_MAX_ACTIONS` in `graph.py`. A reply with no
+tool call ends the run with its text kept, because stopping without a tool call
+is often a refusal.
+
 An action the gate asks about, one that is destructive or reaches another
 person, **pauses the graph** with a LangGraph `interrupt()` rather than being
 decided on the phone owner's behalf. The gate classifies before
@@ -300,6 +326,44 @@ out to be already at its floor before any agent pillar was built.
 - The free series is committed to `tests/evals/history.jsonl` and CI fails when
   a number moves without a new line recorded beside it. See
   `docs/adr/0009-the-eval-trend-is-committed.md`.
+
+Two harnesses meet in the evals. The agent harness is the scaffolding that
+turns a model into an agent: prompt, loop, tools and verifier. The eval harness
+runs fixed work against it and records what each run cost. It was built before
+the agent so that it could overturn the agent's design, and it did.
+
+```mermaid
+flowchart TB
+    subgraph evalh["Eval harness, tests/evals"]
+        tasks["agent tasks<br/>goals with oracle floors,<br/>measure.py"]
+        flows["golden flows<br/>scripted, no model,<br/>harness.py"]
+        trend["history.jsonl<br/>committed trend,<br/>checked by CI"]
+    end
+
+    subgraph agenth["Agent harness, agent/ios_agent"]
+        prompt["operator.md<br/>system prompt"]
+        model["model<br/>init_chat_model"]
+        loop["LangGraph loop<br/>graph.py, loop.py"]
+        tools["tools.py<br/>and verify.py"]
+    end
+
+    session["IosSession"]
+    device["scripted fake, simulator,<br/>or iPhone"]
+
+    tasks -->|"runs goals"| loop
+    prompt --> loop
+    model --> loop
+    loop --> tools
+    tools -->|"direct, or over MCP"| session
+    flows -->|"no model"| session
+    tasks --> trend
+    flows --> trend
+    session --> device
+```
+
+Golden flows skip the model and drive `IosSession` directly, so they price
+perception alone. Agent tasks run the whole agent harness and compare it with a
+hand-written oracle.
 
 The fakes cannot catch everything. Every bug in the Phase 5 commit was found
 only by running against a real device, which is why the eval suite exists.
