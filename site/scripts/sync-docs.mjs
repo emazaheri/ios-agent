@@ -31,7 +31,10 @@ const GENERATED_DIRS = ['start', 'guides', 'concepts', 'reference', 'evals', 're
 const README_SECTIONS = {
 	intro: 'start/introduction',
 	'Contents': null,
-	'Why it is built this way': 'start/introduction',
+	'What you can do with it': 'start/introduction',
+	'Features': 'start/features',
+	'Who it is for': 'start/introduction',
+	'Why it is built this way': 'concepts/design',
 	"Why only Apple's public APIs": 'concepts/platform',
 	'Requirements': 'start/installation',
 	'Setup': 'start/installation',
@@ -49,13 +52,23 @@ const README_SECTIONS = {
 const README_PAGES = {
 	'start/introduction': {
 		title: 'Introduction',
-		description: 'Drive an iPhone or an iOS Simulator with an AI agent: a terminal app, an MCP server, and the library beneath both.',
+		description: 'Give an AI agent an iPhone or an iOS Simulator, and it checks every step it takes. What you can do with it, and who it is for.',
 		order: 1,
+	},
+	'start/features': {
+		title: 'Features',
+		description: 'Knows when an action did not work, runs on a real iPhone over a cable or Wi-Fi, stays cheap on tokens, and asks before anything risky.',
+		order: 2,
 	},
 	'start/installation': {
 		title: 'Installation',
 		description: 'What a Mac needs to drive a simulator or a phone, and the three commands that set it up.',
-		order: 2,
+		order: 3,
+	},
+	'concepts/design': {
+		title: 'Why it is built this way',
+		description: 'The four design decisions that follow from a 200-row list costing 37,000 tokens of raw page source.',
+		order: 0,
 	},
 	'guides/terminal-app': {
 		title: 'The terminal app',
@@ -87,7 +100,8 @@ const README_PAGES = {
 // Whole files, each one page. `title` overrides the file's own heading where
 // that heading names a package rather than saying what the page is.
 const FILES = [
-	{ src: 'docs/real-device-setup.md', slug: 'start/physical-device', title: 'Physical iPhone', order: 3 },
+	{ src: 'docs/real-device-setup.md', slug: 'start/physical-device', title: 'Physical iPhone', order: 4 },
+	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 5 },
 	{ src: 'agent/README.md', slug: 'guides/agent', title: 'The agent and its model', order: 3 },
 	{ src: 'ARCHITECTURE.md', slug: 'concepts/architecture', order: 1 },
 	{ src: 'SAFETY.md', slug: 'concepts/safety', order: 3 },
@@ -274,6 +288,20 @@ function syncReadme() {
 		pages.set(slug, [...(pages.get(slug) ?? []), { name: section.name, text }]);
 	}
 
+	// A README anchor names a section that, here, may live on another page.
+	// GitHub's anchor for a heading is its lowercased text with punctuation
+	// dropped and spaces as hyphens; a section that is a page's only one has
+	// no heading of its own, so its anchor becomes the page itself.
+	const anchor = (name) => name.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
+	const anchors = new Map();
+	for (const [slug, list] of pages) {
+		for (const { name } of list) {
+			if (name !== 'intro') anchors.set(anchor(name), list.length === 1 ? pageUrl(slug) : `${pageUrl(slug)}#${anchor(name)}`);
+		}
+	}
+	const rewriteAnchors = (text) =>
+		text.replace(/\]\(#([\w-]+)\)/g, (whole, id) => (anchors.has(id) ? `](${anchors.get(id)})` : whole));
+
 	for (const [slug, sections] of pages) {
 		// A page made of one section already carries it as its title, so the
 		// heading would only repeat it.
@@ -283,7 +311,7 @@ function syncReadme() {
 		const meta = README_PAGES[slug];
 		write(
 			slug,
-			frontmatter({ ...meta, editSrc: 'README.md' }) + rewriteBody(chunks.join('\n\n'), 'README.md') + '\n',
+			frontmatter({ ...meta, editSrc: 'README.md' }) + rewriteBody(rewriteAnchors(chunks.join('\n\n')), 'README.md') + '\n',
 		);
 	}
 }

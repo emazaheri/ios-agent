@@ -1,11 +1,11 @@
 ---
 title: ios-agent
-description: Drive an iPhone or an iOS Simulator with an AI agent. A terminal app, an MCP server, and the library beneath both.
+description: Give an AI agent an iPhone or an iOS Simulator, and it checks every step it takes. A terminal app, an MCP server, and a Python library.
 template: splash
 editUrl: false
 hero:
-  title: Drive an iPhone with an AI agent
-  tagline: A terminal app, an MCP server, and the library beneath both. Built on Apple's XCUIAutomation, designed for agents rather than test suites, and measured on real hardware.
+  title: Give an AI agent an iPhone. It checks every step it takes.
+  tagline: Use an iOS Simulator or a real iPhone over a cable or Wi-Fi, from the terminal, Claude Code, any MCP client, or Python. Every action returns the screen it produced, so the agent knows when a tap did nothing.
   image:
     html: |
       <svg class="hero-phone" viewBox="0 0 300 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A phone screen read as a compact digest">
@@ -79,6 +79,27 @@ import { Card, CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/comp
 	</figcaption>
 </figure>
 
+## What you can do with it
+
+<CardGrid>
+	<Card title="Hand an agent a goal" icon="rocket">
+		`ios-agent "turn on bold text"` and watch it work: reasoning, the screen it reads,
+		actions and cost, live in the terminal.
+	</Card>
+	<Card title="Give your MCP client hands" icon="puzzle">
+		One entry in `.mcp.json` gives Claude Code, Cursor or any MCP client 31 tools
+		for a simulator or a phone.
+	</Card>
+	<Card title="Use your own iPhone" icon="phone">
+		Over a cable or Wi-Fi, verified on an iPhone 17 Pro Max, with anything risky
+		asking first.
+	</Card>
+	<Card title="Drive it by hand" icon="pencil">
+		`ios-agent manual` needs no API key, and shows exactly what an agent would see
+		on an app nobody has pointed this at before.
+	</Card>
+</CardGrid>
+
 ## Measured, not asserted
 
 <div class="stats">
@@ -116,6 +137,8 @@ Raw WebDriverAgent page source for a 200-row list runs to roughly 37,000 tokens.
 ## Where to go next
 
 <CardGrid>
+	<LinkCard title="Features" description="Knows when an action did not work, runs on a real iPhone, stays cheap on tokens, asks before anything risky." href="/ios-agent/start/features/" />
+	<LinkCard title="How it compares" description="Against mobile-mcp, agent-device, Argent and MobileBuildMCP, including where another tool suits you better." href="/ios-agent/start/comparison/" />
 	<LinkCard title="Installation" description="A Mac, Xcode, and three commands to a running simulator." href="/ios-agent/start/installation/" />
 	<LinkCard title="Connecting over MCP" description="31 tools and 5 resources for Claude Code, Cursor or any client." href="/ios-agent/guides/mcp/" />
 	<LinkCard title="Architecture" description="Six layers, and why the MCP server is one consumer rather than the thing itself." href="/ios-agent/concepts/architecture/" />
