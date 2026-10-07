@@ -10,6 +10,14 @@ export default defineConfig({
 	site: 'https://emazaheri.github.io',
 	base: '/ios-agent',
 	trailingSlash: 'always',
+	// Pages that moved when the sidebar was regrouped by what the reader is
+	// doing. The old URLs were already indexed, so they forward rather than 404.
+	redirects: {
+		'/evals/results/': '/ios-agent/built/results/',
+		'/concepts/platform/': '/ios-agent/concepts/design/',
+		'/start/physical-device/': '/ios-agent/guides/physical-device/',
+		'/reference/ios-tui/': '/ios-agent/project/ios-tui/',
+	},
 	integrations: [
 		// Before Starlight, so the diagram in ARCHITECTURE.md is claimed
 		// before Expressive Code renders it as a code block.
@@ -36,9 +44,14 @@ export default defineConfig({
 				{ label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
 				{ label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
 				{ label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
-				{ label: 'Measurements', items: [{ autogenerate: { directory: 'evals' } }] },
-				{ label: 'iOS realities', collapsed: true, items: [{ autogenerate: { directory: 'realities' } }] },
-				{ label: 'Decision records', collapsed: true, items: [{ autogenerate: { directory: 'decisions' } }] },
+				{
+					label: 'How it was built',
+					items: [
+						{ autogenerate: { directory: 'built' } },
+						{ label: 'iOS realities', collapsed: true, items: [{ autogenerate: { directory: 'realities' } }] },
+						{ label: 'Decision records', collapsed: true, items: [{ autogenerate: { directory: 'decisions' } }] },
+					],
+				},
 				{ label: 'Project', items: [{ autogenerate: { directory: 'project' } }] },
 			],
 		}),

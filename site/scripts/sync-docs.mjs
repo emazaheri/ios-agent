@@ -23,7 +23,7 @@ const GITHUB = 'https://github.com/emazaheri/ios-agent';
 
 // Directories under src/content/docs that this script owns. Anything else
 // there (the landing page) is written by hand and left alone.
-const GENERATED_DIRS = ['start', 'guides', 'concepts', 'reference', 'evals', 'realities', 'decisions', 'project'];
+const GENERATED_DIRS = ['start', 'guides', 'concepts', 'reference', 'built', 'evals', 'realities', 'decisions', 'project'];
 
 // README.md is one long page on GitHub. Here it is split by its `## `
 // headings, and each section is sent to the page that answers its question.
@@ -35,16 +35,16 @@ const README_SECTIONS = {
 	'Features': 'start/features',
 	'Who it is for': 'start/introduction',
 	'Why it is built this way': 'concepts/design',
-	"Why only Apple's public APIs": 'concepts/platform',
+	"Why only Apple's public APIs": 'concepts/design',
 	'Requirements': 'start/installation',
 	'Setup': 'start/installation',
 	'The terminal app': 'guides/terminal-app',
 	'Connecting your own agent over MCP': 'guides/mcp',
-	'What the model sees': 'guides/mcp',
+	'What the model sees': 'concepts/what-the-model-sees',
 	'Safety': null,
-	'Measured on real hardware': 'evals/results',
+	'Measured on real hardware': 'built/results',
 	'Development': 'project/development',
-	'Why the automation runs on a host, not on the phone': 'concepts/platform',
+	'Why the automation runs on a host, not on the phone': 'concepts/design',
 	'Contributing': null,
 	'License': null,
 };
@@ -63,29 +63,29 @@ const README_PAGES = {
 	'start/installation': {
 		title: 'Installation',
 		description: 'What a Mac needs to drive a simulator or a phone, and the three commands that set it up.',
-		order: 3,
+		order: 4,
 	},
 	'concepts/design': {
-		title: 'Why it is built this way',
-		description: 'The four design decisions that follow from a 200-row list costing 37,000 tokens of raw page source.',
-		order: 0,
+		title: 'Design decisions',
+		description: 'Why the design follows from a 200-row list costing 37,000 tokens, why only Apple\'s public APIs, and why the engine runs on a Mac.',
+		order: 3,
 	},
 	'guides/terminal-app': {
-		title: 'The terminal app',
-		description: 'Run a goal, drive the device by hand, switch phones mid-session, and choose the model.',
+		title: 'Run a goal in the terminal',
+		description: 'Give the agent a goal, drive the device by hand, switch phones mid-session, and read the run as it happens.',
 		order: 1,
 	},
 	'guides/mcp': {
 		title: 'Connecting over MCP',
-		description: 'Point Claude Code, Cursor or any MCP client at the server, and see the screen exactly as the model does.',
+		description: 'Point Claude Code, Cursor or any MCP client at the server, over stdio or HTTP.',
 		order: 2,
 	},
-	'concepts/platform': {
-		title: 'Why only public APIs',
-		description: 'Why everything goes through XCTest, why two faster private routes were measured and turned down, and why the engine runs on a Mac.',
+	'concepts/what-the-model-sees': {
+		title: 'What the model sees',
+		description: 'A screen as the model reads it: a few hundred tokens of refs, roles and labels instead of accessibility XML.',
 		order: 2,
 	},
-	'evals/results': {
+	'built/results': {
 		title: 'Measured results',
 		description: 'Success, observations, actions, turns and cost across the agent tasks, and the same goal verified on a physical iPhone.',
 		order: 1,
@@ -100,16 +100,16 @@ const README_PAGES = {
 // Whole files, each one page. `title` overrides the file's own heading where
 // that heading names a package rather than saying what the page is.
 const FILES = [
-	{ src: 'docs/real-device-setup.md', slug: 'start/physical-device', title: 'Physical iPhone', order: 4 },
-	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 5 },
-	{ src: 'agent/README.md', slug: 'guides/agent', title: 'The agent and its model', order: 3 },
+	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 3 },
+	{ src: 'docs/real-device-setup.md', slug: 'guides/physical-device', title: 'Use a physical iPhone', order: 4 },
+	{ src: 'agent/README.md', slug: 'guides/agent', title: 'Choose a model', order: 7 },
 	{ src: 'ARCHITECTURE.md', slug: 'concepts/architecture', order: 1 },
-	{ src: 'SAFETY.md', slug: 'concepts/safety', order: 3 },
-	{ src: 'docs/threat-model.md', slug: 'concepts/threat-model', order: 4 },
-	{ src: 'docs/tool-reference.md', slug: 'reference/tools', title: 'MCP tools', order: 1 },
-	{ src: 'tui/README.md', slug: 'reference/ios-tui', title: 'The ios-tui package', order: 2 },
+	{ src: 'SAFETY.md', slug: 'concepts/safety', order: 4 },
+	{ src: 'docs/threat-model.md', slug: 'concepts/threat-model', order: 5 },
+	{ src: 'docs/tool-reference.md', slug: 'reference/tools', title: 'MCP tools and resources', order: 1 },
 	{ src: 'CONTRIBUTING.md', slug: 'project/contributing', order: 2 },
 	{ src: 'SECURITY.md', slug: 'project/security', order: 3 },
+	{ src: 'tui/README.md', slug: 'project/ios-tui', title: 'Inside ios-tui', order: 4 },
 	{ src: 'docs/realities/README.md', slug: 'realities', label: 'Overview', order: 0 },
 	{ src: 'docs/adr/README.md', slug: 'decisions', label: 'Overview', order: 0 },
 ];
