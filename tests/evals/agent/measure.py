@@ -286,9 +286,10 @@ class RunResult:
     faults: dict[str, int] = field(default_factory=dict)
     #: Runner crashes the auto-heal absorbed. The run still passed.
     recoveries: int = 0
-    #: Report-scored tasks only: which planted bugs the report named, the
-    #: lines that complained about something else (to be read by hand), and the
-    #: report itself, kept so the hand reading can be redone.
+    #: Report-scored tasks only: which planted bugs the report named, and the
+    #: lines that complained about something else (to be read by hand). The
+    #: report itself is kept for these and for every claimed run, so the hand
+    #: reading can be redone.
     planted: dict[str, bool] = field(default_factory=dict)
     expected: tuple[str, ...] = ()
     false_report_candidates: tuple[str, ...] = ()
@@ -401,6 +402,9 @@ class RunResult:
             out["claimed"] = self.claimed
             out["verified"] = self.verified
             out["achieved"] = self.achieved
+            # The agent's own words, so a claim the device disagrees with can
+            # be read by hand before it is believed, as ADR 0024 requires.
+            out["report"] = self.report
         if self.planted:
             out["planted"] = self.planted
             out["expected"] = list(self.expected)
@@ -613,12 +617,12 @@ async def run_task(
         verified=meter.outcome.verified if meter.outcome is not None else None,
         achieved=achieved if claim is not None else None,
         claim=claim,
+        report=meter.report if claim is not None or task.report_scored else "",
         **(
             {
                 "planted": dict(scored.caught),
                 "expected": scored.expected,
                 "false_report_candidates": scored.false_report_candidates,
-                "report": meter.report,
             }
             if task.report_scored
             else {}

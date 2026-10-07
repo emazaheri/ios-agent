@@ -139,6 +139,7 @@ async def test_a_wrong_answer_read_off_the_right_screen_is_a_false_success() -> 
 
     assert result.claim == FALSE_SUCCESS
     assert CARD.done(CARD.model(), "Let's get together") is True
+    assert result.to_dict()["report"] == "They want to go hiking", "kept for the hand reading"
     assert result.passed is False, "the screen held the answer and the agent gave another"
 
 
