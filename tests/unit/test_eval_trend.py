@@ -160,6 +160,29 @@ def test_the_turn_counts_are_guarded() -> None:
     assert any("turn_floor" in line for line in drift)
 
 
+def test_the_claim_counts_are_recorded_and_never_guarded() -> None:
+    """A model decides them, so they are a record, not a guard (ADR 0024).
+
+    The oracle makes no claim, so its rows carry an empty histogram and no
+    rate, and a model row that moved them must not read as drift.
+    """
+    assert {"claims", "false_success_rate", "verifier_recall"}.isdisjoint(CHECKED)
+    assert flatten(TASK_REPORT, suite="agent-oracle")["claims"] == {}
+    assert flatten(TASK_REPORT, suite="agent-oracle")["false_success_rate"] is None
+
+    claimed = json.loads(json.dumps(TASK_REPORT))
+    claimed["totals"]["claims"] = {"true_success": 3, "false_success": 1}
+    claimed["totals"]["false_success_rate"] = 0.25
+    claimed["totals"]["verifier_recall"] = 0.0
+    record = flatten(claimed, suite="agent-model")
+
+    assert record["claims"] == {"true_success": 3, "false_success": 1}
+    assert record["false_success_rate"] == 0.25
+    assert record["verifier_recall"] == 0.0
+    assert compare(record, flatten(TASK_REPORT, suite="agent-model")) == []
+    assert "false success 0.25" in render([record], 10)
+
+
 def test_rendering_an_empty_history_says_so() -> None:
     assert render([], 10) == "no runs recorded yet"
 

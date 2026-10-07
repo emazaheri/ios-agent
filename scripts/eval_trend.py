@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a record's shape changes in a way a reader must notice.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Committed, unlike the reports themselves. It lives beside the suites that
 #: produce it rather than at the repository root, where `evals/` would read as
@@ -59,8 +59,10 @@ CHECKED = (
     "faults",
 )
 
-#: Recorded and shown, never checked. The runner decides these.
-UNCHECKED = ("seconds",)
+#: Recorded and shown, never checked. The runner decides `seconds`, and a
+#: model decides the claim counts (ADR 0024), which the oracle series never
+#: has: it makes no claim, so its values are always empty.
+UNCHECKED = ("seconds", "claims", "false_success_rate", "verifier_recall")
 
 #: Not a count and deliberately not in `CHECKED`. It identifies the system that
 #: produced the counts, so it decides whether comparing them means anything at
@@ -97,6 +99,9 @@ _KEY_ORDER = (
     "seconds",
     "resolution_tiers",
     "faults",
+    "claims",
+    "false_success_rate",
+    "verifier_recall",
     "note",
 )
 
@@ -180,6 +185,12 @@ def flatten(report: dict[str, Any], *, suite: str, note: str | None = None) -> d
         "seconds": totals.get("seconds", 0.0),
         "resolution_tiers": totals.get("resolution_tiers", {}),
         "faults": totals.get("faults", {}),
+        # The agent's done(succeeded) claim against the device: a histogram of
+        # categories, false successes over success claims, and the share of
+        # those the agent's own check caught. Empty and None without a model.
+        "claims": totals.get("claims", {}),
+        "false_success_rate": totals.get("false_success_rate"),
+        "verifier_recall": totals.get("verifier_recall"),
         "note": note,
     }
     return {key: record[key] for key in _KEY_ORDER}
@@ -255,6 +266,8 @@ def render(rows: list[dict[str, Any]], last: int) -> str:
         detail = f"    tiers {tiers or '{}'}"
         if faults:
             detail += f"  faults {faults}"
+        if row.get("claims"):
+            detail += f"  claims {row['claims']}  false success {row.get('false_success_rate')}"
         if row.get("note"):
             detail += f"  ({row['note']})"
         lines.append(detail)

@@ -90,30 +90,4 @@ async def drive(task: Task, session: IosSession, meter: Meter) -> None:
     outcome = await run_goal(
         session, task.goal, backend=backend, max_steps=task.max_steps, task_id=task.name
     )
-
-    # The backend counts at the point the call is made, which is the only
-    # place that can distinguish an explicit observation from a screen that
-    # arrived folded into an action's result.
-    meter.observations = backend.stats.observations
-    meter.finds = backend.stats.finds
-    meter.actions = backend.stats.actions
-    meter.device_tokens = backend.stats.device_tokens
-    meter.refusals = backend.stats.refusals
-    # Turns come off the run rather than the backend: they are model calls,
-    # and the backend never sees one. Nothing sets `meter.outcomes` on this
-    # path, so `turn_floor` stays 0 for a model run; the ceiling is the
-    # oracle's to declare and this column is what gets measured against it.
-    meter.turns = outcome.turns
-    meter.model_served = outcome.model_served
-    meter.charge_model(
-        outcome.prompt_tokens,
-        outcome.completion_tokens,
-        outcome.cache_read_tokens,
-        outcome.cache_write_tokens,
-    )
-    meter.last_screen = backend.last_screen
-    # The report, for the tasks scored on one. Read from the agent's own
-    # summary, which is the one place its findings are written down.
-    meter.report = outcome.summary
-    # None unless the run was traced (`--trace-agent` or IOS_AGENT_TRACING).
-    meter.trace_id = outcome.trace_id
+    meter.take(outcome, backend)
