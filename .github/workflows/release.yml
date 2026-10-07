@@ -78,6 +78,50 @@ jobs:
 
       - uses: pypa/gh-action-pypi-publish@release/v1
 
+  # The MCP registry entry, which pointed at 0.1.1 through five releases
+  # because publishing it was a manual step that needed a person's GitHub
+  # login. The registry accepts this workflow's OIDC token as proof of the
+  # io.github.emazaheri namespace, so, like PyPI, no secret exists to leak.
+  #
+  # After PyPI, because the registry checks the package is there and that its
+  # published README carries the `mcp-name:` line before it lists anything.
+  registry:
+    name: publish to the MCP registry
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # the OIDC credential
+      contents: read
+    env:
+      # Pinned, and checked against the checksum the release publishes. The
+      # registry's own example fetches whatever is latest, which would run an
+      # unreviewed binary holding this job's credential. Bump both together.
+      PUBLISHER_VERSION: v1.8.1
+      PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install mcp-publisher
+        run: |
+          curl -fsSL -o publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${PUBLISHER_SHA256}  publisher.tar.gz" | sha256sum --check
+          tar xzf publisher.tar.gz mcp-publisher
+
+      # PyPI's JSON for a new version can lag the upload by a little.
+      - name: wait for PyPI to serve this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for _ in $(seq 30); do
+            curl -fsS -o /dev/null "https://pypi.org/pypi/ios-mcp/${version}/json" && exit 0
+            sleep 10
+          done
+          echo "PyPI never served ios-mcp ${version}" >&2
+          exit 1
+
+      - run: ./mcp-publisher login github-oidc
+      - run: ./mcp-publisher publish
+
   # Last, and only if PyPI accepted the upload. A GitHub Release is an
   # announcement, and announcing a version nobody can install is the same
   # mistake as a registry manifest pointing at one, which cost 0.1.1.
@@ -87,7 +131,7 @@ jobs:
   # also be able to write to the repository.
   announce:
     name: github release
-    needs: publish
+    needs: registry   # which needs publish: announce only what can be installed and found
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the release, and nothing else
