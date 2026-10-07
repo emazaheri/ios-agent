@@ -180,13 +180,11 @@ ApprovalModal {
 }
 
 #approval-reason,
-#approval-signature,
 #approval-goal {
     column-span: 2;
     height: auto;
 }
 
-#approval-signature,
 #approval-goal {
     color: $text-muted;
 }

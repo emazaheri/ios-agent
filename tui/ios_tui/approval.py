@@ -44,7 +44,6 @@ class ApprovalModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         action = str(self.request.get("action", "an action"))
         reason = str(self.request.get("reason") or "it matched a destructive rule")
-        signature = str(self.request.get("signature") or "")
         goal = str(self.request.get("goal") or "")
 
         with Grid(id="approval"):
@@ -53,7 +52,6 @@ class ApprovalModal(ModalScreen[bool]):
             # has to read before answering, and a `Static` defaults to clipping
             # what does not fit.
             yield Static(Text(reason), id="approval-reason")
-            yield Static(Text(f"on: {signature}"), id="approval-signature")
             yield Static(Text(f"goal: {goal}"), id="approval-goal")
             yield Button("Refuse  (n)", variant="primary", id="refuse")
             yield Button("Allow  (y)", variant="error", id="allow")

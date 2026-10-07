@@ -72,7 +72,7 @@ class Printer:
                     note = "  already as asked (nothing to do)"
                 self._line(f"    {verb:<12} {target[:44]:<44} {ms:>5}ms{note}")
             case ApprovalAsked(request=request):
-                self._line(f"\n  ? {request.get('action')} on {request.get('signature')}")
+                self._line(f"\n  ? allow {request.get('action')}")
                 self._line(f"    {request.get('reason')}")
             case ApprovalAnswered(allowed=allowed):
                 self._line(f"    -> {'allowed' if allowed else 'refused'}\n")
