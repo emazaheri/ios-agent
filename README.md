@@ -15,7 +15,7 @@ Claude Code or any MCP client, or as a Python library.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-1054%20offline-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1061%20offline-brightgreen.svg)](#development)
 
 ![ios-agent answering a question by driving Apple Maps](docs/images/demo.gif)
 
@@ -509,7 +509,7 @@ engine has to live on a Mac, which is why this project has no iOS app.
 ## Development
 
 ```bash
-uv run pytest tests/unit          # 820 tests, no device, no model
+uv run pytest tests/unit          # 827 tests, no device, no model
 uv run pytest tests/tui           # 234 tests, the terminal front end
 uv run pytest tests/integration   # 18 simulator + 3 device tests
 uv run pytest tests/evals -s      # golden flows, with cost per flow
@@ -563,7 +563,7 @@ ios-mcp    library + MCP server   depends on neither
 
 Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 the setup, the loop, and the five conventions that are load bearing rather than
-stylistic. CI runs ruff, mypy and the 1054 offline tests on Linux and macOS.
+stylistic. CI runs ruff, mypy and the 1061 offline tests on Linux and macOS.
 
 ## License
 
