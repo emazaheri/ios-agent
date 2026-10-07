@@ -32,6 +32,7 @@ export IOS_AGENT_MODEL=gpt-5.5
 | `IOS_AGENT_MODEL` | `claude-opus-5` | Change together with the provider |
 | `IOS_AGENT_MAX_TOKENS` | `16000` | Thinking and the reply share this budget |
 | `IOS_AGENT_EFFORT` | `medium` | Anthropic only, silently skipped elsewhere |
+| `IOS_AGENT_PROMPT_CACHE` | `true` | Anthropic only, see below |
 | `IOS_AGENT_TEMPERATURE` | unset | Never sent unless set, see below |
 | `IOS_AGENT_MAX_STEPS` | `24` | Turns before the loop gives up |
 | `IOS_AGENT_EXTRA` | `{}` | Passed through untouched, overrides everything above |
@@ -41,6 +42,10 @@ wrong model is an error rather than a no-op:
 
 - **`effort`** is an Anthropic concept, sent as `output_config`. It is skipped
   entirely for every other provider.
+- **`prompt_cache`** sends `cache_control`, Anthropic only: one breakpoint at
+  the end of the system prompt, which every run shares, and automatic caching
+  on the transcript, which every turn re-sends. Other providers cache without
+  being asked and are sent nothing. See `docs/adr/0022`.
 - **`temperature`** is never sent unless you set it. Claude Opus 5, Opus 4.8,
   Opus 4.7 and Sonnet 5 reject it with a 400, so it cannot be a default. On
   providers that accept it, setting it works normally.

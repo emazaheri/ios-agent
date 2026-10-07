@@ -20,7 +20,7 @@ from collections.abc import Awaitable, Callable
 from importlib import resources
 from typing import Any
 
-from langchain.messages import AIMessage, AnyMessage
+from langchain.messages import AIMessage, AnyMessage, SystemMessage
 from langgraph.types import Command
 
 from ios_agent.backend import Backend, SessionBackend
@@ -52,6 +52,30 @@ def operator_prompt() -> str:
     return (resources.files("ios_agent") / "prompts" / "operator.md").read_text()
 
 
+def cache_breakpoint(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """The same transcript, with a cache breakpoint at the end of the system prompt.
+
+    Automatic caching, which `AgentSettings.bind_kwargs` turns on, puts its
+    breakpoint on the last block, so it serves the turns of one run and never
+    the first turn of the next: that run's goal differs, and the goal comes
+    straight after the system prompt. Tools and system prompt are the same
+    for every run, and this marker is what lets a run start on a cache hit.
+
+    A copy, made at call time. The graph's own state keeps the plain system
+    message, so the transcript stays provider-neutral and every turn sends the
+    same bytes for it.
+    """
+    if not messages or not isinstance(messages[0], SystemMessage):
+        return messages
+    system = messages[0]
+    if not isinstance(system.content, str):
+        return messages
+    marked = SystemMessage(
+        content=[{"type": "text", "text": system.content, "cache_control": {"type": "ephemeral"}}]
+    )
+    return [marked, *messages[1:]]
+
+
 def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
     """Bind whichever provider is configured to a tool list.
 
@@ -79,10 +103,11 @@ def chat_model(settings: AgentSettings | None = None) -> ModelFactory:
             # that installs it in this repository.
             raise ImportError(f"{exc}\n{cfg.missing_package_hint()}") from exc
 
-        bound = chat.bind_tools(tools)
+        bound = chat.bind_tools(tools, **cfg.bind_kwargs())
+        caching = cfg.caches_prompt
 
         async def call(messages: list[AnyMessage]) -> AIMessage:
-            reply = await bound.ainvoke(messages)
+            reply = await bound.ainvoke(cache_breakpoint(messages) if caching else messages)
             assert isinstance(reply, AIMessage)
             return reply
 

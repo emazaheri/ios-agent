@@ -1,9 +1,14 @@
-"""Prompt caching, as the meter sees it.
+"""Prompt caching: asked for only where it means something, and seen where it happens.
 
+Two halves, and the second matters more than the first. Asking Anthropic to
+cache is a parameter that must not leak to any other provider, the same rule
+`effort` follows. Seeing a cache hit is what makes the request worth anything:
 LangChain counts cached tokens inside `input_tokens`, so a harness that reads
-only the total prices a cached token like any other. OpenAI caches a repeated
-prefix without being asked, so every figure recorded against it may overstate
-what the run cost. These assert that a cache hit is counted and priced as one.
+only the total prices a cached token like any other, and caching would save
+money on the bill while every recorded figure said it saved nothing.
+
+No network anywhere. `ChatAnthropic` builds its request payload without
+sending it, which is the shape the API would receive.
 """
 
 from __future__ import annotations
@@ -13,13 +18,78 @@ from typing import Any
 
 import pytest
 from ios_agent.config import AgentSettings
-from ios_agent.loop import run_goal
-from langchain.messages import AIMessage, AnyMessage
+from ios_agent.graph import opening_messages
+from ios_agent.loop import cache_breakpoint, run_goal
+from langchain.messages import AIMessage, AnyMessage, HumanMessage
 from measure import RunResult
 from screens import DeviceModel, build_session
 from scripted_model import ScriptedModel
 
 from ios_mcp.config import Settings
+
+_EPHEMERAL = {"type": "ephemeral"}
+
+
+def test_cache_control_is_bound_only_for_anthropic() -> None:
+    assert AgentSettings().bind_kwargs() == {"cache_control": _EPHEMERAL}
+
+    for provider in ("openai", "google_genai", "ollama", "bedrock_converse"):
+        cfg = AgentSettings(provider=provider, model="whatever")
+        assert cfg.bind_kwargs() == {}, f"{provider} was sent Anthropic's cache_control"
+        assert not cfg.caches_prompt
+
+
+def test_prompt_caching_can_be_turned_off() -> None:
+    cfg = AgentSettings(prompt_cache=False)
+    assert cfg.bind_kwargs() == {}
+    assert "prompt_cache" not in cfg.describe()
+
+
+def test_a_report_names_whether_the_prompt_was_cached() -> None:
+    """The two arms of ADR 0022 must not share a model string."""
+    assert AgentSettings().describe() == "anthropic:claude-opus-5 effort=medium prompt_cache=True"
+    assert "prompt_cache" not in AgentSettings(provider="openai", model="gpt-5.5").describe()
+
+
+def test_cache_control_is_not_a_constructor_argument() -> None:
+    """It is a per-request field. Built into the client, it would not be sent."""
+    assert "cache_control" not in AgentSettings().chat_kwargs()
+
+
+def test_the_breakpoint_marks_the_system_prompt_and_nothing_else() -> None:
+    messages = opening_messages("You drive a phone.", "Turn on Bold Text.")
+
+    marked = cache_breakpoint(messages)
+
+    assert marked[0].content == [
+        {"type": "text", "text": "You drive a phone.", "cache_control": _EPHEMERAL}
+    ]
+    assert marked[1:] == messages[1:]
+    # A copy: the graph's state keeps the plain prompt, so the transcript it
+    # hands any provider is unchanged.
+    assert messages[0].content == "You drive a phone."
+
+
+def test_a_transcript_without_a_system_prompt_is_left_alone() -> None:
+    messages: list[AnyMessage] = [HumanMessage(content="hi")]
+    assert cache_breakpoint(messages) is messages
+    assert cache_breakpoint([]) == []
+
+
+def test_anthropic_receives_both_breakpoints() -> None:
+    """What reaches the wire: a marked system block and the top-level field."""
+    from langchain_anthropic import ChatAnthropic
+
+    cfg = AgentSettings()
+    chat = ChatAnthropic(model=cfg.model, api_key="sk-test", **cfg.chat_kwargs())  # type: ignore[arg-type]
+    messages = cache_breakpoint(opening_messages("You drive a phone.", "Turn on Bold Text."))
+
+    payload = chat._get_request_payload(messages, **cfg.bind_kwargs())
+
+    assert payload["system"] == [
+        {"type": "text", "text": "You drive a phone.", "cache_control": _EPHEMERAL}
+    ]
+    assert payload["cache_control"] == _EPHEMERAL
 
 
 def _settings() -> Settings:

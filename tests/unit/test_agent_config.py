@@ -22,7 +22,7 @@ def test_the_default_is_claude_but_the_loop_does_not_require_it() -> None:
     cfg = AgentSettings()
     assert cfg.provider == "anthropic"
     assert cfg.model == "claude-opus-5"
-    assert cfg.describe() == "anthropic:claude-opus-5 effort=medium"
+    assert cfg.describe() == "anthropic:claude-opus-5 effort=medium prompt_cache=True"
 
 
 def test_effort_is_sent_only_to_anthropic() -> None:

@@ -43,13 +43,18 @@ KNOWN_EXTRAS: dict[str, str] = {
 }
 
 #: Parameters only Anthropic understands, skipped for every other provider.
-_ANTHROPIC_ONLY = ("effort",)
+_ANTHROPIC_ONLY = ("effort", "prompt_cache")
 
 #: Anthropic's 5-minute cache: a read costs a tenth of an input token and a
 #: write a quarter more. The defaults for the two cache prices when they are
 #: not set, because the default provider is Anthropic.
 _CACHE_READ_MULTIPLIER = 0.1
 _CACHE_WRITE_MULTIPLIER = 1.25
+
+#: What `prompt_cache` sends. Five minutes, the default TTL: a turn and the
+#: run after it start well inside that, so the 1-hour TTL would only double
+#: the price of every write.
+_EPHEMERAL = {"type": "ephemeral"}
 
 #: Where each provider's credential is usually found. Deliberately incomplete,
 #: and treated as a hint rather than a requirement.
@@ -98,6 +103,13 @@ class AgentSettings(BaseSettings):
     #: entirely for other providers. On Claude Opus 5 this is the cost lever,
     #: because `temperature` is not available.
     effort: str | None = "medium"
+
+    #: Anthropic only, like `effort`. Asks the API to cache the prompt prefix:
+    #: tools and system prompt, which every run shares, and the transcript,
+    #: which every turn of a run re-sends. Other providers decide for
+    #: themselves (OpenAI caches a repeated prefix without being asked), so
+    #: nothing is sent to them. Under measurement: see docs/adr/0022.
+    prompt_cache: bool = True
 
     #: Left unset by default and not sent when unset. Claude Opus 5, Opus 4.8,
     #: Opus 4.7 and Sonnet 5 reject it with a 400, so it cannot be a default;
@@ -163,6 +175,23 @@ class AgentSettings(BaseSettings):
             kwargs["output_config"] = {"effort": self.effort}
         kwargs.update(self.extra)
         return kwargs
+
+    @property
+    def caches_prompt(self) -> bool:
+        """Whether this configuration marks the prompt for caching."""
+        return self.provider == "anthropic" and self.prompt_cache
+
+    def bind_kwargs(self) -> dict[str, Any]:
+        """Per-request parameters, bound with the tools rather than built in.
+
+        `cache_control` is a field on each request, not on the client, so it
+        does not belong in `chat_kwargs`: `ChatAnthropic` would not take it at
+        construction. Bound here it turns on automatic caching, which moves a
+        breakpoint to the end of the transcript on every turn.
+        """
+        if self.caches_prompt:
+            return {"cache_control": dict(_EPHEMERAL)}
+        return {}
 
     def describe(self) -> str:
         """A one-line identity for reports, so a number names its model."""
