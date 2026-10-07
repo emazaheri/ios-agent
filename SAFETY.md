@@ -37,13 +37,15 @@ Two modes:
 
 - The MCP client supports elicitation: the human is asked directly, with the
   action and target named.
-- It does not: the call raises `action_requires_approval` carrying a signature.
-  The caller confirms with the user, then repeats the call with
+- It does not, or the question cannot be delivered: the call raises
+  `action_requires_approval` carrying a signature, and nothing happens on the
+  device. The caller confirms with the user, then repeats the call with
   `approve=<signature>`. This is the path an external human-in-the-loop layer
   uses.
 
-A client that cannot answer is treated as refusal. An unanswerable question is
-not consent.
+Nothing gated runs until someone has said yes. An unanswerable question is not
+consent, and it is not a refusal either: the caller is told nobody was asked,
+rather than that the user declined.
 
 Approval is scoped to one specific action. Approving Send does not approve
 Delete, and a refusal is never cached as consent.
@@ -60,6 +62,15 @@ The value is read from the host keychain and sent straight to the device. It
 appears in no prompt, no tool result, and no audit entry. It is also
 deliberately not run through the destructive-text rules, since a password
 containing the word "delete" is not an instruction.
+
+A password field shows dots, so the screen never holds the value. Any other
+field shows it, and an app may repeat it ("No results for ..."). So from the
+moment a secret is typed, the session replaces it with `[secret]` in every
+screen, search result, read and audit entry it returns, for the rest of the
+session. Two limits: a value shorter than four characters is not scrubbed,
+because removing every occurrence of it would wreck the screen, and a
+screenshot is a picture, which nothing here edits. Type secrets into password
+fields.
 
 Store one with:
 

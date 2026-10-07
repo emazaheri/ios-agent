@@ -55,7 +55,10 @@ from ios_mcp.wda.session import SPRINGBOARD_BUNDLE_ID, WdaSession
 logger = logging.getLogger(__name__)
 
 Direction = Literal["up", "down", "left", "right"]
-ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool]]
+#: Asks a human about one gated action. True allows it and False refuses it.
+#: None means nobody could be asked, which is not consent either: the action is
+#: refused with a signature the caller can pass back once it has asked.
+ApprovalHandler = Callable[[str, "Verdict", "Target | None"], Awaitable[bool | None]]
 
 #: Fraction of a scrollable area traversed by one scroll gesture.
 _SCROLL_FRACTION = 0.6
@@ -404,6 +407,12 @@ class IosSession:
         a password never becomes part of a transcript.
         """
         secret = await resolve_secret(secret_ref)
+        if not self.redactor.remember_secret(secret):
+            logger.warning(
+                "Secret %r is too short to scrub from screens; it will show wherever "
+                "the field does not mask it",
+                secret_ref,
+            )
         return await self.type_text(
             secret,
             ref=ref,
@@ -913,14 +922,16 @@ class IosSession:
         if self.gate.is_approved(signature):
             return
 
-        if self.on_approval is None:
+        answer = (
+            None if self.on_approval is None else await self.on_approval(action, verdict, target)
+        )
+        if answer is None:
             raise ActionRequiresApproval(
                 verdict.reason or f"{action} needs approval",
                 hint=(f"Confirm with the user, then repeat the call with approve={signature!r}."),
                 details={"signature": signature, "verdict": verdict.to_dict()},
             )
-
-        if not await self.on_approval(action, verdict, target):
+        if not answer:
             raise ActionRejectedByPolicy(
                 f"The user declined: {verdict.reason}",
                 hint="Do not retry this action. Ask what they would like instead.",

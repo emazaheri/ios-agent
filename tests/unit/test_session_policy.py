@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fake_device import make_session
+from fake_wda import FakeField
 from trees import form_screen, node, settings_screen
 
 from ios_mcp.errors import (
@@ -143,6 +146,60 @@ async def test_typing_a_secret_keeps_it_out_of_the_result_and_the_audit(monkeypa
     assert "hunter2" in fake.typed(), "the device still receives the real value"
     assert "hunter2" not in str(result.to_dict())
     assert "hunter2" not in str(session.audit.to_dict())
+
+
+async def test_a_secret_stays_out_of_every_later_screen(monkeypatch) -> None:
+    """An ordinary field shows what was typed, so the screen after it does too.
+
+    Found on a simulator: typed into Settings search, the value came back as the
+    field's value in the action's own result and again in "No Results for ...".
+    A password field shows dots, but nothing stops a caller using another kind.
+    """
+    monkeypatch.setenv("IOS_MCP_SECRET_TEST_PASSWORD", "hunter2")
+    session, fake, _ = make_session(form_screen())
+    await session.observe()
+
+    class SearchField(FakeField):
+        def receive(self, keys: str) -> None:
+            super().receive(keys)
+            fake.source_tree = node(
+                "Application",
+                label="Settings",
+                h=852,
+                children=[
+                    node("SearchField", label="Search", value=self.text, y=100),
+                    node("StaticText", label=f"No Results for \u201c{self.text}\u201d", y=200),
+                ],
+            )
+
+    fake.focused_field = SearchField()
+    result = await session.type_secret("test-password")
+    later = await session.observe()
+
+    returned = result.digest.nodes if result.digest else result.delta.added if result.delta else []
+    assert any("hunter2" in f"{n.label} {n.value}" for n in returned), (
+        "the screen never showed the value, so this proves nothing"
+    )
+    for shown in (
+        json.dumps(result.to_dict()),
+        json.dumps(later.to_dict(include_elements=True)),
+        later.render(),
+        await session.read_text(),
+        json.dumps(session.audit.to_dict()),
+    ):
+        assert "hunter2" not in shown
+    assert "[secret]" in later.render(), "the screen should still say something is there"
+
+
+async def test_a_secret_too_short_to_scrub_is_still_typed(monkeypatch) -> None:
+    monkeypatch.setenv("IOS_MCP_SECRET_PIN", "42")
+    session, fake, _ = make_session(form_screen())
+    await session.observe()
+
+    result = await session.type_secret("pin", target="To:")
+
+    assert result.ok
+    assert "42" in fake.typed()
 
 
 async def test_a_secret_is_not_run_through_the_destructive_text_rules(monkeypatch) -> None:

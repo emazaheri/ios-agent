@@ -60,29 +60,31 @@ class ServerContext:
         await self.pool.release_all()
 
 
-async def _elicit_approval(action: str, verdict: Verdict, target: Target | None) -> bool:
+async def _elicit_approval(action: str, verdict: Verdict, target: Target | None) -> bool | None:
     """Ask the human, through the MCP client, before doing something destructive.
 
-    Elicitation keeps the decision with the person rather than the model. When
-    the client does not support it, the action is refused rather than allowed:
-    an unanswerable question is not consent.
+    Elicitation keeps the decision with the person rather than the model. A
+    client that cannot be asked gets None back to the session, which refuses
+    the action with a signature: the documented path for a caller that asks
+    the person itself and repeats the call with `approve=`. Returning False
+    there instead told that caller "the user declined" when nobody had been
+    asked, and left the signature path advertised by every gated tool
+    unreachable over the protocol.
     """
-    what = target.describe if target else action
+    what = f"{action} on {target.describe}" if target else action
     question = (
-        f"Allow {action} on {what}?\n"
-        f"{verdict.reason}\n"
-        f"This affects the real device and may not be reversible."
+        f"Allow {what}?\n{verdict.reason}\nThis affects the real device and may not be reversible."
     )
     try:
         context = get_context()
     except (LookupError, RuntimeError, AttributeError):
-        logger.warning("No MCP context available for approval; refusing %s", action)
-        return False
+        logger.warning("No MCP context available for approval of %s", action)
+        return None
 
     try:
         result: Any = await context.elicit(question, response_type=None)
     except Exception as exc:
-        logger.warning("Elicitation failed (%s); refusing %s", exc, action)
-        return False
+        logger.warning("Could not ask about %s (%s); handing it back to the caller", action, exc)
+        return None
 
     return getattr(result, "action", None) == "accept"
