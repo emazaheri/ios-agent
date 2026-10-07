@@ -93,6 +93,10 @@ class FakeWda:
     window: dict[str, float] = field(default_factory=lambda: {"width": 393, "height": 852})
     alert_text: str | None = None
     alert_buttons: list[str] = field(default_factory=lambda: ["Cancel", "OK"])
+    #: An alert `/alert/accept` reports pressing and leaves standing. The
+    #: "Open in ...?" a custom-scheme deep link raises did exactly that on an
+    #: iOS 27 simulator, and the action said ok.
+    alert_ignores_endpoint: bool = False
     app_states: dict[str, int] = field(default_factory=dict)
     #: Which app is in front. A launch moves it, because the digest header
     #: names the foreground app and a fake that always said Settings would
@@ -202,7 +206,8 @@ class FakeWda:
                 return self._error(404, "no such alert")
             return self._ok(self.alert_buttons)
         if tail in ("/alert/accept", "/alert/dismiss"):
-            self.alert_text = None
+            if not self.alert_ignores_endpoint:
+                self.alert_text = None
             return self._ok(None)
         if tail == "/wda/apps/state":
             return self._ok(self.app_states.get((body or {}).get("bundleId", ""), 1))

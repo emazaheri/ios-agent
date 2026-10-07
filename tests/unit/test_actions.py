@@ -255,6 +255,55 @@ async def test_handling_an_alert_clears_it() -> None:
     assert result.alert is None
 
 
+def _open_in_alert() -> dict:
+    """SpringBoard's "Open in ...?", the way it reads in the tree."""
+    return node(
+        "Application",
+        label="SpringBoard",
+        h=852,
+        children=[
+            node("Alert", label="Open in \u201cNotes\u201d?", y=400, h=100),
+            node("Button", label="Cancel", x=60, y=451, w=140, h=48),
+            node("Button", label="Open", x=205, y=451, w=140, h=48),
+        ],
+    )
+
+
+async def test_an_alert_that_ignores_the_endpoint_is_tapped_instead() -> None:
+    """Found on an iOS 27 simulator: accept said ok and the alert stayed."""
+    session, fake, _ = make_session(_open_in_alert())
+    fake.alert_text = "Open in \u201cNotes\u201d?"
+    fake.alert_buttons = ["Cancel", "Open"]
+    fake.alert_ignores_endpoint = True
+    tapped: list[object] = []
+
+    def on_tap(path: str, body: object) -> None:
+        if path.endswith("/wda/tap"):
+            tapped.append(body)
+            fake.alert_text = None
+
+    fake.on_gesture = on_tap
+
+    result = await session.handle_alert("accept", "Open")
+
+    assert result.ok is True
+    assert len(tapped) == 1
+    assert "tapped instead" in (result.note or "")
+
+
+async def test_an_alert_that_will_not_go_is_a_failure_not_a_success() -> None:
+    session, fake, _ = make_session(_open_in_alert())
+    fake.alert_text = "Open in \u201cNotes\u201d?"
+    fake.alert_buttons = ["Cancel", "Open"]
+    fake.alert_ignores_endpoint = True
+
+    result = await session.handle_alert("accept", "Open")
+
+    assert result.ok is False
+    assert result.alert is not None
+    assert session.audit.entries[-1].code == "alert_not_handled"
+
+
 async def test_press_button_rejects_an_unknown_name() -> None:
     session, _, _ = make_session(settings_screen())
     with pytest.raises(InvalidArgument) as exc_info:

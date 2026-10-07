@@ -658,8 +658,32 @@ class IosSession:
         async with self._auditing(f"handle_alert:{action}", {"button": button}):
             started = time.monotonic()
             before = await self.snapshot()
+            shown = await self.wda.alert()
             await self.wda.handle_alert(action, button)
             outcome = await self._settle(baseline=before.fingerprint)
+
+            # The endpoint can report a press and leave the alert standing: the
+            # "Open in ...?" a deep link raises did, on an iOS 27 simulator. A
+            # tap on the same button in the tree worked, so that is the second
+            # try, and an alert that survives both is reported, not claimed.
+            note = None
+            if shown is not None and await self._same_alert(shown):
+                # Accept is the last button and dismiss the first, which is how
+                # iOS lays out "Cancel, Open" and "Don't Allow, Allow".
+                buttons = shown.buttons
+                label = button or (
+                    (buttons[-1] if action == "accept" else buttons[0]) if buttons else None
+                )
+                node = next(
+                    (n for n in outcome.digest.nodes if n.role == "button" and n.label == label),
+                    None,
+                )
+                if node is not None:
+                    await self.wda.tap(*node.rect.center)
+                    outcome = await self._settle(baseline=outcome.digest.fingerprint)
+                    note = f"the alert ignored {action}, so {label!r} was tapped instead"
+            standing = shown if shown is not None and await self._same_alert(shown) else None
+            handled = standing is None
             return await self._finish(
                 f"handle_alert:{action}",
                 before,
@@ -667,7 +691,16 @@ class IosSession:
                 target=None,
                 started=started,
                 args={"action": action, "button": button},
+                note=note if standing is None else f"the alert {standing.text!r} is still showing",
+                ok=handled,
+                code=None if handled else ErrorCode.ALERT_NOT_HANDLED.value,
+                error=None if handled else "the alert is still showing",
             )
+
+    async def _same_alert(self, shown: AlertInfo) -> bool:
+        """Is the alert that was showing still the one showing?"""
+        now = await self.wda.alert()
+        return now is not None and now.text == shown.text
 
     async def wait_for(
         self,
