@@ -42,7 +42,7 @@ from ios_mcp.perception.digest import Digest, build_digest
 from ios_mcp.perception.find import DEFAULT_LIMIT, FindResult, find_in_tree
 from ios_mcp.perception.refs import RefTable, Target
 from ios_mcp.perception.resolve import resolve as resolve_target
-from ios_mcp.perception.roles import SETTABLE_ROLES
+from ios_mcp.perception.roles import SETTABLE_ROLES, TYPEABLE_ROLES
 from ios_mcp.perception.vision import annotate, ensure_available, fit
 from ios_mcp.policy.audit import AuditTrail
 from ios_mcp.policy.faults import Fault, classify
@@ -365,6 +365,7 @@ class IosSession:
             ref=ref,
             target=target,
             role=None,
+            prefer_roles=TYPEABLE_ROLES,
             idem_key=idem_key,
             require_target=False,
             note="typed a secret" if _redact else None,

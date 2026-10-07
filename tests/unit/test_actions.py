@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 from fake_device import make_session
+from fake_wda import FakeField
 from trees import form_screen, list_screen, node, settings_screen
 
 from ios_mcp.config import Settings
 from ios_mcp.errors import (
+    ElementAmbiguous,
     ElementNotFound,
     ElementNotInteractable,
     InvalidArgument,
@@ -302,6 +304,40 @@ async def test_an_alert_that_will_not_go_is_a_failure_not_a_success() -> None:
     assert result.ok is False
     assert result.alert is not None
     assert session.audit.entries[-1].code == "alert_not_handled"
+
+
+def _two_searches() -> dict:
+    """Settings on iOS 27: a "Search" row in the list and a "Search" field."""
+    return node(
+        "Application",
+        label="Settings",
+        h=852,
+        children=[
+            node("Button", label="Search", x=0, y=640, h=54),
+            node("SearchField", label="Search", x=16, y=800, w=300, h=44),
+        ],
+    )
+
+
+async def test_typing_at_a_shared_label_picks_the_field() -> None:
+    """The agent looped on this until the gate halted it: two "Search"es."""
+    session, fake, _ = make_session(_two_searches())
+    fake.focused_field = FakeField()
+    await session.observe()
+
+    result = await session.type_text("wifi", target="Search")
+
+    assert result.target is not None and result.target.role == "searchfield"
+    assert fake.taps()[0][1] > 800, "focused the row rather than the field"
+
+
+async def test_tapping_a_shared_label_is_still_ambiguous() -> None:
+    """Only typing knows which one it means; a tap could want either."""
+    session, _, _ = make_session(_two_searches())
+    await session.observe()
+
+    with pytest.raises(ElementAmbiguous):
+        await session.tap(target="Search")
 
 
 async def test_press_button_rejects_an_unknown_name() -> None:
