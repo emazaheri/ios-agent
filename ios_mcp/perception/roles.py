@@ -164,6 +164,10 @@ SETTABLE_ROLES: frozenset[str] = frozenset(
     {"switch", "slider", "stepper", "picker", "segmented", "checkbox", "radio"}
 )
 
+#: Roles that take typed text. Settings shows a "Search" row and a "Search"
+#: field on one screen, and typing at "Search" was ambiguous between them.
+TYPEABLE_ROLES: frozenset[str] = frozenset({"textfield", "securefield", "searchfield", "textview"})
+
 
 #: Names iOS attaches to purely decorative disclosure glyphs, whether as a
 #: label or as an accessibility id. Their only job is to draw an arrow at the

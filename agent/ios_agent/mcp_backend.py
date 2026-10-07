@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
+from ios_agent.backend import where
 from ios_agent.batch import LastAction
 from ios_agent.verify import Attempt, Verifier
 from ios_mcp.devices.base import AppInfo, best_app_match
@@ -100,13 +101,13 @@ class McpBackend:
         return await self._act(
             ("tap", target.strip().lower(), ""),
             "ios_tap",
-            {"target": target, "idem_key": idem_key},
+            {**where(target), "idem_key": idem_key},
         )
 
     async def type_text(self, text: str, target: str | None, *, idem_key: str) -> str:
         args: dict[str, Any] = {"text": text, "idem_key": idem_key}
         if target:
-            args["target"] = target
+            args.update(where(target))
         return await self._act(
             ("type_text", (target or "").strip().lower(), text.strip().lower()),
             "ios_type",
@@ -117,7 +118,7 @@ class McpBackend:
         return await self._act(
             ("set_value", target.strip().lower(), value.strip().lower()),
             "ios_set_value",
-            {"value": value, "target": target, "idem_key": idem_key},
+            {"value": value, **where(target), "idem_key": idem_key},
         )
 
     async def scroll(self, direction: str, until: str | None, *, idem_key: str) -> str:

@@ -371,6 +371,21 @@ async def test_where_a_run_ended_follows_an_action_that_returned_a_delta() -> No
     assert "=0" in shown, "last_screen should still be what the model last read whole"
 
 
+async def test_the_agent_can_name_an_element_by_ref() -> None:
+    """An ambiguous label is answered with "pass a ref", and the agent's verbs
+    take only `target`. Sent as text, `e15` was looked up as a label."""
+    model = DeviceModel()
+    session, fake, _ = build_session(model, _settings())
+    backend = SessionBackend(session)
+    screen = await backend.observe()
+    ref = next(line.split()[0] for line in screen.splitlines() if '"Accessibility"' in line)
+
+    reply = await backend.tap(ref, idem_key="k1")
+
+    assert "failed" not in reply.splitlines()[0], reply
+    assert fake.taps()
+
+
 async def test_the_loop_stops_when_the_session_halts() -> None:
     """Halting lives in the policy layer and the agent obeys it.
 

@@ -350,3 +350,16 @@ def test_the_mcp_stats_mirror_is_complete() -> None:
     mirrored = {name for name in vars(_Stats()) if not name.startswith("_")}
 
     assert expected == mirrored, f"the mirror is missing {sorted(expected - mirrored)}"
+
+
+async def test_a_ref_reaches_the_server_as_a_ref(served: Any) -> None:
+    """The same rule as the direct backend: `e2` is a ref, not a label."""
+    client, _model, _session, fake = served
+    backend = McpBackend(client)
+    screen = await backend.observe()
+    ref = next(line.split()[0] for line in screen.splitlines() if '"Accessibility"' in line)
+
+    reply = await backend.tap(ref, idem_key="k1")
+
+    assert "failed" not in reply.splitlines()[0], reply
+    assert fake.taps()

@@ -21,6 +21,7 @@ for any agent.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -33,6 +34,30 @@ from ios_mcp.session import IosSession
 #: Matches the digest's own estimate and both eval harnesses, so the numbers
 #: are comparable without converting between units.
 _CHARS_PER_TOKEN = 4
+
+_REF = re.compile(r"e\d+")
+
+
+def where(target: str | None) -> dict[str, str]:
+    """`target` as the session wants it: a ref when it is one, else text.
+
+    An ambiguous label is answered with "Pass a ref from ios_observe instead",
+    and the agent's verbs take only `target`. Sent as text, `e15` was searched
+    for as a label and not found, so the advice the error gave could not be
+    followed. Done here rather than in the tool descriptions, which cost
+    prompt tokens on every turn.
+    """
+    ref, text = split_target(target)
+    if ref is not None:
+        return {"ref": ref}
+    return {} if text is None else {"target": text}
+
+
+def split_target(target: str | None) -> tuple[str | None, str | None]:
+    """`(ref, target)` for the session; see `where`."""
+    if target is not None and _REF.fullmatch(target.strip()):
+        return target.strip(), None
+    return None, target
 
 
 @dataclass
@@ -150,21 +175,24 @@ class SessionBackend:
     # -- actions -----------------------------------------------------------
 
     async def tap(self, target: str, *, idem_key: str) -> str:
+        ref, text = split_target(target)
         return await self._act(
             attempt_key("tap", target),
-            lambda: self.session.tap(target=target, idem_key=idem_key),
+            lambda: self.session.tap(ref=ref, target=text, idem_key=idem_key),
         )
 
     async def type_text(self, text: str, target: str | None, *, idem_key: str) -> str:
+        ref, field = split_target(target)
         return await self._act(
             attempt_key("type_text", target, text),
-            lambda: self.session.type_text(text, target=target, idem_key=idem_key),
+            lambda: self.session.type_text(text, ref=ref, target=field, idem_key=idem_key),
         )
 
     async def set_value(self, value: str, target: str, *, idem_key: str) -> str:
+        ref, text = split_target(target)
         return await self._act(
             attempt_key("set_value", target, value),
-            lambda: self.session.set_value(value, target=target, idem_key=idem_key),
+            lambda: self.session.set_value(value, ref=ref, target=text, idem_key=idem_key),
         )
 
     async def scroll(self, direction: str, until: str | None, *, idem_key: str) -> str:
