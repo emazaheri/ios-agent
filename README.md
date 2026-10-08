@@ -62,6 +62,8 @@ uv run ios-agent "turn on bold text"
 Typical goals: check that a change you just made works in the running app,
 change a setting, read an answer out of an app that has no API, or walk a flow
 on a phone you cannot hand to a test suite.
+[docs/use-cases.md](docs/use-cases.md) lists what works today, with the
+evidence for each and what is not supported yet.
 
 ## Features
 
