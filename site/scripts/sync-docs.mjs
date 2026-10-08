@@ -64,7 +64,7 @@ const README_PAGES = {
 	'start/installation': {
 		title: 'Installation',
 		description: 'What a Mac needs to drive a simulator or a phone, and the three commands that set it up.',
-		order: 5,
+		order: 6,
 	},
 	'concepts/design': {
 		title: 'Design decisions',
@@ -106,8 +106,9 @@ const README_PAGES = {
 // Whole files, each one page. `title` overrides the file's own heading where
 // that heading names a package rather than saying what the page is.
 const FILES = [
-	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 3 },
-	{ src: 'docs/quickstart.md', slug: 'start/quickstart', order: 4 },
+	{ src: 'docs/use-cases.md', slug: 'start/use-cases', order: 3 },
+	{ src: 'docs/comparison.md', slug: 'start/comparison', order: 4 },
+	{ src: 'docs/quickstart.md', slug: 'start/quickstart', order: 5 },
 	{ src: 'docs/check-your-app.md', slug: 'guides/check-your-app', order: 3 },
 	{ src: 'docs/approvals-and-secrets.md', slug: 'guides/approvals-and-secrets', order: 5 },
 	{ src: 'docs/library.md', slug: 'guides/library', title: 'Build on the library', order: 6 },
