@@ -34,6 +34,15 @@ export default defineConfig({
 					tag: 'meta',
 					attrs: { name: 'google-site-verification', content: 'QcZyAv8-qn0GQfXy1VHzlGJBy2cx1DjYuxPUb7Byqp4' },
 				},
+				// Agent discovery. The catalog, the MCP server card and robots.txt
+				// live in the emazaheri.github.io repository, because agents look
+				// for them at the domain root, which this project site is not.
+				{
+					tag: 'link',
+					attrs: { rel: 'ai-catalog', href: 'https://emazaheri.github.io/.well-known/ai-catalog.json' },
+				},
+				// WebMCP tools: search, list and read these pages from the browser.
+				{ tag: 'script', attrs: { type: 'module', src: '/ios-agent/webmcp.js' } },
 			],
 			customCss: ['./src/styles/theme.css'],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/emazaheri/ios-agent' }],
