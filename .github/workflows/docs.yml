@@ -37,7 +37,7 @@ jobs:
     name: build and check links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Runs `npm ci` and `npm run build` in site/, which syncs the Markdown
       # first, then uploads dist/ as the Pages artifact.
